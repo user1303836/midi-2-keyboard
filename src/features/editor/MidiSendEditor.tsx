@@ -2,6 +2,7 @@ import type { MidiSend } from "@/bindings/MidiSend";
 import type { SendValue } from "@/bindings/SendValue";
 import { NumberInput, Segmented, Select, TextInput, type SelectOption } from "@/components/ui/inputs";
 import { deviceLabel } from "@/lib/describe";
+import { midiBytesProblem } from "@/lib/midi";
 import { defaultMidiSend, MIDI_SEND_TYPES, type MidiSendType } from "@/lib/model";
 import { useApp } from "@/lib/store";
 
@@ -12,11 +13,6 @@ const CHANNELS: SelectOption<string>[] = Array.from({ length: 16 }, (_, index) =
   label: `Channel ${index + 1}`,
 }));
 
-/** Whether a "raw bytes" text is a well-formed run of hex bytes. */
-export function validHex(text: string): boolean {
-  const tokens = text.trim().split(/[\s,]+/).filter(Boolean);
-  return tokens.length > 0 && tokens.every((token) => /^[0-9a-f]{1,2}$/i.test(token));
-}
 
 function ValueField({
   label,
@@ -91,6 +87,24 @@ export function OutputSelect({
   );
 }
 
+/** "To": the output a message goes to, with a word when there is nowhere for it to go. */
+export function OutputField({ value, onChange }: { value: string | null; onChange: (value: string | null) => void }) {
+  const none = useApp((state) => state.outputs.length === 0);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="shrink-0 text-sm text-fg-muted">To</span>
+        <OutputSelect className="min-w-0 flex-1" value={value} onChange={onChange} />
+      </div>
+      {none && (
+        <span className="text-sm leading-snug text-fg-faint">
+          No MIDI output is connected right now. This is sent as soon as one that fits is there.
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Edits one MIDI message to send: its kind, channel, number and value. */
 export function MidiSendEditor({
   message,
@@ -108,7 +122,7 @@ export function MidiSendEditor({
           aria-label="MIDI message"
           className="w-[150px]"
           value={message.type}
-          options={MIDI_SEND_TYPES.map((info) => ({ value: info.type, label: info.label }))}
+          options={MIDI_SEND_TYPES.map((info) => ({ value: info.type, label: info.label, hint: info.hint }))}
           onChange={(type) => onChange(defaultMidiSend(type, message))}
         />
         {"channel" in message && (
@@ -174,9 +188,7 @@ export function MidiSendEditor({
               value={message.bytes}
               onChange={(bytes) => onChange({ ...message, bytes }, "bytes")}
             />
-            {message.bytes.trim() !== "" && !validHex(message.bytes) && (
-              <span className="text-sm text-warn">These are not hex bytes (two digits each, separated by spaces).</span>
-            )}
+            {midiBytesProblem(message.bytes) && <span className="text-sm text-warn">{midiBytesProblem(message.bytes)}</span>}
           </div>
         )}
       </div>

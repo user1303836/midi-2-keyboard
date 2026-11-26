@@ -10,6 +10,7 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
+  Lightbulb,
   LocateFixed,
   MoreHorizontal,
   Pencil,
@@ -243,6 +244,11 @@ const MappingRow = memo(function MappingRow({
               </Badge>
             </span>
           </Tooltip>
+        )}
+        {mapping.feedback && (
+          <Badge tone="midi" title="Sends MIDI back to the controller to show its state (a light)">
+            <Lightbulb size={11} />
+          </Badge>
         )}
         {mapping.rate_limit && (
           <Badge tone="accent" title={`Rate limit: ${rateLimitText(mapping.rate_limit)}`}>

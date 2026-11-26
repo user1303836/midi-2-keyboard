@@ -1,5 +1,5 @@
 import { AlertTriangle, FolderOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { Profile } from "@/bindings/Profile";
 import type { Settings } from "@/bindings/Settings";
@@ -7,6 +7,8 @@ import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch, TextInput } from "@/components/ui/inputs";
 import { Badge, Kbd, Option } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlays";
+import { deviceLabel } from "@/lib/describe";
+import { pauseHotkeyProblem } from "@/lib/keys";
 import { api, restartAsAdmin, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +38,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const set = <K extends keyof Settings>(key: K, value: Settings[K], coalesce?: string) =>
     updateSettings((s) => ({ ...s, [key]: value }), coalesce);
   const mod = info.platform === "macos" ? "⌘" : "Ctrl";
+  // Why the last shortcut pressed for "Pause from anywhere" was not taken.
+  const [hotkeyProblem, setHotkeyProblem] = useState<string | null>(null);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Settings" width={600}>
@@ -108,12 +112,18 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           title="Pause from anywhere"
           description="A shortcut that pauses and resumes all output whichever application is in front — the emergency brake when a mapping misbehaves. Modifier keys plus one key, for example Ctrl+Alt+Pause."
         >
-          <KeyComboInput
-            className="w-[230px]"
-            placeholder="Click, then press a shortcut"
-            keys={settings.pause_hotkey ?? []}
-            onChange={(keys) => set("pause_hotkey", keys)}
-          />
+          <div className="flex w-[230px] flex-col gap-1">
+            <KeyComboInput
+              placeholder="Click, then press a shortcut"
+              keys={settings.pause_hotkey ?? []}
+              onChange={(keys) => {
+                const problem = pauseHotkeyProblem(keys);
+                setHotkeyProblem(problem);
+                if (!problem) set("pause_hotkey", keys);
+              }}
+            />
+            {hotkeyProblem && <span className="text-sm leading-snug text-warn">{hotkeyProblem}</span>}
+          </div>
         </Option>
       </Group>
 
@@ -342,11 +352,13 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           );
         })}
       </div>
-      {outputs.length > 0 && (
+      {
         <div className="mt-5">
           <h3 className="mb-1 text-xs font-semibold tracking-wider text-fg-faint uppercase">Outputs</h3>
           <div className="mb-2 text-sm text-fg-faint">
-            Where “Send MIDI” actions and lights can go. An output is only opened once something is sent to it.
+            {outputs.length > 0
+              ? "Where “Send MIDI” actions and lights can go. An output is only opened once something is sent to it."
+              : "None found. Lights and “Send MIDI” need a device that accepts MIDI."}
           </div>
           <div className="flex flex-col gap-1">
             {outputs.map((port) => (
@@ -357,7 +369,12 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                     port.state === "connected" ? "bg-midi shadow-[0_0_6px_var(--midi)]" : port.state === "error" ? "bg-warn" : "bg-line-strong",
                   )}
                 />
-                <span className="selectable min-w-0 flex-1 truncate">{port.name}</span>
+                <span className="selectable min-w-0 flex-1 truncate">
+                  {port.name}
+                  {devices.find((d) => d.name === port.name)?.alias && (
+                    <span className="text-fg-faint"> · {deviceLabel(port.name, { devices } as never)}</span>
+                  )}
+                </span>
                 <span className={cn("shrink-0 text-sm", port.state === "error" ? "text-warn" : "text-fg-faint")}>
                   {port.state === "connected" ? "in use" : port.state === "error" ? port.error || "could not be opened" : "available"}
                 </span>
@@ -365,7 +382,7 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             ))}
           </div>
         </div>
-      )}
+      }
     </Dialog>
   );
 }

@@ -312,6 +312,27 @@ export function keyInfo(key: Key): KeyInfo {
   return table().get(key) ?? { key, label: key, name: key, group: "System" };
 }
 
+const GUARD_KEYS: readonly Key[] = ["ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"];
+const SHIFT_KEYS: readonly Key[] = ["ShiftLeft", "ShiftRight"];
+/** Keys nobody types by accident: fine as a system-wide shortcut without Ctrl / Alt / Win. */
+const SAFE_ALONE = /^(Pause|ScrollLock|F1[3-9]|F2[0-4])$/;
+
+/**
+ * Why a combination must not become the system-wide pause shortcut, or `null` if it may. While
+ * registered, the system hands the combination to this app whatever is in front — a bare letter
+ * would vanish from everything the user types and toggle the output each time.
+ */
+export function pauseHotkeyProblem(keys: readonly Key[]): string | null {
+  if (keys.length === 0) return null;
+  const others = keys.filter((key) => !GUARD_KEYS.includes(key) && !SHIFT_KEYS.includes(key));
+  if (others.length !== 1) return "Use Ctrl, Alt or Win plus exactly one other key — for example Ctrl+Alt+Pause.";
+  if (!keys.some((key) => GUARD_KEYS.includes(key)) && !SAFE_ALONE.test(others[0])) {
+    const label = keyLabel(others[0]);
+    return `Add Ctrl, Alt or Win — ${label} on its own would pause the output every time you press ${label} anywhere.`;
+  }
+  return null;
+}
+
 export function keyLabel(key: Key): string {
   return keyInfo(key).label;
 }

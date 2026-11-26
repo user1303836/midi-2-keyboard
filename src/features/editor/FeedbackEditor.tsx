@@ -1,16 +1,18 @@
 import type { Feedback } from "@/bindings/Feedback";
 import type { FeedbackWhen } from "@/bindings/FeedbackWhen";
 import type { Mapping } from "@/bindings/Mapping";
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/inputs";
 import { Field } from "@/components/ui/misc";
+import { deviceLabel } from "@/lib/describe";
 import { behaviorTypeInfo, feedbackForSource, primaryAction } from "@/lib/model";
-import { useApp } from "@/lib/store";
+import { useApp, useKnownLayers } from "@/lib/store";
 
 import { InlineSwitch, LayerInput } from "./ActionEditor";
 import { MidiSendEditor, OutputSelect } from "./MidiSendEditor";
 
 /** Whether the behavior has an "on" state of its own (something held or latched). */
-function hasOnState(mapping: Mapping): boolean {
+export function hasOnState(mapping: Mapping): boolean {
   const b = mapping.behavior;
   return b.type === "hold" || b.type === "toggle" || (b.type === "tap_hold" && b.hold_target !== null);
 }
@@ -20,11 +22,18 @@ function hasOnState(mapping: Mapping): boolean {
  * when what it does is switch a profile or a layer, showing that profile or layer.
  */
 export function suggestFeedback(mapping: Mapping): Feedback {
-  const base: Feedback = feedbackForSource(mapping.source) ?? {
-    device: null,
-    when: { type: "engaged" },
-    on: { type: "control_change", channel: mapping.source.channel ?? 1, controller: 1, value: { type: "fixed", value: 127 } },
-    off: { type: "control_change", channel: mapping.source.channel ?? 1, controller: 1, value: { type: "fixed", value: 0 } },
+  const { ports, outputs } = useApp.getState();
+  // A mapping that listens to any device would only light up after its control was touched
+  // once; where there is exactly one controller that can be lit, name it.
+  const lit = ports.filter((port) => outputs.some((output) => output.name === port.name));
+  const device = mapping.source.device === null && lit.length === 1 ? lit[0].name : null;
+  const base: Feedback = {
+    ...(feedbackForSource(mapping.source) ?? {
+      when: { type: "engaged" },
+      on: { type: "control_change", channel: mapping.source.channel ?? 1, controller: 1, value: { type: "fixed", value: 127 } },
+      off: { type: "control_change", channel: mapping.source.channel ?? 1, controller: 1, value: { type: "fixed", value: 0 } },
+    }),
+    device,
   };
   const action = primaryAction(mapping.behavior);
   if (!hasOnState(mapping) && action?.type === "switch_profile" && action.target.type === "profile") {
@@ -45,23 +54,49 @@ export function FeedbackEditor({
   onChange: (feedback: Feedback | null, coalesceKey?: string) => void;
 }) {
   const profiles = useApp((state) => state.config.profiles);
+  const config = useApp((state) => state.config);
+  const outputs = useApp((state) => state.outputs);
+  const layers = useKnownLayers();
   const feedback = mapping.feedback;
 
   if (!feedback) {
+    const suggested = suggestFeedback(mapping);
+    // A light that follows "this mapping is on" can never show for a behavior with no on state.
+    const stateless = !hasOnState(mapping) && suggested.when.type === "engaged";
+    const selectable = profiles.find((p) => !p.always_on)?.id ?? profiles[0]?.id ?? "";
     return (
       <div className="flex flex-col gap-2">
-        <InlineSwitch label="Send MIDI back to show a state" checked={false} onChange={() => onChange(suggestFeedback(mapping))} />
+        {!stateless && <InlineSwitch label="Send MIDI back to show a state" checked={false} onChange={() => onChange(suggested)} />}
         <div className="text-sm leading-snug text-fg-faint">
           Lights a pad while a toggle or a layer is on, or shows which profile is active. The controller has
           to react to MIDI it receives — most pad controllers light a pad for “note on” and switch it off for
           velocity 0.
         </div>
+        {stateless && (
+          <div className="rounded-md border bg-app p-2.5 text-sm leading-snug text-fg-muted">
+            “{behaviorTypeInfo(mapping.behavior.type).label}” has no on / off state of its own, so there is nothing for its
+            light to show. Give this mapping the behavior <b className="text-fg">Hold</b> (lit while held) or{" "}
+            <b className="text-fg">Toggle</b> (on and off with each press) — or light it for something else:
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => onChange({ ...suggested, when: { type: "layer", layer: layers[0] ?? "shift" } })}>
+                While a layer is on…
+              </Button>
+              <Button size="sm" disabled={!selectable} onClick={() => onChange({ ...suggested, when: { type: "profile", id: selectable } })}>
+                While a profile is active…
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   const set = (change: Partial<Feedback>, key?: string) => onChange({ ...feedback, ...change }, key);
   const when = feedback.when;
+  // Where the light will go, as far as that can be known before anything is touched.
+  const target = feedback.device ?? mapping.source.device;
+  const offIsVelocityZero =
+    feedback.off.type === "note_on" && feedback.off.velocity.type === "fixed" && feedback.off.velocity.value === 0;
 
   return (
     <div className="flex flex-col gap-3">
@@ -83,7 +118,7 @@ export function FeedbackEditor({
                   type === "engaged"
                     ? { type }
                     : type === "layer"
-                      ? { type, layer: "shift" }
+                      ? { type, layer: layers[0] ?? "shift" }
                       : { type, id: profiles.find((p) => !p.always_on)?.id ?? "" },
               })
             }
@@ -106,13 +141,29 @@ export function FeedbackEditor({
           never show. Use Hold or Toggle — or let the light show a layer or a profile instead.
         </div>
       )}
-      <Field label="When on" align="start">
+      <Field
+        label="When on"
+        align="start"
+        hint={feedback.on.type === "note_on" ? "On many pad controllers the velocity picks the colour." : undefined}
+      >
         <MidiSendEditor message={feedback.on} allowIncoming={false} onChange={(on, key) => set({ on }, key && `on:${key}`)} />
       </Field>
-      <Field label="When off" align="start">
+      <Field label="When off" align="start" hint={offIsVelocityZero ? "“Note on” with velocity 0 is what switches most pads off." : undefined}>
         <MidiSendEditor message={feedback.off} allowIncoming={false} onChange={(off, key) => set({ off }, key && `off:${key}`)} />
       </Field>
-      <Field label="Send to">
+      <Field
+        label="Send to"
+        align="start"
+        hint={
+          outputs.length === 0
+            ? "No MIDI output is connected right now — the light shows as soon as one that fits is there."
+            : target === null
+              ? "This mapping listens to any device, so the light only comes on once its control was touched. Pick the controller here to light it right away."
+              : !outputs.some((port) => port.name === target)
+                ? `There is no MIDI output called “${deviceLabel(target, config)}” right now — the light shows once it is there.`
+                : undefined
+        }
+      >
         <OutputSelect className="w-[260px]" value={feedback.device} onChange={(device) => set({ device })} />
       </Field>
     </div>

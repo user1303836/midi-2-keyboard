@@ -106,6 +106,71 @@ export interface MessageView {
 }
 
 /** Breaks a message into display parts. */
+const STATUS_NAMES: Record<number, [string, number]> = {
+  0x80: ["note off", 2],
+  0x90: ["note on", 2],
+  0xa0: ["poly pressure", 2],
+  0xb0: ["control change", 2],
+  0xc0: ["program change", 1],
+  0xd0: ["channel pressure", 1],
+  0xe0: ["pitch bend", 2],
+};
+
+/**
+ * What is wrong with a "raw bytes" text, in words a person can act on, or `null` when it is a
+ * run of whole MIDI messages. Follows what the engine accepts: status byte first, the right
+ * number of data bytes (running status allowed), SysEx closed with F7.
+ */
+export function midiBytesProblem(text: string): string | null {
+  const tokens = text.trim().split(/[\s,]+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  const bad = tokens.find((token) => !/^[0-9a-f]{1,2}$/i.test(token));
+  if (bad !== undefined) return `“${bad}” is not a hex byte (two digits each, separated by spaces).`;
+  const bytes = tokens.map((token) => parseInt(token, 16));
+  const hex = (value: number) => value.toString(16).toUpperCase().padStart(2, "0");
+  const needs = (count: number) => (count === 1 ? "one more byte" : `${count === 2 ? "two" : count} more bytes`);
+  let running: number | null = null;
+  let i = 0;
+  while (i < bytes.length) {
+    let status = bytes[i];
+    if (status < 0x80) {
+      if (running === null) return `A message starts with a status byte (80–FF); ${hex(status)} is a data byte.`;
+      status = running;
+    } else {
+      i++;
+    }
+    if (status === 0xf0) {
+      const end = bytes.indexOf(0xf7, i);
+      if (end < 0) return "The SysEx message is not closed: it has to end with F7.";
+      const stray = bytes.slice(i, end).find((value) => value >= 0x80);
+      if (stray !== undefined) return `Inside a SysEx message every byte must be below 80; ${hex(stray)} is not.`;
+      i = end + 1;
+      running = null;
+      continue;
+    }
+    let name: string;
+    let count: number;
+    if (status < 0xf0) {
+      [name, count] = STATUS_NAMES[status & 0xf0];
+      running = status;
+    } else {
+      running = null;
+      if (status === 0xf1 || status === 0xf3) [name, count] = [status === 0xf1 ? "time code" : "song select", 1];
+      else if (status === 0xf2) [name, count] = ["song position", 2];
+      else if (status === 0xf4 || status === 0xf5 || status === 0xf7) return `${hex(status)} cannot start a message.`;
+      else [name, count] = ["system message", 0];
+    }
+    const data = bytes.slice(i, i + count);
+    const high = data.find((value) => value >= 0x80);
+    if (data.length < count || high !== undefined) {
+      const missing = high !== undefined ? count - data.indexOf(high) : count - data.length;
+      return `Incomplete: ${hex(status)} (${name}) needs ${needs(missing)}${count === 2 ? `, e.g. ${hex(status)} 3C 7F` : ""}.`;
+    }
+    i += count;
+  }
+  return null;
+}
+
 export function viewMessage(message: MidiMessage, middleCOctave = 4): MessageView {
   switch (message.type) {
     case "note_on":

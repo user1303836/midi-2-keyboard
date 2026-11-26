@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Copy, FolderInput, Layers, MoreHorizontal, Play, Radio, Timer, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, Copy, FolderInput, Layers, Lightbulb, MoreHorizontal, Play, Radio, Timer, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
@@ -26,6 +26,7 @@ import {
   behaviorTypeInfo,
   ccWithShape,
   defaultBehavior,
+  feedbackForSource,
   isEmptyAction,
   isFullRange,
   layerSwitches,
@@ -44,7 +45,8 @@ import { cn } from "@/lib/utils";
 
 import { BehaviorEditor } from "./BehaviorEditor";
 import { ConditionsEditor, LearnOnce, RateLimitEditor } from "./ExtrasEditor";
-import { FeedbackEditor } from "./FeedbackEditor";
+import { SourceContext } from "./ActionEditor";
+import { FeedbackEditor, hasOnState, suggestFeedback } from "./FeedbackEditor";
 import { SourceEditor } from "./SourceEditor";
 import { SourceIcon } from "../mappings/tokens";
 
@@ -128,6 +130,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
   const placeholder = isDraft ? "New mapping" : `${sourceTitle(mapping.source.event, octave)} mapping`;
 
   return (
+    <SourceContext.Provider value={mapping.source}>
     <aside
       aria-label="Mapping editor"
       className="z-20 flex h-full w-[452px] max-w-full shrink-0 animate-slide-in flex-col border-l bg-surface max-[1180px]:absolute max-[1180px]:top-0 max-[1180px]:right-0 max-[1180px]:bottom-0 max-[1180px]:shadow-pop"
@@ -293,6 +296,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
         </div>
       )}
     </aside>
+    </SourceContext.Provider>
   );
 }
 
@@ -709,6 +713,34 @@ function Wizard({
           {stage === "action" && (
             <RateTip confirm mapping={mapping} onApply={(rate_limit) => onUpdate((m) => ({ ...m, rate_limit }))} />
           )}
+          {/* Something with an on / off state can show it on the controller: one click. */}
+          {stage === "action" &&
+            done &&
+            hasOnState(mapping) &&
+            feedbackForSource(mapping.source) &&
+            (mapping.feedback ? (
+              <div className="mt-3 flex items-center gap-1.5 text-sm text-fg-muted">
+                <Lightbulb size={14} className="shrink-0 text-midi" />
+                <span>Its light on the controller shows when it is on</span>
+                <span className="text-fg-faint">·</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-fg"
+                  onClick={() => onUpdate((m) => ({ ...m, feedback: null }))}
+                >
+                  remove
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="mt-3 flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg"
+                onClick={() => onUpdate((m) => ({ ...m, feedback: suggestFeedback(m) }))}
+              >
+                <Lightbulb size={14} className="shrink-0 text-midi" />
+                <span className="underline underline-offset-2">Light it on the controller while it is on</span>
+              </button>
+            ))}
         </div>
       </div>
 

@@ -17,7 +17,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { EngineOp } from "@/bindings/EngineOp";
@@ -25,6 +25,7 @@ import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { LayerOp } from "@/bindings/LayerOp";
 import type { MouseButton } from "@/bindings/MouseButton";
 import type { SequenceStep } from "@/bindings/SequenceStep";
+import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch, TextArea, TextInput } from "@/components/ui/inputs";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tooltip } from "@/components/ui/overlays";
@@ -34,6 +35,7 @@ import {
   actionTypeInfo,
   defaultAction,
   defaultStep,
+  midiSendForSource,
   STEP_TYPES,
   type ActionType,
   type StepType,
@@ -42,7 +44,13 @@ import { useApp, useKnownLayers } from "@/lib/store";
 import { cn, move } from "@/lib/utils";
 
 import { KeyComboInput } from "./KeyComboInput";
-import { MidiSendEditor, OutputSelect } from "./MidiSendEditor";
+import { MidiSendEditor, OutputField } from "./MidiSendEditor";
+
+/**
+ * The source of the mapping whose actions are being edited, where there is one: a fresh
+ * "Send MIDI" starts out as that very control, which is what it is nearly always for.
+ */
+export const SourceContext = createContext<Source | null>(null);
 
 const ACTION_ICONS: Record<ActionType, ReactNode> = {
   keys: <Keyboard size={15} />,
@@ -294,6 +302,7 @@ export function ActionEditor({
 }) {
   const profiles = useApp((state) => state.config.profiles);
   const viewProfileId = useApp((state) => state.viewProfileId);
+  const source = useContext(SourceContext);
 
   return (
     <div className="flex flex-col gap-2">
@@ -423,10 +432,7 @@ export function ActionEditor({
                 message={action.message}
                 onChange={(message, key) => onChange({ ...action, message }, key && `midi:${key}`)}
               />
-              <div className="flex items-center gap-1.5">
-                <span className="shrink-0 text-sm text-fg-muted">To</span>
-                <OutputSelect className="min-w-0 flex-1" value={action.device} onChange={(device) => onChange({ ...action, device })} />
-              </div>
+              <OutputField value={action.device} onChange={(device) => onChange({ ...action, device })} />
             </div>
           )}
         </div>
@@ -443,7 +449,14 @@ export function ActionEditor({
                   key={info.type}
                   icon={ACTION_ICONS[info.type]}
                   className="h-auto py-1"
-                  onSelect={() => info.type !== action.type && onChange(defaultAction(info.type, viewProfileId ?? ""))}
+                  onSelect={() => {
+                    if (info.type === action.type) return;
+                    onChange(
+                      info.type === "midi" && source
+                        ? { type: "midi", device: null, message: midiSendForSource(source) }
+                        : defaultAction(info.type, viewProfileId ?? ""),
+                    );
+                  }}
                 >
                   <div>
                     <div className={cn(info.type === action.type && "font-semibold text-accent")}>{info.label}</div>
@@ -608,10 +621,7 @@ function StepEditor({ step, onChange }: { step: SequenceStep; onChange: (step: S
       return (
         <div className="flex flex-col gap-1.5">
           <MidiSendEditor message={step.message} onChange={(message, key) => onChange({ ...step, message }, key && `midi:${key}`)} />
-          <div className="flex items-center gap-1.5">
-            <span className="shrink-0 text-sm text-fg-muted">To</span>
-            <OutputSelect className="min-w-0 flex-1" value={step.device} onChange={(device) => onChange({ ...step, device })} />
-          </div>
+          <OutputField value={step.device} onChange={(device) => onChange({ ...step, device })} />
         </div>
       );
   }

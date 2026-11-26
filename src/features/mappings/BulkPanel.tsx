@@ -127,7 +127,8 @@ export function BulkPanel({ ids }: { ids: string[] }) {
         </div>
       </div>
       <div className="border-t px-4 py-3 text-sm leading-relaxed text-fg-faint">
-        <Kbd>Ctrl</Kbd> click adds or removes a mapping, <Kbd>Shift</Kbd> click picks a range, <Kbd>Ctrl+A</Kbd> picks all.
+        <Kbd>Ctrl</Kbd> click adds or removes a mapping, <Kbd>Shift</Kbd> click or <Kbd>Shift</Kbd> <Kbd>↑</Kbd> <Kbd>↓</Kbd>{" "}
+        picks a range, <Kbd>Ctrl+A</Kbd> picks all.
       </div>
     </aside>
   );

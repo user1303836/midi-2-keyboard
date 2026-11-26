@@ -204,12 +204,15 @@ function useShortcuts() {
       if (isTyping(event.target) || state.panel !== "none" || !state.viewProfileId) return;
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
       const text = event.clipboardData?.getData("text/plain") ?? "";
-      if (!/^\s*[[{]/.test(text)) return;
+      if (!/^\s*[[{]/.test(text)) {
+        if (text.trim()) state.toast("The clipboard holds no mappings — copy one with Ctrl+C first.");
+        return;
+      }
       event.preventDefault();
       void mappingsFromText(text)
         .then((mappings) => {
           if (!mappings) {
-            state.toast("The clipboard does not hold any mappings.", { kind: "warning" });
+            state.toast("The clipboard holds no mappings — copy one with Ctrl+C first.");
             return;
           }
           state.addMappings(mappings);

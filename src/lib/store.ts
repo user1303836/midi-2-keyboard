@@ -840,7 +840,7 @@ export const useApp = create<State>((set, get) => {
       set((state) => ({
         toasts: [...state.toasts.slice(-3), { id, kind: options?.kind ?? "info", message, action: options?.action }],
       }));
-      const lifetime = options?.kind === "error" || options?.kind === "warning" ? 9000 : 4500;
+      const lifetime = options?.kind === "error" || options?.kind === "warning" || options?.action ? 9000 : 4500;
       setTimeout(() => get().dismissToast(id), lifetime);
     },
 

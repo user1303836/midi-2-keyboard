@@ -391,12 +391,12 @@ export function defaultAction(type: ActionType, profileId = ""): Action {
 
 export type MidiSendType = MidiSend["type"];
 
-export const MIDI_SEND_TYPES: { type: MidiSendType; label: string }[] = [
-  { type: "note_on", label: "Note on" },
-  { type: "note_off", label: "Note off" },
-  { type: "control_change", label: "Control change" },
-  { type: "program_change", label: "Program change" },
-  { type: "raw", label: "Raw bytes (SysEx…)" },
+export const MIDI_SEND_TYPES: { type: MidiSendType; label: string; hint: string }[] = [
+  { type: "note_on", label: "Note on", hint: "lights most pads" },
+  { type: "note_off", label: "Note off", hint: "ends a note" },
+  { type: "control_change", label: "Control change", hint: "knobs, buttons, many lights" },
+  { type: "program_change", label: "Program change", hint: "switches a sound or a preset" },
+  { type: "raw", label: "Raw bytes", hint: "SysEx and anything else" },
 ];
 
 /** A fresh message of the given kind, keeping channel and number of `previous` where they fit. */
@@ -420,6 +420,20 @@ export function defaultMidiSend(type: MidiSendType, previous?: MidiSend): MidiSe
     case "raw":
       return { type, bytes: "" };
   }
+}
+
+/** The message a "Send MIDI" action most likely wants: the triggering control itself, passed on. */
+export function midiSendForSource(source: Source): MidiSend {
+  const channel = source.channel ?? 1;
+  const event = source.event;
+  if (event.type === "note") {
+    return { type: "note_on", channel, note: event.notes.min, velocity: { type: "fixed", value: 127 } };
+  }
+  if (event.type === "control_change") {
+    return { type: "control_change", channel, controller: event.controller, value: { type: "incoming" } };
+  }
+  if (event.type === "program_change") return { type: "program_change", channel, program: { type: "incoming" } };
+  return defaultMidiSend("control_change");
 }
 
 /**
