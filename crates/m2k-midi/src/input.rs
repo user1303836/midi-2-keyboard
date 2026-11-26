@@ -26,7 +26,9 @@
 //! A port that disappears mid-SysEx simply drops its partial message with the connection.
 //! Timestamps come from one [`Instant`] captured in [`InputManager::start`], read when the OS
 //! callback runs (midir's own timestamps have a different epoch per port, and only millisecond
-//! resolution on Windows). The sink is called with no lock held.
+//! resolution on Windows). The sink is called holding no lock but its connection's own delivery
+//! gate, which closing the connection waits on: once a port is reported closed, nothing more from
+//! it is delivered (see `Connection`).
 //!
 //! # Port names
 //!
@@ -370,7 +372,7 @@ struct Entry {
     name: Arc<str>,
     state: PortState,
     error: String,
-    connection: Option<MidiInputConnection<()>>,
+    connection: Option<Connection>,
 }
 
 impl Entry {
@@ -384,7 +386,7 @@ impl Entry {
     }
 
     /// Records the outcome of an attempt to open the port.
-    fn opened(&mut self, result: Result<MidiInputConnection<()>, String>) {
+    fn opened(&mut self, result: Result<Connection, String>) {
         match result {
             Ok(connection) => {
                 log::info!("MIDI input connected: {}", self.name);
@@ -618,17 +620,39 @@ impl Poller {
     }
 }
 
-/// The callback of one connection: decode and deliver.
+/// An open port. Dropping it closes the gate first, waiting for a delivery in progress, and only
+/// then the OS connection: once a port has been closed (and `PortsChanged` says so), nothing more
+/// from it reaches the sink, so the engine can release whatever that device was holding without
+/// a late Note On sneaking in behind. The gate is not held while midir closes the connection
+/// (WinMM may run the callback on the closing thread).
+struct Connection {
+    gate: Arc<Mutex<bool>>,
+    _inner: MidiInputConnection<()>,
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        *lock(&self.gate) = false;
+    }
+}
+
+/// The callback of one connection: decode and deliver, while the gate is open.
 fn port_callback(
     delivery: Arc<Delivery>,
     port: Arc<str>,
+    gate: Arc<Mutex<bool>>,
 ) -> impl FnMut(u64, &[u8], &mut ()) + Send + 'static {
     let mut parser = Parser::new();
     move |_os_time, bytes, _| {
+        let open = lock(&gate);
+        if !*open {
+            return;
+        }
         let time_us = delivery.now_us();
         parser.feed(bytes, &mut |message| {
             delivery.send(InputEvent::Message { port: port.clone(), time_us, message });
         });
+        drop(open);
     }
 }
 
@@ -663,14 +687,15 @@ impl Clients {
         delivery: &Arc<Delivery>,
         port: &MidiInputPort,
         name: &Arc<str>,
-    ) -> Result<MidiInputConnection<()>, String> {
+    ) -> Result<Connection, String> {
         let input = self.take()?;
-        let callback = port_callback(delivery.clone(), name.clone());
+        let gate = Arc::new(Mutex::new(true));
+        let callback = port_callback(delivery.clone(), name.clone(), gate.clone());
         // midir names the connection's own port after this (visible in e.g. `aconnect -l`).
         let connection_name = name.replace('\0', "");
         match catch_unwind(AssertUnwindSafe(|| input.connect(port, &connection_name, callback, ())))
         {
-            Ok(Ok(connection)) => Ok(connection),
+            Ok(Ok(connection)) => Ok(Connection { gate, _inner: connection }),
             Ok(Err(error)) => {
                 let message = describe_connect_error(error.kind());
                 self.idle.push(error.into_inner());
@@ -685,14 +710,15 @@ impl Clients {
         &mut self,
         delivery: &Arc<Delivery>,
         name: &Arc<str>,
-    ) -> Result<MidiInputConnection<()>, String> {
+    ) -> Result<Connection, String> {
         use midir::ext::VirtualInput;
 
         let input = self.take()?;
-        let callback = port_callback(delivery.clone(), name.clone());
+        let gate = Arc::new(Mutex::new(true));
+        let callback = port_callback(delivery.clone(), name.clone(), gate.clone());
         let port_name = name.replace('\0', "");
         match catch_unwind(AssertUnwindSafe(|| input.create_virtual(&port_name, callback, ()))) {
-            Ok(Ok(connection)) => Ok(connection),
+            Ok(Ok(connection)) => Ok(Connection { gate, _inner: connection }),
             Ok(Err(error)) => {
                 let message = format!("Could not create the virtual port: {}.", error.kind());
                 self.idle.push(error.into_inner());
@@ -709,7 +735,7 @@ impl Clients {
         &mut self,
         _delivery: &Arc<Delivery>,
         _name: &Arc<str>,
-    ) -> Result<MidiInputConnection<()>, String> {
+    ) -> Result<Connection, String> {
         Err("Virtual ports are not supported on this platform.".into())
     }
 }
