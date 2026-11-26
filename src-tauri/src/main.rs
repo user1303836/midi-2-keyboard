@@ -166,6 +166,17 @@ fn parse_profiles(text: &str) -> Result<Vec<Profile>, String> {
     Err("this file does not contain MIDI 2 Keyboard profiles".into())
 }
 
+/// Starts the app again with administrator rights (the user answers the UAC prompt) and quits
+/// this instance. Needed to control programs that themselves run as administrator.
+#[tauri::command(async)]
+fn restart_as_admin(app: AppHandle) -> Result<(), String> {
+    // Give up the single-instance lock first, or the elevated copy would be turned away.
+    tauri_plugin_single_instance::destroy(&app);
+    m2k_output::platform::relaunch_elevated(&[])?;
+    quit_app(&app);
+    Ok(())
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     quit_app(&app);
@@ -419,6 +430,7 @@ fn main() {
             export_profiles,
             import_profiles,
             parse_profile_text,
+            restart_as_admin,
             quit,
         ])
         .setup(move |app| {

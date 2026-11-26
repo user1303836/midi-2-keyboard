@@ -137,6 +137,32 @@ function sampleConfig(): Config {
   };
 }
 
+/**
+ * The real backend runs imported files through the config loader, which fills in every optional
+ * field. This does just enough of that for the UI (which relies on complete objects).
+ */
+function normalizeProfiles(data: { profiles?: Profile[] }): Profile[] {
+  return (data.profiles ?? []).map((profile) => ({
+    ...profile,
+    always_on: profile.always_on ?? false,
+    apps: profile.apps ?? [],
+    mappings: (profile.mappings ?? []).map((m) => ({
+      ...m,
+      name: m.name ?? "",
+      enabled: m.enabled ?? true,
+      conditions: m.conditions ?? [],
+      rate_limit: m.rate_limit ?? null,
+      source: {
+        ...m.source,
+        device: m.source.device ?? null,
+        channel: m.source.channel ?? null,
+        hysteresis: m.source.hysteresis ?? 0,
+        debounce_ms: m.source.debounce_ms ?? 0,
+      },
+    })),
+  }));
+}
+
 function loadConfig(): Config {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -290,7 +316,7 @@ export function createMockBackend(): Backend {
   return {
     async snapshot(): Promise<Snapshot> {
       return {
-        info: { version: "0.1.0-mock", platform: "windows", config_path: "(browser storage)", wayland: false },
+        info: { version: "0.1.0-mock", platform: "windows", config_path: "(browser storage)", wayland: false, elevated: false },
         config,
         engine: { ...status },
         ports,
@@ -361,7 +387,7 @@ export function createMockBackend(): Backend {
           if (!file) return resolve(null);
           try {
             const data = JSON.parse(await file.text());
-            resolve(Array.isArray(data.profiles) ? data.profiles : null);
+            resolve(Array.isArray(data.profiles) ? normalizeProfiles(data) : null);
           } catch {
             resolve(null);
           }
@@ -371,28 +397,9 @@ export function createMockBackend(): Backend {
       });
     },
     async parseProfiles(text: string) {
-      // The real backend runs the config loader over it; this fills in just enough for the UI.
-      const data = JSON.parse(text) as { profiles?: Profile[] };
-      return (data.profiles ?? []).map((profile) => ({
-        ...profile,
-        always_on: profile.always_on ?? false,
-        apps: profile.apps ?? [],
-        mappings: (profile.mappings ?? []).map((m) => ({
-          ...m,
-          name: m.name ?? "",
-          enabled: m.enabled ?? true,
-          conditions: m.conditions ?? [],
-          rate_limit: m.rate_limit ?? null,
-          source: {
-            ...m.source,
-            device: m.source.device ?? null,
-            channel: m.source.channel ?? null,
-            hysteresis: m.source.hysteresis ?? 0,
-            debounce_ms: m.source.debounce_ms ?? 0,
-          },
-        })),
-      }));
+      return normalizeProfiles(JSON.parse(text));
     },
+    async restartAsAdmin() {},
     async quit() {},
     async subscribe(listener) {
       listeners.add(listener);

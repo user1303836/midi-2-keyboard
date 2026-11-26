@@ -7,7 +7,7 @@ import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch, TextInput } from "@/components/ui/inputs";
 import { Badge, Kbd, Option } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlays";
-import { api, useApp } from "@/lib/store";
+import { api, restartAsAdmin, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 import { AppPicker } from "./AppPicker";
@@ -143,6 +143,22 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               ]}
               onChange={(mode) => set("injector", { ...settings.injector, windows_key_mode: mode })}
             />
+          </Option>
+        )}
+        {info.platform === "windows" && (
+          <Option
+            title="Administrator rights"
+            description={
+              info.elevated
+                ? "Running as administrator: programs that run as administrator can be controlled too."
+                : "Windows keeps input from ordinary programs out of programs that run as administrator (some games, installers, system tools). To control those, restart MIDI 2 Keyboard as administrator."
+            }
+          >
+            {info.elevated ? (
+              <Badge tone="midi">administrator</Badge>
+            ) : (
+              <Button onClick={() => void restartAsAdmin()}>Restart as administrator</Button>
+            )}
           </Option>
         )}
         {info.platform === "linux" && (

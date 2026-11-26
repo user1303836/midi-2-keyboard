@@ -21,6 +21,10 @@ pub struct AppInfo {
     /// `true` when the display server cannot tell us about the foreground app or accept
     /// injected input without extra setup (Wayland).
     pub wayland: bool,
+    /// The app runs with administrator rights (Windows), which it needs to control other
+    /// programs that do.
+    #[serde(default)]
+    pub elevated: bool,
 }
 
 /// Everything a front end needs to render its first frame.

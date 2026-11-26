@@ -16,4 +16,9 @@ config_path: string,
  * `true` when the display server cannot tell us about the foreground app or accept
  * injected input without extra setup (Wayland).
  */
-wayland: boolean, };
+wayland: boolean, 
+/**
+ * The app runs with administrator rights (Windows), which it needs to control other
+ * programs that do.
+ */
+elevated: boolean, };

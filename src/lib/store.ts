@@ -214,7 +214,14 @@ export const useApp = create<State>((set, get) => {
             const now = Date.now();
             if (now - (recentErrors.get(e.outcome.error) ?? 0) > 30_000) {
               recentErrors.set(e.outcome.error, now);
-              get().toast(message, { kind: "warning" });
+              // The backend words elevation problems with this phrase (ELEVATION_REQUIRED).
+              const needsAdmin = e.outcome.error.includes("as administrator") && !get().info.elevated;
+              get().toast(message, {
+                kind: "warning",
+                action: needsAdmin
+                  ? { label: "Restart as administrator", run: () => void restartAsAdmin() }
+                  : undefined,
+              });
             }
             continue;
           }
@@ -286,7 +293,7 @@ export const useApp = create<State>((set, get) => {
   return {
     ready: false,
     fatal: null,
-    info: { version: "", platform: "", config_path: "", wayland: false },
+    info: { version: "", platform: "", config_path: "", wayland: false, elevated: false },
     config: EMPTY_CONFIG,
     engine: EMPTY_STATUS,
     ports: [],
@@ -659,6 +666,15 @@ function applyDevParams(): void {
   if (params.has("monitor")) useApp.setState({ monitorOpen: true });
   const panel = params.get("panel");
   if (panel === "settings" || panel === "devices") useApp.setState({ panel });
+}
+
+/** Restarts the app elevated; if the user declines the prompt, says so. */
+export async function restartAsAdmin(): Promise<void> {
+  try {
+    await (await api()).restartAsAdmin();
+  } catch (error) {
+    useApp.getState().toast(String(error), { kind: "warning" });
+  }
 }
 
 /** The backend, for imperative calls from components (learn, test, simulate, import/export). */

@@ -276,6 +276,7 @@ impl Runtime {
                 platform: platform_name().to_string(),
                 config_path: inner.path.display().to_string(),
                 wayland: is_wayland(),
+                elevated: platform::is_elevated(),
             },
             config: lock(&inner.config).clone(),
             engine: inner.engine.status(),

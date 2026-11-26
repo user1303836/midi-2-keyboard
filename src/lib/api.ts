@@ -37,6 +37,8 @@ export interface Backend {
   importProfiles(): Promise<Profile[] | null>;
   /** Parses the text of a profile file into complete, repaired profiles. */
   parseProfiles(text: string): Promise<Profile[]>;
+  /** Windows: restart the app with administrator rights (shows the UAC prompt). */
+  restartAsAdmin(): Promise<void>;
   quit(): Promise<void>;
   subscribe(listener: (event: RuntimeEvent) => void): Promise<() => void>;
 }
@@ -60,6 +62,7 @@ async function createTauriBackend(): Promise<Backend> {
       invoke<boolean>("export_profiles", { profiles, suggestedName }),
     importProfiles: () => invoke<Profile[] | null>("import_profiles"),
     parseProfiles: (text) => invoke<Profile[]>("parse_profile_text", { text }),
+    restartAsAdmin: () => invoke("restart_as_admin"),
     quit: () => invoke("quit"),
     subscribe: async (listener) => {
       const unlisten = await listen<RuntimeEvent>("m2k:event", (event) => listener(event.payload));
