@@ -35,15 +35,29 @@ import { onDeviceActivity } from "@/lib/monitor";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+/** Drag payload types: a profile being reordered, a mapping on its way to another profile. */
+const PROFILE_DRAG = "application/x-m2k-profile";
+const MAPPING_DRAG = "application/x-m2k-mapping";
+
 function ProfileItem({
   profile,
   onEdit,
   autoRename = false,
+  drag,
 }: {
   profile: Profile;
   onEdit: (profile: Profile) => void;
   /** Start with the name being edited (a profile that was just created). */
   autoRename?: boolean;
+  /** Drag and drop: reordering profiles, and mappings dropped onto a profile. */
+  drag: {
+    dragging: boolean;
+    dropBefore: boolean;
+    onStart: () => void;
+    onOver: (event: React.DragEvent) => void;
+    onDrop: () => void;
+    onEnd: () => void;
+  };
 }) {
   const viewed = useApp((state) => state.viewProfileId === profile.id);
   const live = useApp(
@@ -61,6 +75,8 @@ function ProfileItem({
   const toast = useApp((state) => state.toast);
   const [renaming, setRenaming] = useState(autoRename);
   const [confirming, setConfirming] = useState(false);
+  // A mapping is being dragged over this profile (dropping it moves the mapping here).
+  const [mappingOver, setMappingOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -81,6 +97,36 @@ function ProfileItem({
       role="button"
       tabIndex={0}
       aria-current={viewed}
+      draggable={!renaming}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData(PROFILE_DRAG, profile.id);
+        drag.onStart();
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes(MAPPING_DRAG)) {
+          if (viewed) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setMappingOver(true);
+          return;
+        }
+        drag.onOver(e);
+      }}
+      onDragLeave={() => setMappingOver(false)}
+      onDrop={(e) => {
+        const mappingId = e.dataTransfer.getData(MAPPING_DRAG);
+        setMappingOver(false);
+        if (mappingId) {
+          e.preventDefault();
+          const state = useApp.getState();
+          state.moveMappingToProfile(mappingId, profile.id);
+          state.toast(`Moved to “${profile.name}”`, { action: { label: "Undo", run: state.undo } });
+          return;
+        }
+        drag.onDrop();
+      }}
+      onDragEnd={drag.onEnd}
       onClick={() => viewProfile(profile.id)}
       onDoubleClick={() => setRenaming(true)}
       onKeyDown={(e) => {
@@ -91,6 +137,9 @@ function ProfileItem({
       className={cn(
         "group flex h-[30px] cursor-pointer items-center gap-2 rounded-md pr-1 pl-2 outline-hidden transition-colors",
         viewed ? "bg-active text-fg" : "text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover",
+        drag.dragging && "opacity-40",
+        drag.dropBefore && "shadow-[0_-2px_0_0_var(--accent)]",
+        mappingOver && "bg-accent-soft text-fg ring-1 ring-accent",
       )}
     >
       <Tooltip
@@ -256,6 +305,14 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
   const toast = useApp((state) => state.toast);
   // The profile that was just created: it starts with its name selected, ready to be typed over.
   const [created, setCreated] = useState<string | null>(null);
+  // Reordering by drag and drop (the order is the priority when several profiles match an app).
+  const moveProfile = useApp((state) => state.moveProfile);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const endDrag = () => {
+    setDragId(null);
+    setDropIndex(null);
+  };
 
   const doImport = async () => {
     const backend = await api();
@@ -308,9 +365,34 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
         </IconButton>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-1.5 pb-2">
-        {profiles.map((profile) => (
-          <ProfileItem key={profile.id} profile={profile} onEdit={onEditProfile} autoRename={profile.id === created} />
+        {profiles.map((profile, index) => (
+          <ProfileItem
+            key={profile.id}
+            profile={profile}
+            onEdit={onEditProfile}
+            autoRename={profile.id === created}
+            drag={{
+              dragging: dragId === profile.id,
+              dropBefore: dropIndex === index && dragId !== null && dragId !== profile.id,
+              onStart: () => setDragId(profile.id),
+              onOver: (event) => {
+                if (!dragId) return;
+                event.preventDefault();
+                const box = event.currentTarget.getBoundingClientRect();
+                setDropIndex(event.clientY > box.top + box.height / 2 ? index + 1 : index);
+              },
+              onDrop: () => {
+                if (dragId && dropIndex !== null) {
+                  const from = profiles.findIndex((p) => p.id === dragId);
+                  moveProfile(dragId, dropIndex > from ? dropIndex - 1 : dropIndex);
+                }
+                endDrag();
+              },
+              onEnd: endDrag,
+            }}
+          />
         ))}
+        {dropIndex === profiles.length && dragId && <div className="mx-2 h-[2px] shrink-0 rounded-full bg-accent" />}
       </div>
 
       <div className="shrink-0 border-t">

@@ -144,6 +144,8 @@ const MappingRow = memo(function MappingRow({
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", mapping.id);
+        // Lets a profile in the sidebar take the mapping (dropping it there moves it).
+        e.dataTransfer.setData("application/x-m2k-mapping", mapping.id);
         onDragStart(mapping.id);
       }}
       onDragOver={(e) => onDragOver(index, e)}
