@@ -22,6 +22,7 @@ import { loadKeyboardLayout } from "./keys";
 import {
   duplicateMapping,
   duplicateProfile,
+  duplicateProfiles,
   isEmptyAction,
   knownLayers,
   newMapping,
@@ -495,12 +496,14 @@ export const useApp = create<State>((set, get) => {
     importProfiles(profiles) {
       if (profiles.length === 0) return;
       const taken = new Set(get().config.profiles.map((p) => p.name));
-      const fresh = profiles.map((p) => {
+      const names = profiles.map((p) => {
         let name = p.name;
         for (let n = 2; taken.has(name); n++) name = `${p.name} (${n})`;
         taken.add(name);
-        return duplicateProfile(p, name);
+        return name;
       });
+      // Together, so that profiles which switch to each other still do after the import.
+      const fresh = duplicateProfiles(profiles, names);
       get().edit((config) => ({ ...config, profiles: [...config.profiles, ...fresh] }));
       get().viewProfile(fresh[0].id);
     },

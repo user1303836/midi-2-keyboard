@@ -582,14 +582,35 @@ export function newProfile(name: string): Profile {
   return { id: newId("profile"), name, always_on: false, apps: [], mappings: [] };
 }
 
-export function duplicateProfile(profile: Profile, name: string): Profile {
-  const copy = structuredClone(profile);
-  return {
-    ...copy,
-    id: newId("profile"),
-    name,
-    mappings: copy.mappings.map((mapping) => ({ ...mapping, id: newId("map") })),
+/**
+ * Copies of profiles that enter a config together (an import, a duplicate). Every profile and
+ * mapping gets a fresh id, and whatever inside them points at one of these profiles — "switch
+ * to profile", a light that shows a profile — follows it to its copy; without that, profiles
+ * that switch to each other would arrive with every link broken. References to profiles that
+ * are not part of the batch are left alone.
+ */
+export function duplicateProfiles(profiles: Profile[], names: string[]): Profile[] {
+  const ids = new Map(profiles.map((profile) => [profile.id, newId("profile")]));
+  const follow = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(follow);
+    if (typeof value !== "object" || value === null) return value;
+    const object = value as Record<string, unknown>;
+    // The two shapes that name a profile: a switch_profile target and what a light shows.
+    if (object.type === "profile" && typeof object.id === "string" && ids.has(object.id)) {
+      return { ...object, id: ids.get(object.id) };
+    }
+    return Object.fromEntries(Object.entries(object).map(([key, inner]) => [key, follow(inner)]));
   };
+  return profiles.map((profile, index) => ({
+    ...structuredClone(profile),
+    id: ids.get(profile.id)!,
+    name: names[index],
+    mappings: profile.mappings.map((mapping) => ({ ...(follow(mapping) as Mapping), id: newId("map") })),
+  }));
+}
+
+export function duplicateProfile(profile: Profile, name: string): Profile {
+  return duplicateProfiles([profile], [name])[0];
 }
 
 export function findProfile(config: Config, id: string | null): Profile | null {
