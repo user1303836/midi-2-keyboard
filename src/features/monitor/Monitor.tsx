@@ -1,4 +1,4 @@
-import { ArrowRight, Ban, CornerDownRight, Eraser, Pause, Play, TriangleAlert, X } from "lucide-react";
+import { ArrowRight, Ban, CornerDownRight, Eraser, Gauge, Pause, Play, TriangleAlert, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Config } from "@/bindings/Config";
@@ -6,6 +6,7 @@ import type { MidiLog } from "@/bindings/MidiLog";
 import type { Outcome } from "@/bindings/Outcome";
 import { IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch } from "@/components/ui/inputs";
+import { Tooltip } from "@/components/ui/overlays";
 import { deviceLabel, sourceTitle } from "@/lib/describe";
 import { bytesToHex, encodeMessage, isBlackKey, noteName, viewMessage } from "@/lib/midi";
 import { clearLog, onFired, onMidi, setLogFrozen, useLog, useLogFrozen, type LogEntry } from "@/lib/monitor";
@@ -415,6 +416,35 @@ function VirtualController() {
   );
 }
 
+function formatLatency(us: number): string {
+  return us < 1000 ? `${us} µs` : `${(us / 1000).toFixed(us < 10_000 ? 2 : 1)} ms`;
+}
+
+/** How long MIDI took to become output, as measured by the engine itself. */
+function LatencyReadout() {
+  const latency = useApp((state) => state.engine.latency);
+  if (!latency || latency.samples === 0) return null;
+  return (
+    <Tooltip
+      content={
+        <>
+          Time from a MIDI message reaching the engine to the key event being handed to the system,
+          over the last few seconds ({latency.samples} messages). Median {formatLatency(latency.median_us)},
+          99th percentile {formatLatency(latency.p99_us)}, slowest {formatLatency(latency.max_us)}.
+        </>
+      }
+    >
+      <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-line px-2 py-[2px] text-sm text-fg-muted">
+        <Gauge size={12} className="text-midi" />
+        latency
+        <span className="font-mono text-fg tabular-nums">{formatLatency(latency.median_us)}</span>
+        <span className="text-fg-faint">· p99</span>
+        <span className="font-mono tabular-nums">{formatLatency(latency.p99_us)}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
 export function MonitorPanel() {
   const setMonitorOpen = useApp((state) => state.setMonitorOpen);
   const tab = useApp((state) => state.monitorTab);
@@ -436,6 +466,7 @@ export function MonitorPanel() {
             ? "Everything that comes in, and everything that goes out."
             : "Click the keys or move the sliders: it is treated exactly like a real device."}
         </span>
+        <LatencyReadout />
         <IconButton label="Close monitor" size="sm" onClick={() => setMonitorOpen(false)}>
           <X size={14} />
         </IconButton>
