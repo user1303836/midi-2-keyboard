@@ -12,16 +12,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use m2k_midi::input::{InputEvent, InputManager, InputOptions, PortPolicy, PortState, PortStatus};
+use m2k_midi::output::{OutputEvent, OutputManager, OutputOptions, paired_output_name};
 use m2k_output::platform::{self, Permissions};
 use m2k_output::{Injector, Key, NullInjector};
 
 use crate::app::{AppInfo, RuntimeEvent, Snapshot};
-use crate::engine::{Engine, EngineOptions, NullMidiSink};
+use crate::engine::{Engine, EngineOptions, MidiSink, NullMidiSink};
 use crate::events::{EngineEvent, EngineStatus};
 use crate::model::{Action, Config};
 use crate::store;
@@ -83,6 +84,11 @@ struct Inner {
     engine: Engine,
     input: Mutex<Option<InputManager>>,
     ports: Mutex<Vec<PortStatus>>,
+    /// MIDI output ("Send MIDI", feedback lights). `None` in a dry run.
+    output: Mutex<Option<Arc<OutputManager>>>,
+    outputs: Mutex<Vec<PortStatus>>,
+    /// The output port names, shared with the engine's [`OutputSink`].
+    output_names: Arc<Mutex<Vec<String>>>,
     permissions: Mutex<Permissions>,
     backend_error: Mutex<String>,
     /// Keys the current output backend cannot send (shown as unavailable in the UI).
@@ -133,6 +139,40 @@ fn unsupported_keys(injector: &dyn Injector) -> Vec<Key> {
     Key::ALL.iter().copied().filter(|key| !injector.supports(*key)).collect()
 }
 
+/// The app's own virtual MIDI input (macOS / Linux), which other programs see as an output.
+const VIRTUAL_PORT: &str = "MIDI 2 Keyboard";
+
+/// The engine's MIDI output: m2k-midi's [`OutputManager`], with the port names at hand so the
+/// engine thread never copies the port list.
+struct OutputSink {
+    manager: Arc<OutputManager>,
+    names: Arc<Mutex<Vec<String>>>,
+}
+
+impl MidiSink for OutputSink {
+    fn send(&self, port: &str, bytes: &[u8]) -> Result<(), String> {
+        self.manager.send(Some(port), bytes).map_err(|error| error.to_string())
+    }
+
+    fn has_port(&self, name: &str) -> bool {
+        lock(&self.names).iter().any(|port| port == name)
+    }
+
+    fn paired_output(&self, input: &str) -> Option<String> {
+        let names = lock(&self.names);
+        paired_output_name(input, names.iter().map(String::as_str)).map(str::to_string)
+    }
+}
+
+/// Connected input ports, without the app's own virtual one (where unaimed feedback can go).
+fn connected_inputs(ports: &[PortStatus]) -> Vec<String> {
+    ports
+        .iter()
+        .filter(|port| port.state == PortState::Connected && !port.is_virtual)
+        .map(|port| port.name.clone())
+        .collect()
+}
+
 fn policy_for(config: &Config) -> PortPolicy {
     if config.settings.connect_new_devices {
         PortPolicy::AllExcept(
@@ -177,15 +217,39 @@ impl Runtime {
         let (injector, backend_error) = make_injector(&config, options.dry_run);
         let unsupported = unsupported_keys(injector.as_ref());
 
+        // MIDI output, started first so the engine's first lights go to real ports. None in a
+        // dry run: a test must not change what the controllers show.
+        let to_inner: Arc<OnceLock<Weak<Inner>>> = Arc::new(OnceLock::new());
+        let output = (!options.dry_run).then(|| {
+            let to_inner = to_inner.clone();
+            Arc::new(OutputManager::start(
+                OutputOptions {
+                    own_virtual_input: cfg!(unix).then(|| VIRTUAL_PORT.to_string()),
+                    ..OutputOptions::default()
+                },
+                PortPolicy::AllExcept(Vec::new()),
+                move |event| {
+                    if let Some(inner) = to_inner.get().and_then(Weak::upgrade) {
+                        inner.on_output_event(event);
+                    }
+                },
+            ))
+        });
+        let outputs = output.as_ref().map(|manager| manager.ports()).unwrap_or_default();
+        let output_names =
+            Arc::new(Mutex::new(outputs.iter().map(|port| port.name.clone()).collect::<Vec<_>>()));
+        let midi_out: Box<dyn MidiSink> = match &output {
+            Some(manager) => {
+                Box::new(OutputSink { manager: manager.clone(), names: output_names.clone() })
+            }
+            None => Box::new(NullMidiSink),
+        };
+
         let inner = Arc::new_cyclic(|weak: &Weak<Inner>| {
             let for_engine = weak.clone();
             let engine = Engine::start(
                 config.clone(),
-                EngineOptions {
-                    injector,
-                    track_foreground: true,
-                    midi_out: Box::new(NullMidiSink),
-                },
+                EngineOptions { injector, track_foreground: true, midi_out },
                 move |event| {
                     if let Some(inner) = for_engine.upgrade() {
                         inner.on_engine_event(event);
@@ -200,6 +264,9 @@ impl Runtime {
                 engine,
                 input: Mutex::new(None),
                 ports: Mutex::new(Vec::new()),
+                output: Mutex::new(output.clone()),
+                outputs: Mutex::new(outputs.clone()),
+                output_names,
                 permissions: Mutex::new(platform::permissions()),
                 backend_error: Mutex::new(backend_error),
                 unsupported_keys: Mutex::new(unsupported),
@@ -224,11 +291,20 @@ impl Runtime {
             inner.remember_file();
         }
 
+        // Output events from now on; a change between the first scan and here still counts.
+        let _ = to_inner.set(Arc::downgrade(&inner));
+        if let Some(manager) = &output {
+            let now = manager.ports();
+            if now != outputs {
+                inner.on_output_event(OutputEvent::PortsChanged { ports: now });
+            }
+        }
+
         // MIDI input.
         let for_input = Arc::downgrade(&inner);
         let manager = InputManager::start(
             InputOptions {
-                virtual_port: cfg!(unix).then(|| "MIDI 2 Keyboard".to_string()),
+                virtual_port: cfg!(unix).then(|| VIRTUAL_PORT.to_string()),
                 ..InputOptions::default()
             },
             policy_for(&config),
@@ -238,7 +314,9 @@ impl Runtime {
                 }
             },
         );
-        *lock(&inner.ports) = manager.ports();
+        let ports = manager.ports();
+        inner.engine.midi_inputs_changed(connected_inputs(&ports));
+        *lock(&inner.ports) = ports;
         *lock(&inner.input) = Some(manager);
 
         // Event flusher.
@@ -300,8 +378,7 @@ impl Runtime {
             config: lock(&inner.config).clone(),
             engine: inner.engine.status(),
             ports: lock(&inner.ports).clone(),
-            // TODO(engine): the output ports of m2k-midi's OutputManager.
-            outputs: Vec::new(),
+            outputs: lock(&inner.outputs).clone(),
             permissions: lock(&inner.permissions).clone(),
             warnings: std::mem::take(&mut *lock(&inner.warnings)),
             backend_error: lock(&inner.backend_error).clone(),
@@ -392,6 +469,8 @@ impl Runtime {
         }
         drop(lock(&inner.input).take());
         inner.engine.stop();
+        // After the engine (whose sink holds it too): delivers what is queued, closes the ports.
+        drop(lock(&inner.output).take());
         inner.flush_pending_save();
         inner.wake.notify_all();
         inner.save_wake.notify_all();
@@ -595,15 +674,41 @@ impl Inner {
             }
             InputEvent::PortsChanged { ports } => {
                 let previous = std::mem::replace(&mut *lock(&self.ports), ports.clone());
+                let connected = connected_inputs(&ports);
+                if connected != connected_inputs(&previous) {
+                    self.engine.midi_inputs_changed(connected);
+                }
                 for old in previous.iter().filter(|p| p.state == PortState::Connected) {
-                    let still_connected = ports
-                        .iter()
-                        .any(|p| p.name == old.name && p.state == PortState::Connected);
+                    let still_connected =
+                        ports.iter().any(|p| p.name == old.name && p.state == PortState::Connected);
                     if !still_connected {
                         self.engine.device_disconnected(&old.name);
                     }
                 }
                 self.emit(RuntimeEvent::Ports { ports });
+            }
+        }
+    }
+
+    /// The output ports changed: lights go out again to the ports that came, came back or
+    /// changed state (an identical list means one was replaced within a scan and lost what it
+    /// showed: then to all of them), and the front end gets the new list.
+    fn on_output_event(&self, event: OutputEvent) {
+        match event {
+            OutputEvent::PortsChanged { ports } => {
+                let previous = std::mem::replace(&mut *lock(&self.outputs), ports.clone());
+                *lock(&self.output_names) = ports.iter().map(|port| port.name.clone()).collect();
+                let replaced = ports == previous;
+                let refresh: Vec<String> = ports
+                    .iter()
+                    .filter(|port| port.state != PortState::Error)
+                    .filter(|port| replaced || !previous.contains(port))
+                    .map(|port| port.name.clone())
+                    .collect();
+                if !refresh.is_empty() {
+                    self.engine.midi_outputs_changed(refresh);
+                }
+                self.emit(RuntimeEvent::Outputs { outputs: ports });
             }
         }
     }

@@ -204,6 +204,13 @@ impl Printer {
         } else {
             self.out(format_args!("  output   NOT WORKING: {}", snapshot.backend_error));
         }
+        if dry_run {
+            self.out("  midi out DRY RUN: nothing is sent to MIDI outputs");
+        } else {
+            let names: Vec<&str> = snapshot.outputs.iter().map(|port| port.name.as_str()).collect();
+            let names = if names.is_empty() { "none".to_string() } else { names.join(", ") };
+            self.out(format_args!("  midi out {names}"));
+        }
         if !snapshot.permissions.hint.is_empty() {
             self.out(format_args!("  note     {}", snapshot.permissions.hint));
         }
