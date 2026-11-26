@@ -31,11 +31,52 @@ function notifyLog() {
   logListeners.forEach((listener) => listener());
 }
 
-function pulse(mappingId: string, kind: ActivityKind) {
-  activityListeners.get(mappingId)?.forEach((listener) => listener(kind));
+// Under a flood of MIDI the engine reports sixty batches a second. Nobody can read or see that
+// fast, and redrawing for every batch is what costs CPU: the log is redrawn at most twenty
+// times a second, and a light that was just lit is not lit again for a moment (it stays on
+// either way) unless something more important happened to its mapping.
+const LOG_REDRAW_MS = 50;
+const PULSE_REPEAT_MS = 90;
+let logRedrawTimer: ReturnType<typeof setTimeout> | null = null;
+let lastLogRedraw = 0;
+
+function notifyLogSoon() {
+  const wait = LOG_REDRAW_MS - (performance.now() - lastLogRedraw);
+  if (wait <= 0 && logRedrawTimer === null) {
+    lastLogRedraw = performance.now();
+    notifyLog();
+  } else if (logRedrawTimer === null) {
+    logRedrawTimer = setTimeout(() => {
+      logRedrawTimer = null;
+      lastLogRedraw = performance.now();
+      notifyLog();
+    }, Math.max(0, wait));
+  }
 }
 
 const PULSE_RANK: Record<ActivityKind, number> = { matched: 0, skipped: 1, sent: 2, failed: 3 };
+const lastPulse = new Map<string, { at: number; rank: number }>();
+const lastDevicePulse = new Map<string, number>();
+
+function pulse(mappingId: string, kind: ActivityKind) {
+  const listeners = activityListeners.get(mappingId);
+  if (!listeners) return;
+  const now = performance.now();
+  const rank = PULSE_RANK[kind];
+  const last = lastPulse.get(mappingId);
+  if (last && now - last.at < PULSE_REPEAT_MS && rank <= last.rank) return;
+  lastPulse.set(mappingId, { at: now, rank });
+  listeners.forEach((listener) => listener(kind));
+}
+
+function devicePulse(device: string) {
+  const listeners = deviceListeners.get(device);
+  if (!listeners) return;
+  const now = performance.now();
+  if (now - (lastDevicePulse.get(device) ?? -Infinity) < PULSE_REPEAT_MS) return;
+  lastDevicePulse.set(device, now);
+  listeners.forEach((listener) => listener());
+}
 
 /** Feeds a batch of engine events (status events are handled by the main store). */
 export function pushEngineEvents(events: EngineEvent[]): void {
@@ -80,11 +121,11 @@ export function pushEngineEvents(events: EngineEvent[]): void {
     }
   }
   pulses.forEach((kind, id) => pulse(id, kind));
-  devices.forEach((device) => deviceListeners.get(device)?.forEach((listener) => listener()));
+  devices.forEach(devicePulse);
   if (added.length === 0 || frozen) return;
   entries = entries.concat(added);
   if (entries.length > MAX_ENTRIES) entries = entries.slice(entries.length - MAX_ENTRIES);
-  notifyLog();
+  notifyLogSoon();
 }
 
 export function clearLog(): void {
@@ -140,7 +181,10 @@ export function onMappingActivity(mappingId: string, listener: (kind: ActivityKi
   set.add(listener);
   return () => {
     set.delete(listener);
-    if (set.size === 0) activityListeners.delete(mappingId);
+    if (set.size === 0) {
+      activityListeners.delete(mappingId);
+      lastPulse.delete(mappingId);
+    }
   };
 }
 

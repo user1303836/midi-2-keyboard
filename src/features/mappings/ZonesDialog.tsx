@@ -155,7 +155,7 @@ export function ZonesDialog({ open, onOpenChange }: { open: boolean; onOpenChang
           </div>
         </Field>
         <Field label="Keys" align="start" hint="One key per zone, from the bottom of the knob's travel to the top.">
-          <KeySequenceInput keys={keys} onChange={setKeys} />
+          <KeySequenceInput keys={keys} onChange={setKeys} first="the bottom zone first" />
           {keys.length > 0 && (
             <button
               type="button"

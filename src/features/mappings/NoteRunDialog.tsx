@@ -20,7 +20,16 @@ type Scale = "all" | "white" | "black";
 type Mode = "hold" | "tap";
 
 /** Captures keys one after another, in the order they are pressed (not as a combination). */
-export function KeySequenceInput({ keys, onChange }: { keys: Key[]; onChange: (keys: Key[]) => void }) {
+export function KeySequenceInput({
+  keys,
+  onChange,
+  first = "lowest note first",
+}: {
+  keys: Key[];
+  onChange: (keys: Key[]) => void;
+  /** Which end the first key belongs to, e.g. "lowest note first". */
+  first?: string;
+}) {
   const [armed, setArmed] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const latest = useRef({ keys, onChange });
@@ -80,7 +89,7 @@ export function KeySequenceInput({ keys, onChange }: { keys: Key[]; onChange: (k
         {armed
           ? keys.length
             ? "keep typing… (Backspace removes the last)"
-            : "Type the keys in order, lowest note first…"
+            : `Type the keys in order, ${first}…`
           : keys.length
             ? "click to add more"
             : "Click, then type the keys in order"}

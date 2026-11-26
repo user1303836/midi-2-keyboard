@@ -515,33 +515,49 @@ export function LastEvent() {
   useEffect(() => {
     // An output is only ever shown next to a message of the control that caused it: the engine
     // names the mappings a message reached, and every firing names its mapping.
+    //
+    // The line is worked out for every message but drawn at most ten times a second: under a
+    // flood of MIDI nobody could read more, and redrawing sixty times a second costs real CPU.
+    let current: { midi: MidiLog; fired: Result | null } | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let drawnAt = 0;
+    const draw = () => {
+      timer = null;
+      drawnAt = performance.now();
+      setShown(current);
+    };
+    const drawSoon = () => {
+      if (timer !== null) return;
+      const wait = 100 - (performance.now() - drawnAt);
+      if (wait <= 0) draw();
+      else timer = setTimeout(draw, wait);
+    };
     const offMidi = onMidi((log) => {
       if (log.message.type === "clock" || log.message.type === "active_sensing") return;
-      setShown((current) => ({
+      current = {
         midi: log,
         // The same control's last result stays through its release or the rest of a knob turn.
-        fired:
-          current?.fired && log.mappings.includes(current.fired.mappingId) ? { ...current.fired, earlier: true } : null,
-      }));
+        fired: current?.fired && log.mappings.includes(current.fired.mappingId) ? { ...current.fired, earlier: true } : null,
+      };
+      drawSoon();
     });
     const offFired = onFired((log) => {
-      setShown((current) =>
-        current && current.midi.mappings.includes(log.mapping_id)
-          ? {
-              midi: current.midi,
-              fired: {
-                mappingId: log.mapping_id,
-                text: log.description,
-                sent: log.outcome.type === "sent",
-                note: outcomeText(log.outcome),
-              },
-            }
-          : current,
-      );
+      if (!current || !current.midi.mappings.includes(log.mapping_id)) return;
+      current = {
+        midi: current.midi,
+        fired: {
+          mappingId: log.mapping_id,
+          text: log.description,
+          sent: log.outcome.type === "sent",
+          note: outcomeText(log.outcome),
+        },
+      };
+      drawSoon();
     });
     return () => {
       offMidi();
       offFired();
+      if (timer !== null) clearTimeout(timer);
     };
   }, []);
 
