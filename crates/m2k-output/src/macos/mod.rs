@@ -8,7 +8,9 @@
 //! - Volume, media, brightness and eject keys are `NSEventTypeSystemDefined` events
 //!   (subtype 8), the way Apple keyboards deliver them.
 //! - Text: `CGEventKeyboardSetUnicodeString`, at most 20 UTF-16 units per event without
-//!   splitting surrogate pairs, posted without modifier flags; `\n` / `\t` are real keys.
+//!   splitting surrogate pairs, posted without modifier flags; `\n` / `\t` are real keys, also
+//!   without modifiers. The events carry the keycode of a letter key the injector does not hold
+//!   (applications that track keys by keycode see it go down and up).
 //! - Mouse: clicks get a click count (double-clicks work), moves while a button is held are
 //!   drag events, relative moves carry their deltas for games. Coordinates are global display
 //!   points (the space macOS positions the pointer in), clamped to the attached displays.
@@ -20,8 +22,11 @@
 //! - Every event carries [`crate::INJECTION_TAG`] in `kCGEventSourceUserData`.
 //! - macOS silently drops posted events without the Accessibility permission, and keystrokes
 //!   while Secure Event Input is on (a password field or a terminal's Secure Keyboard Entry has
-//!   focus). Presses, text and pointer moves then report [`OutputError::Permission`]; releases
-//!   never do, since the matching press did not arrive either.
+//!   focus). Presses, releases, text and pointer moves then report [`OutputError::Permission`].
+//!   A release is checked against an almost fresh answer: one macOS dropped leaves the key down
+//!   in the application that got the press, and the error makes the engine retry it until it
+//!   gets through. (A release whose press was refused too holds nothing; the engine knows that
+//!   from the press's error.)
 
 pub(crate) mod platform;
 
@@ -46,8 +51,11 @@ const NAME: &str = "macos-cgevent";
 /// `CGEventKeyboardSetUnicodeString` takes at most 20 UTF-16 units per event.
 const TEXT_CHUNK: usize = 20;
 
-/// How long a cached Accessibility check stays valid.
+/// How long a cached Accessibility check stays valid for presses, text and pointer input.
 const TRUST_TTL: Duration = Duration::from_secs(2);
+
+/// ... and for releases, which must not be reported as delivered when they were not.
+const RELEASE_TRUST_TTL: Duration = Duration::from_millis(100);
 
 /// Subtype of the system-defined events that carry the media keys
 /// (`NX_SUBTYPE_AUX_CONTROL_BUTTONS`).
@@ -140,10 +148,12 @@ impl CgInjector {
 
     /// `Permission` when macOS drops what we just posted (`keyboard`: also Secure Event
     /// Input). Events are posted regardless, so a wrong answer never costs functionality.
-    fn check_delivery(&mut self, keyboard: bool) -> Result<()> {
+    /// `release`: checked with an almost fresh answer (see the module documentation).
+    fn check_delivery(&mut self, keyboard: bool, release: bool) -> Result<()> {
+        let max_age = if release { RELEASE_TRUST_TTL } else { TRUST_TTL };
         let now = Instant::now();
         let trusted = match self.trusted {
-            Some((at, value)) if now.duration_since(at) < TRUST_TTL => value,
+            Some((at, value)) if now.duration_since(at) < max_age => value,
             _ => {
                 let value = unsafe { AXIsProcessTrusted() };
                 self.trusted = Some((now, value));
@@ -228,14 +238,43 @@ impl CgInjector {
                 self.caps_via_iokit = iokit::toggle_caps_lock();
             }
             if self.caps_via_iokit {
-                return if down { self.check_delivery(false) } else { Ok(()) };
+                // The lock state flipped through IOKit; the release has nothing to undo.
+                return if down { self.check_delivery(false, false) } else { Ok(()) };
             }
         }
         match mac {
             MacKey::Code(code) => self.post_keycode(key, code, down, repeat)?,
             MacKey::System(kind) => self.post_system_key(kind, down, repeat)?,
         }
-        if down { self.check_delivery(true) } else { Ok(()) }
+        self.check_delivery(true, !down)
+    }
+
+    /// The keycode text events carry: macOS takes the characters from the event's string, but
+    /// applications that track keys by keycode see that key go down and up, so not one the
+    /// injector holds.
+    fn text_keycode(&self) -> u16 {
+        [Key::KeyA, Key::KeyS, Key::KeyD, Key::KeyF]
+            .into_iter()
+            .filter(|key| !self.down.contains(key))
+            .find_map(|key| match keymap::macos(key) {
+                Some(MacKey::Code(code)) => Some(code),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// A key typed as part of a text (Enter, Tab): without modifiers, like the characters; a
+    /// key the injector holds stays held (released and pressed again).
+    fn post_text_key(&self, key: Key) -> Result<()> {
+        let Some(MacKey::Code(code)) = keymap::macos(key) else { return Ok(()) };
+        let order = if self.down.contains(&key) { [false, true] } else { [true, false] };
+        for down in order {
+            let event = CGEvent::new_keyboard_event(self.src(), code, down)
+                .ok_or_else(|| failed("create a keyboard event"))?;
+            CGEvent::set_flags(Some(&event), CGEventFlags(0));
+            self.post(&event);
+        }
+        Ok(())
     }
 
     /// Posts a chunk of text and clears it.
@@ -243,8 +282,9 @@ impl CgInjector {
         if chunk.is_empty() {
             return Ok(());
         }
+        let code = self.text_keycode();
         for down in [true, false] {
-            let event = CGEvent::new_keyboard_event(self.src(), 0, down)
+            let event = CGEvent::new_keyboard_event(self.src(), code, down)
                 .ok_or_else(|| failed("create a keyboard event"))?;
             // SAFETY: the pointer and length describe `chunk`, alive for the call.
             unsafe {
@@ -351,10 +391,7 @@ impl Injector for CgInjector {
             };
             if let Some(key) = key {
                 self.flush_text(&mut chunk)?;
-                if let Some(MacKey::Code(code)) = keymap::macos(key) {
-                    self.post_keycode(key, code, true, false)?;
-                    self.post_keycode(key, code, false, false)?;
-                }
+                self.post_text_key(key)?;
                 continue;
             }
             let mut units = [0u16; 2];
@@ -365,7 +402,7 @@ impl Injector for CgInjector {
             chunk.extend_from_slice(units);
         }
         self.flush_text(&mut chunk)?;
-        self.check_delivery(true)
+        self.check_delivery(true, false)
     }
 
     fn mouse_button(&mut self, button: MouseButton, down: bool) -> Result<()> {
@@ -403,7 +440,7 @@ impl Injector for CgInjector {
         CGEvent::set_integer_value_field(ev, CGEventField::MouseEventClickState, clicks);
         CGEvent::set_flags(ev, CGEventFlags(self.modifier_flags()));
         self.post(&event);
-        if down { self.check_delivery(false) } else { Ok(()) }
+        self.check_delivery(false, !down)
     }
 
     fn mouse_move_relative(&mut self, dx: i32, dy: i32) -> Result<()> {
@@ -414,14 +451,14 @@ impl Injector for CgInjector {
         let target =
             clamp_to_displays(CGPoint::new(from.x + f64::from(dx), from.y + f64::from(dy)));
         self.post_move(target, i64::from(dx), i64::from(dy))?;
-        self.check_delivery(false)
+        self.check_delivery(false, false)
     }
 
     fn mouse_move_absolute(&mut self, x: i32, y: i32) -> Result<()> {
         let from = self.cursor();
         let target = clamp_to_displays(CGPoint::new(f64::from(x), f64::from(y)));
         self.post_move(target, (target.x - from.x) as i64, (target.y - from.y) as i64)?;
-        self.check_delivery(false)
+        self.check_delivery(false, false)
     }
 
     fn scroll(&mut self, dx: i32, dy: i32) -> Result<()> {
@@ -441,7 +478,7 @@ impl Injector for CgInjector {
         .ok_or_else(|| failed("create a scroll event"))?;
         CGEvent::set_flags(Some(&event), CGEventFlags(self.modifier_flags()));
         self.post(&event);
-        self.check_delivery(false)
+        self.check_delivery(false, false)
     }
 }
 

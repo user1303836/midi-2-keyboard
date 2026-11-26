@@ -132,8 +132,11 @@ pub trait Injector: Send {
     /// limit (`None`: any length). Longer texts must be split by the caller, with a few
     /// milliseconds between the pieces (one frame, ~16 ms, is always enough). `linux-uinput`
     /// would lose characters otherwise (the kernel queues about 128 events for the compositor,
-    /// a character costs 4 to 8); `windows-sendinput` keeps each call to about a millisecond
-    /// (SendInput blocks the caller per event), so the engine stays responsive.
+    /// a character costs 4 to 8); `linux-x11` would mistype them (a keycode it gives a
+    /// character must keep it until applications have read the press; the limit follows the
+    /// number of free keycodes); `windows-sendinput` keeps each call to about a millisecond
+    /// (SendInput blocks the caller per event), so the engine stays responsive. The value may
+    /// change while the backend runs: ask before each text.
     fn max_text_chunk(&self) -> Option<usize> {
         None
     }

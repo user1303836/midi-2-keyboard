@@ -464,13 +464,11 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Whether the desktop actually shows tray icons.
+/// Whether the desktop actually shows tray icons. An AppIndicator icon is only visible when the
+/// desktop runs a tray host: KDE, Cinnamon, XFCE, MATE, ... do, stock GNOME needs an extension.
+/// Without one the icon goes nowhere and nothing reports an error, so look for a host explicitly.
 #[cfg(target_os = "linux")]
 mod tray_host {
-    //! An AppIndicator icon is only visible when the desktop runs a tray host: KDE, Cinnamon,
-    //! XFCE, MATE, ... do, stock GNOME needs an extension. Without one the icon goes nowhere and
-    //! nothing reports an error, so look for a host explicitly.
-
     use gtk::gio;
     use gtk::glib::{self, ToVariant as _};
     use x11rb::protocol::xproto::ConnectionExt as _;

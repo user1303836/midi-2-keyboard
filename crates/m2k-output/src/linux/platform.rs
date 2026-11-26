@@ -1,8 +1,13 @@
 //! Linux platform probes.
 //!
 //! X11: the active window from `_NET_ACTIVE_WINDOW` (EWMH), its `WM_CLASS` (`app_id`, the
-//! class part), `_NET_WM_NAME` / `WM_NAME` and `_NET_WM_PID` (+ `/proc/<pid>/exe` for the
-//! process name). One connection is kept open between polls and re-established when it breaks.
+//! class part) and `_NET_WM_NAME` / `WM_NAME`. The process is the one the X server knows owns
+//! the window (X-Resource extension); `_NET_WM_PID`, which the application reports itself and
+//! which is wrong for sandboxed (Flatpak) applications, only without that extension. Its name
+//! is the executable's (`/proc/<pid>/exe`), except for interpreters, runtimes and Wine, where the
+//! window class names the application. `foreground_app` and `running_apps` describe a window
+//! the same way, so a rule picked from the list matches when that application is in front.
+//! One connection is kept open between polls and re-established when it breaks.
 //! Wayland gives clients no way to see the focused window, so nothing is reported there.
 
 use std::collections::HashSet;
@@ -11,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection;
 use x11rb::errors::ReplyError;
+use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _, QueryClientIdsReply};
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, GetPropertyReply, Window};
 use x11rb::rust_connection::RustConnection;
 
@@ -143,12 +149,19 @@ struct XConn {
     type_desktop: u32,
     net_wm_state: u32,
     state_skip_taskbar: u32,
+    /// X-Resource 1.2 (which client process owns a window) is available.
+    xres: bool,
 }
 
 impl XConn {
     fn connect() -> Option<Self> {
         let (conn, screen) = x11rb::connect(None).ok()?;
         let root = conn.setup().roots.get(screen)?.root;
+        let xres = conn
+            .res_query_version(1, 2)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .is_some_and(|version| (version.server_major, version.server_minor) >= (1, 2));
         let names: [&[u8]; 10] = [
             b"_NET_ACTIVE_WINDOW",
             b"_NET_WM_NAME",
@@ -197,6 +210,7 @@ impl XConn {
             type_desktop,
             net_wm_state,
             state_skip_taskbar,
+            xres,
         })
     }
 
@@ -281,9 +295,17 @@ impl XConn {
         let name =
             self.conn.get_property(false, window, self.net_wm_name, self.utf8_string, 0, 1024);
         let pid = self.conn.get_property(false, window, self.net_wm_pid, AtomEnum::CARDINAL, 0, 1);
+        let owner = self.xres.then(|| {
+            let spec = ClientIdSpec { client: window, mask: ClientIdMask::LOCAL_CLIENT_PID };
+            self.conn.res_query_client_ids(&[spec])
+        });
         let class = reply(class.map_err(|_| Broken)?.reply())?;
         let name = reply(name.map_err(|_| Broken)?.reply())?;
         let pid = reply(pid.map_err(|_| Broken)?.reply())?;
+        let owner = match owner {
+            Some(cookie) => Some(reply(cookie.map_err(|_| Broken)?.reply())?),
+            None => None,
+        };
         if class.is_none() && name.is_none() {
             return Ok(None); // the window is gone
         }
@@ -303,10 +325,60 @@ impl XConn {
             .into_iter();
         let instance = parts.next().unwrap_or_default();
         let class_name = parts.next().filter(|c| !c.is_empty()).unwrap_or(instance);
-        let pid = pid.and_then(|r| r.value32().and_then(|mut v| v.next())).unwrap_or(0);
-        let process = process_name(pid);
+        let pid = match owner {
+            // The process the X server sees on the other end of the window's connection, in our
+            // PID namespace. None: a remote client (its _NET_WM_PID would name some unrelated
+            // local process) or one the server cannot identify.
+            Some(owner) => owner.as_ref().map_or(0, local_pid),
+            None => pid.and_then(|r| r.value32().and_then(|mut v| v.next())).unwrap_or(0),
+        };
+        let mut process = process_name(pid);
+        if is_host(&process) && !class_name.is_empty() {
+            process = class_name.clone();
+        }
         Ok(Some(ForegroundApp { process, title, app_id: class_name, pid, elevated: false }))
     }
+}
+
+/// The local process id in an X-Resource client id reply (0 when there is none).
+fn local_pid(reply: &QueryClientIdsReply) -> u32 {
+    reply
+        .ids
+        .iter()
+        .find(|id| u32::from(id.spec.mask) & u32::from(ClientIdMask::LOCAL_CLIENT_PID) != 0)
+        .and_then(|id| id.value.first().copied())
+        .unwrap_or(0)
+}
+
+/// Programs that run an application rather than being one (interpreters, runtimes, Wine): their
+/// executable name says nothing about the application in the window.
+fn is_host(process: &str) -> bool {
+    // python3.12 -> python, electron29 -> electron, wine64 -> wine
+    let name = process.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    matches!(
+        name,
+        "python"
+            | "pypy"
+            | "java"
+            | "node"
+            | "nodejs"
+            | "electron"
+            | "perl"
+            | "ruby"
+            | "mono"
+            | "mono-sgen"
+            | "dotnet"
+            | "gjs"
+            | "gjs-console"
+            | "lua"
+            | "luajit"
+            | "php"
+            | "tclsh"
+            | "wish"
+            | "wine"
+            | "wine-preloader"
+            | "wine64-preloader"
+    )
 }
 
 /// A reply, `None` for X protocol errors (e.g. the window vanished), `Broken` when the

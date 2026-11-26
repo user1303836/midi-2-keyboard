@@ -157,7 +157,14 @@ impl UinputInjector {
                 self.set_shift(*shift, (false, false))?;
                 *shift = (false, false);
             }
-            self.tap(evdev_code(key)?)?;
+            let code = evdev_code(key)?;
+            if self.down.contains(&key) {
+                // A key held through the injector stays held: release it and press it again.
+                self.key_event(code, 0)?;
+                self.key_event(code, 1)?;
+            } else {
+                self.tap(code)?;
+            }
         }
         Ok(skipped)
     }

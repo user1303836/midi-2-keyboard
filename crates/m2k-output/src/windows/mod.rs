@@ -246,12 +246,16 @@ impl Injector for SendInputInjector {
                 '\t' => Some(Key::Tab),
                 _ => None,
             };
-            match key {
-                Some(key) => {
+            let held = key.and_then(|key| self.down.iter().find(|held| held.key == key));
+            match (key, held.map(|held| [held.input(true), held.input(false)])) {
+                // A key held through the injector stays held: release it and press it again,
+                // with the event that pressed it.
+                (Some(_), Some(again)) => self.inputs.extend(again),
+                (Some(key), None) => {
                     self.push_key(key, false, &mut layout)?;
                     self.push_key(key, true, &mut layout)?;
                 }
-                None => {
+                (None, _) => {
                     let mut units = [0u16; 2];
                     for &unit in c.encode_utf16(&mut units).iter() {
                         self.push_unicode(unit);
