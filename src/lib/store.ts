@@ -215,7 +215,11 @@ export const useApp = create<State>((set, get) => {
 
   // Flush pending edits when the window is hidden or closed.
   if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", () => void flushSave());
+    // Only when an edit is actually waiting: an unconditional save here would write this
+    // window's copy over changes made elsewhere (the tray, another window, an import).
+    window.addEventListener("beforeunload", () => {
+      if (saveTimer) void flushSave();
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden" && saveTimer) void flushSave();
     });
