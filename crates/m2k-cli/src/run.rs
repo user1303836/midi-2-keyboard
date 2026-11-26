@@ -2,8 +2,10 @@
 //! (config + engine + MIDI input, exactly what the desktop app runs) and prints everything that
 //! happens. Ctrl+C shuts it down cleanly, which releases everything the engine holds.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -84,7 +86,7 @@ pub fn run(args: &[String]) -> i32 {
     printer.header(&snapshot, existed, dry_run);
 
     let mut reported_drops = 0;
-    while !interrupt::requested() {
+    while !interrupt::requested() && !printer.broken.get() {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => printer.event(event),
             Err(RecvTimeoutError::Timeout) => {}
@@ -120,6 +122,8 @@ struct Printer {
     profiles: HashMap<String, String>,
     ports: Vec<PortStatus>,
     last_status: Option<String>,
+    /// stdout went away (see `out`).
+    broken: Cell<bool>,
 }
 
 impl Printer {
@@ -131,6 +135,7 @@ impl Printer {
             profiles: HashMap::new(),
             ports: Vec::new(),
             last_status: None,
+            broken: Cell::new(false),
         };
         printer.index(config);
         printer
@@ -166,37 +171,46 @@ impl Printer {
         }
     }
 
+    /// Writes one line to stdout. Never panics (unlike `println!`): when stdout is gone, e.g.
+    /// piped into a `head` that exited, it marks the printer broken and the main loop shuts the
+    /// runtime down, so held keys are still released.
+    fn out(&self, text: impl Display) {
+        if writeln!(std::io::stdout(), "{text}").is_err() {
+            self.broken.set(true);
+        }
+    }
+
     /// One output line: seconds, tag, text. Engine events carry their own timestamp.
     fn line(&self, time_us: Option<u64>, tag: &str, text: impl Display) {
         let us = time_us.unwrap_or_else(|| self.started.elapsed().as_micros() as u64);
-        println!("{:>10.3}  {tag:<5}  {text}", us as f64 / 1_000_000.0);
+        self.out(format_args!("{:>10.3}  {tag:<5}  {text}", us as f64 / 1_000_000.0));
     }
 
     fn header(&self, snapshot: &Snapshot, existed: bool, dry_run: bool) {
         let config = &snapshot.config;
         let mappings: usize = config.profiles.iter().map(|p| p.mappings.len()).sum();
         let created = if existed { "" } else { " (did not exist: created with the defaults)" };
-        println!("m2k run {}", snapshot.info.version);
-        println!("  config   {}{created}", snapshot.info.config_path);
-        println!(
+        self.out(format_args!("m2k run {}", snapshot.info.version));
+        self.out(format_args!("  config   {}{created}", snapshot.info.config_path));
+        self.out(format_args!(
             "           {} profile(s), {mappings} mapping(s), {} device(s) known",
             config.profiles.len(),
             config.devices.len()
-        );
+        ));
         if dry_run {
-            println!("  output   DRY RUN: nothing is sent to the OS");
+            self.out("  output   DRY RUN: nothing is sent to the OS");
         } else if snapshot.backend_error.is_empty() {
-            println!("  output   {}", snapshot.engine.backend);
+            self.out(format_args!("  output   {}", snapshot.engine.backend));
         } else {
-            println!("  output   NOT WORKING: {}", snapshot.backend_error);
+            self.out(format_args!("  output   NOT WORKING: {}", snapshot.backend_error));
         }
         if !snapshot.permissions.hint.is_empty() {
-            println!("  note     {}", snapshot.permissions.hint);
+            self.out(format_args!("  note     {}", snapshot.permissions.hint));
         }
         for warning in &snapshot.warnings {
-            println!("  warning  {warning}");
+            self.out(format_args!("  warning  {warning}"));
         }
-        println!("Press Ctrl+C to stop.");
+        self.out("Press Ctrl+C to stop.");
     }
 
     fn event(&mut self, event: RuntimeEvent) {
