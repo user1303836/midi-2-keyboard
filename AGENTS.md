@@ -146,6 +146,11 @@ There is no test suite (see the ground rules). Verify by exercising the real thi
   output back while its own window has focus.
 - This injects real input into the owner's desktop: only ever into a window you opened, keep
   runs short, and make sure nothing is left held (`snapshot().engine.held_keys` must be empty).
+- Only one instance of the app runs per login session (the single-instance guard), **across
+  agents too**: while somebody else's instance is up, your launch just hands over to theirs and
+  exits, and your script never connects. Look first (`Get-CimInstance Win32_Process -Filter
+  "Name = 'midi-2-keyboard.exe'"` shows whose build it is), wait for it to go away, quit your own
+  instance when you are done, and never kill one you did not start.
 
 ## Working in parallel (multiple agents)
 
