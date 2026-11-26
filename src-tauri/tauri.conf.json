@@ -40,7 +40,8 @@
     "shortDescription": "Translate MIDI events into keyboard and mouse input.",
     "category": "Utility",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
     },
     "linux": {
       "deb": {

@@ -1,14 +1,17 @@
 // Rate limiting and conditions: the two "advanced" groups of a mapping.
 
-import { Plus, Trash2 } from "lucide-react";
+import { CircleDot, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Condition } from "@/bindings/Condition";
+import type { MidiLog } from "@/bindings/MidiLog";
 import type { RateLimit } from "@/bindings/RateLimit";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Switch, TextInput } from "@/components/ui/inputs";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/overlays";
 import { CONDITION_TYPES, defaultCondition, defaultRateLimit } from "@/lib/model";
-import { useApp, useKnownLayers } from "@/lib/store";
+import { onMidi } from "@/lib/monitor";
+import { api, useApp, useKnownLayers } from "@/lib/store";
 import { cn, formatMs } from "@/lib/utils";
 
 import { ChannelSelect, NoteInput, RangeEditor } from "./fields";
@@ -142,6 +145,45 @@ export function RateLimitEditor({
   );
 }
 
+/**
+ * "Touch it instead of typing it": waits for the next matching MIDI message and hands it over.
+ * While armed, the engine holds its fire like during any other learn.
+ */
+function LearnOnce({
+  accept,
+  label,
+}: {
+  accept: (log: MidiLog) => boolean;
+  label: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const handler = useRef(accept);
+  handler.current = accept;
+  useEffect(() => {
+    if (!armed) return;
+    void api().then((backend) => backend.setLearning(true));
+    const off = onMidi((log) => {
+      if (handler.current(log)) setArmed(false);
+    });
+    const timeout = setTimeout(() => setArmed(false), 15000);
+    return () => {
+      off();
+      clearTimeout(timeout);
+      void api().then((backend) => backend.setLearning(false));
+    };
+  }, [armed]);
+  return (
+    <Button
+      size="sm"
+      variant={armed ? "midi" : "secondary"}
+      icon={<CircleDot size={12} className={armed ? "animate-pulse" : undefined} />}
+      onClick={() => setArmed(!armed)}
+    >
+      {armed ? label : "Learn"}
+    </Button>
+  );
+}
+
 function ConditionRow({
   condition,
   onChange,
@@ -231,6 +273,14 @@ function ConditionRow({
               onChange={(mode) => onChange({ ...condition, held: mode === "held" })}
             />
             <ChannelSelect value={condition.channel} onChange={(channel) => onChange({ ...condition, channel })} />
+            <LearnOnce
+              label="Press the note…"
+              accept={(log) => {
+                if (log.message.type !== "note_on" || log.message.velocity === 0) return false;
+                onChange({ ...condition, note: log.message.note, channel: log.message.channel });
+                return true;
+              }}
+            />
           </div>
         )}
         {condition.type === "control_value" && (
@@ -247,6 +297,14 @@ function ConditionRow({
               />
               <span className="text-fg-muted">is between</span>
               <ChannelSelect value={condition.channel} onChange={(channel) => onChange({ ...condition, channel })} />
+              <LearnOnce
+                label="Move the control…"
+                accept={(log) => {
+                  if (log.message.type !== "control_change") return false;
+                  onChange({ ...condition, controller: log.message.controller, channel: log.message.channel });
+                  return true;
+                }}
+              />
             </div>
             <RangeEditor limit={127} value={condition.range} onChange={(range) => onChange({ ...condition, range }, "range")} />
           </>
