@@ -35,7 +35,16 @@ import { onDeviceActivity } from "@/lib/monitor";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: Profile) => void }) {
+function ProfileItem({
+  profile,
+  onEdit,
+  autoRename = false,
+}: {
+  profile: Profile;
+  onEdit: (profile: Profile) => void;
+  /** Start with the name being edited (a profile that was just created). */
+  autoRename?: boolean;
+}) {
   const viewed = useApp((state) => state.viewProfileId === profile.id);
   const live = useApp(
     (state) => state.engine.effective_profile === profile.id || profile.always_on,
@@ -50,12 +59,15 @@ function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: 
   const index = useApp((state) => state.config.profiles.findIndex((p) => p.id === profile.id));
   const moveProfile = useApp((state) => state.moveProfile);
   const toast = useApp((state) => state.toast);
-  const [renaming, setRenaming] = useState(false);
+  const [renaming, setRenaming] = useState(autoRename);
   const [confirming, setConfirming] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (renaming) inputRef.current?.select();
+    if (renaming) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
   }, [renaming]);
 
   const exportProfile = async () => {
@@ -242,6 +254,8 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
   const importProfiles = useApp((state) => state.importProfiles);
   const setPanel = useApp((state) => state.setPanel);
   const toast = useApp((state) => state.toast);
+  // The profile that was just created: it starts with its name selected, ready to be typed over.
+  const [created, setCreated] = useState<string | null>(null);
 
   const doImport = async () => {
     const backend = await api();
@@ -288,14 +302,14 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
         <IconButton
           label="New profile"
           size="sm"
-          onClick={() => addProfile(`Profile ${profiles.length + 1}`)}
+          onClick={() => setCreated(addProfile(`Profile ${profiles.length + 1}`))}
         >
           <Plus size={14} />
         </IconButton>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto px-1.5 pb-2">
         {profiles.map((profile) => (
-          <ProfileItem key={profile.id} profile={profile} onEdit={onEditProfile} />
+          <ProfileItem key={profile.id} profile={profile} onEdit={onEditProfile} autoRename={profile.id === created} />
         ))}
       </div>
 

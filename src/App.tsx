@@ -103,16 +103,19 @@ function useShortcuts() {
       } else if (!mod && !event.altKey && key === "n" && !typing && state.panel === "none") {
         event.preventDefault();
         state.startWizard();
-      } else if (
-        (key === "delete" || key === "backspace") &&
-        (focusedMappingId() ?? state.selectedMappingId) &&
-        !typing &&
-        state.panel === "none"
-      ) {
-        if ((event.target as HTMLElement | null)?.closest("[data-radix-popper-content-wrapper],[role=dialog]")) return;
-        event.preventDefault();
+      } else if ((key === "delete" || key === "backspace") && !typing && state.panel === "none") {
+        // Deleting a mapping needs clear intent: the key must come from a mapping's row, or from
+        // nowhere in particular (nothing focused). A Backspace that a control of the editor has
+        // used for itself — clearing a shortcut field, say — must never take the mapping with it.
+        if (event.defaultPrevented) return;
+        const target = event.target as HTMLElement | null;
+        const onRow = focusedMappingId();
+        const nowhere = !target || target === document.body || target === document.documentElement;
+        if (!onRow && !nowhere) return;
         // The row with the focus ring is the one that goes; the focus moves on to its neighbor.
-        const id = (focusedMappingId() ?? state.selectedMappingId)!;
+        const id = onRow ?? state.selectedMappingId;
+        if (!id) return;
+        event.preventDefault();
         const siblings = state.config.profiles.find((p) => p.mappings.some((m) => m.id === id))?.mappings ?? [];
         const at = siblings.findIndex((m) => m.id === id);
         state.removeMapping(id);
