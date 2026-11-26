@@ -17,6 +17,7 @@ It is built around two promises:
 | Source | Notes |
 | --- | --- |
 | Notes | single notes or ranges, any/one channel, velocity zones |
+| Chords | several notes held together, optionally "struck within N ms" |
 | Control Change | knobs/faders, buttons and pedals (a "pressed" range), endless encoders in all three relative encodings (two's complement, binary offset, sign-magnitude) |
 | 14-bit CC, NRPN, RPN | assembled from their MSB/LSB/data messages; 7-bit or 14-bit data; increment/decrement |
 | Program Change, Pitch Bend, Channel and Poly Pressure | |
@@ -45,18 +46,33 @@ launching programs, opening files and URLs.
 
 **Shaping** — rate limits (throttle, throttle with a final trailing fire, debounce), conditions
 (only in a certain application, only while a layer is on, only while another pad is held, only
-while a knob is in a certain position), per-action timing.
+while a knob is in a certain position), hysteresis for jittery pedals and faders, per-action
+timing.
 
 **Organization** — profiles, always-on (global) profiles, automatic profile switching by
-foreground application, import/export, undo/redo.
+foreground application (picked from a list of open apps), import/export, undo/redo. The list
+points out mappings that share a control.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
-*why* something was not sent), an activity light on every mapping, and an on-screen virtual
-controller for trying things without hardware.
+*why* something was not sent), the engine's measured MIDI-to-key latency, an activity light on
+every mapping, and an on-screen virtual controller for trying things without hardware.
 
 **Safety** — everything the app holds down is tracked and released on pause, profile switch,
-device disconnect, config change and exit. By default nothing is sent while the app's own window
-has focus, so a mapping cannot type into (or close) the editor.
+device disconnect, config change and exit; a key release the system refuses is retried until it
+goes through. By default nothing is sent while the app's own window has focus, so a mapping
+cannot type into (or close) the editor.
+
+**Light on the machine** — the engine is native code on its own thread (tens of microseconds
+from MIDI message to key event, 0% CPU when idle). Closing the window keeps the mappings running
+from the tray with no browser view loaded at all (about 30 MB).
+
+## Platform status
+
+| | Builds and packages in CI | Verified on a real machine |
+| --- | --- | --- |
+| Windows 10/11 | yes (NSIS + MSI) | yes — end to end, real keystrokes |
+| macOS 11+ (universal) | yes (DMG) | not yet — compiled and reviewed only |
+| Linux (X11 / Wayland via uinput) | yes (deb, rpm, AppImage) | not yet — compiled and reviewed only |
 
 ## Using it
 
@@ -65,7 +81,12 @@ has focus, so a mapping cannot type into (or close) the editor.
 3. Switch to the application you want to control and use your controller.
 
 Everything else is under **All options** in the editor. The **Monitor** (bottom right, `Ctrl+M`)
-shows what is going on.
+shows what is going on, and its *Virtual controller* tab lets you play notes and turn knobs
+without any hardware. Ready-made profiles to import and pick apart are in [`examples/`](examples).
+
+Keys are not sent while the app's own window is in front (so a mapping cannot type into the
+editor) — switch to the application you want to control to try a mapping. Closing the window
+keeps the app running in the tray; quit from the tray icon's menu.
 
 Good to know:
 
@@ -74,11 +95,13 @@ Good to know:
   To control windows that run as administrator, run this app as administrator too.
 - **macOS:** the app needs the *Accessibility* permission to send keys
   (System Settings → Privacy & Security → Accessibility). It asks on first use.
-- **Linux:** on X11 it works out of the box. On Wayland it needs access to `/dev/uinput`; the app
-  shows the exact udev rule to add. Per-application profiles need X11.
+- **Linux:** on X11 it works out of the box. On Wayland it needs access to `/dev/uinput`: the deb
+  and rpm packages install the udev rule for that; with the AppImage the app shows the rule to
+  add. Per-application profiles need X11.
 
 The configuration is a single JSON file (Settings → *Show config file*), saved atomically with a
-backup copy; a corrupt file is set aside and the backup restored.
+backup copy; a corrupt file is set aside and the backup restored. You can edit it by hand while
+the app is running.
 
 ## Building from source
 
@@ -100,9 +123,13 @@ Other useful commands:
 
 ```sh
 npm run dev                                   # the UI alone in a browser, against a mock backend
-npm run cargo -- run -p m2k-cli -- devices    # list MIDI input ports
-npm run cargo -- run -p m2k-cli -- monitor    # print incoming MIDI
 npm run bindings                              # regenerate the TypeScript types from the Rust types
+
+# m2k, the headless companion (npm run cargo -- run -p m2k-cli -- <command>)
+m2k devices                                   # list MIDI input ports
+m2k monitor [name]                            # print incoming MIDI, decoded
+m2k run [--config file] [--dry-run]           # run a config without the UI (dry run sends nothing)
+m2k simulate config.json script.txt           # replay scripted MIDI and print what would be sent
 ```
 
 ## How it is put together

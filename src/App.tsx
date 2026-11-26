@@ -80,6 +80,9 @@ function useShortcuts() {
       } else if (mod && key === "d" && state.selectedMappingId && !typing) {
         event.preventDefault();
         state.cloneMapping(state.selectedMappingId);
+      } else if (!mod && document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) {
+        // A dialog or menu is open: single-key shortcuts belong to it, not to the list behind it.
+        return;
       } else if (!mod && !event.altKey && key === "n" && !typing && state.panel === "none") {
         event.preventDefault();
         state.startWizard();

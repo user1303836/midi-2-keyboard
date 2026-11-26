@@ -53,9 +53,13 @@ crates/
                 held-key bookkeeping, platform probes (permissions, foreground app).
   m2k-core/     Config model (the JSON schema), persistence, and the engine: matching,
                 behaviors (trigger/hold/toggle/tap-hold/multi-tap/step/...), rate limiting,
-                scheduling, conditions, profiles, monitor events.
-src-tauri/      Tauri v2 desktop shell: commands/events between the engine and the UI, tray,
-                autostart, single-instance.
+                scheduling, conditions, profiles, monitor events. `runtime.rs` wires config +
+                engine + MIDI input together for any front end.
+  m2k-cli/      `m2k` headless tools: devices, monitor, run, simulate, export-bindings.
+src-tauri/      Tauri v2 desktop shell: commands/events between the runtime and the UI, tray,
+                autostart, single-instance. While the app sits in the tray there is no window
+                (and no webview) at all; it is rebuilt on demand.
+examples/       Importable example profiles.
 src/            React + TypeScript + Vite frontend.
 src/bindings/   TypeScript types GENERATED from the Rust types with ts-rs. Never edit by hand.
 ```
@@ -119,6 +123,29 @@ a stub: a file `stub-pkg-config.cmd` *outside the repository* containing the sin
 before the command (PowerShell: set `$env:PKG_CONFIG_ALLOW_CROSS = "1"` and `$env:PKG_CONFIG`
 first). This covers the core crates (the default members, also with `clippy -p <crate>`); the
 Tauri shell needs the target's system libraries, so leave `src-tauri` to CI.
+
+## Verifying without tests
+
+There is no test suite (see the ground rules). Verify by exercising the real thing:
+
+- **Engine semantics:** `npm run cargo -- run -p m2k-cli -- simulate <config.json> <script>` runs a
+  config against scripted, timed MIDI through the real engine with a logging backend and prints
+  every key event and engine event. `m2k run --dry-run` does the same against the real MIDI
+  ports. Neither presses real keys.
+- **The UI alone:** `npm run dev` serves it against a mock backend; `window.__m2k.send(device,
+  bytes)` in the page plays MIDI into the mock, and `?select=<mapping-id>`, `?wizard=1`,
+  `?monitor=1`, `?panel=settings|devices`, `?theme=light|dark` put it into a given state.
+- **The real desktop app, end to end (Windows):** start the built exe with
+  `M2K_CONFIG_DIR=<scratch dir>` (never touch the user's real config) and
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=<port>`, then drive the webview
+  over the Chrome DevTools Protocol (e.g. `playwright-core`'s `connectOverCDP`, kept outside the
+  repo). `window.__TAURI_INTERNALS__.invoke("send_midi", { device, bytes })` feeds MIDI exactly
+  like a device would (one call may carry many messages), `invoke("snapshot")` returns config +
+  live status. To check real output, open a Notepad window of your own, make sure **it** is the
+  foreground window before every send, and read its text back (`WM_GETTEXT`). The app holds
+  output back while its own window has focus.
+- This injects real input into the owner's desktop: only ever into a window you opened, keep
+  runs short, and make sure nothing is left held (`snapshot().engine.held_keys` must be empty).
 
 ## Working in parallel (multiple agents)
 
