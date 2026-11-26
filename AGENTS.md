@@ -48,14 +48,17 @@ thread, must never block, and must never leave keys stuck down.
 ```
 crates/
   m2k-midi/     MIDI domain: message types, byte-stream parser, NRPN/RPN/14-bit state tracking,
-                device I/O (midir) with hot-plug handling.
+                device I/O (midir) with hot-plug handling: inputs (`input.rs`) and outputs
+                (`output.rs`: ports opened on first send, a send that never blocks).
   m2k-output/   Key model + OS input injection (keyboard, mouse, unicode text) per platform,
                 held-key bookkeeping, platform probes (permissions, foreground app).
   m2k-core/     Config model (the JSON schema), persistence, and the engine: matching,
                 behaviors (trigger/hold/toggle/tap-hold/multi-tap/step/...), rate limiting,
-                scheduling, conditions, profiles, monitor events. `runtime.rs` wires config +
-                engine + MIDI input together for any front end.
-  m2k-cli/      `m2k` headless tools: devices, monitor, run, simulate, export-bindings.
+                scheduling, conditions, profiles, monitor events, and MIDI going back out
+                ("Send MIDI" actions, feedback lights) through a `MidiSink`. `runtime.rs` wires
+                config + engine + MIDI input and output together for any front end.
+  m2k-cli/      `m2k` headless tools: devices, outputs, send, monitor, run, simulate,
+                export-bindings.
 src-tauri/      Tauri v2 desktop shell: commands/events between the runtime and the UI, tray,
                 autostart, single-instance. While the app sits in the tray there is no window
                 (and no webview) at all; it is rebuilt on demand.
@@ -75,7 +78,13 @@ src/bindings/   TypeScript types GENERATED from the Rust types with ts-rs. Never
   - Keys are named after the W3C `KeyboardEvent.code` values (`KeyA`, `ArrowUp`, `ControlLeft`,
     `F13`, `NumpadAdd`, `AudioVolumeUp`). They denote physical keys.
   - Config changes must stay backward compatible: add fields with `#[serde(default)]`; never
-    rename or remove without a migration in `m2k-core`.
+    rename or remove without a migration in `m2k-core`. A hand-written config may leave out
+    everything that has an obvious value (see "Writing the config by hand" in the README); keep
+    it that way when adding fields.
+  - A controller's output is found **by name**: the output port named like the input the message
+    came from. Port names go through the same normalization on both sides.
+  - An empty action (no keys, no text, a macro without effect) is no action: the engine never
+    fires or reports it.
 - Platform-specific code lives behind `cfg` in per-OS modules. Every platform must keep compiling;
   CI builds all three.
 
@@ -146,6 +155,11 @@ There is no test suite (see the ground rules). Verify by exercising the real thi
   output back while its own window has focus.
 - This injects real input into the owner's desktop: only ever into a window you opened, keep
   runs short, and make sure nothing is left held (`snapshot().engine.held_keys` must be empty).
+- **Never send MIDI to the owner's hardware.** A controller that receives MIDI changes what it
+  shows or stores, and other gear may hang off an interface's outputs. Engine-side checks of
+  "Send MIDI" and lights belong in `m2k simulate` (it prints `MIDI-OUT` lines; a dry run has no
+  output at all). For the real output path on Windows, name "Microsoft GS Wavetable Synth" as
+  the output and send only control changes (silent); never a note, the machine has speakers.
 - The owner may be sitting at the machine. A run that takes the foreground or sends real input
   steals their keystrokes (one of theirs once ended up as the key of a test mapping) and can put
   yours into their window. Before every such run, read how long the desktop has been idle
