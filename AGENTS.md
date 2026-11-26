@@ -102,6 +102,24 @@ npm run cargo -- run -p m2k-cli -- devices   # the headless CLI (devices / monit
 (`src-tauri`) is not a default workspace member: it needs the built frontend (`npm run build`) to
 compile, so plain `cargo check` skips it.
 
+### Checking Linux and macOS from the Windows dev machine
+
+CI builds all three platforms, but `cfg`-gated code can be type-checked locally before pushing
+(check / clippy only: nothing is linked or run). The rustup targets `x86_64-unknown-linux-gnu`
+and `aarch64-apple-darwin` are installed on this machine.
+
+```
+npm run cargo -- check --target aarch64-apple-darwin        # macOS: works as is
+npm run cargo -- check --target x86_64-unknown-linux-gnu    # Linux: needs the stub below
+```
+
+For Linux, `alsa-sys`'s build script runs `pkg-config`, which refuses to cross-compile. Give it
+a stub: a file `stub-pkg-config.cmd` *outside the repository* containing the single line
+`@echo -lasound`, then (bash) `PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG='C:\path\to\stub-pkg-config.cmd'`
+before the command (PowerShell: set `$env:PKG_CONFIG_ALLOW_CROSS = "1"` and `$env:PKG_CONFIG`
+first). This covers the core crates (the default members, also with `clippy -p <crate>`); the
+Tauri shell needs the target's system libraries, so leave `src-tauri` to CI.
+
 ## Working in parallel (multiple agents)
 
 Several agents may work on this repository at once.
