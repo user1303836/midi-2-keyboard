@@ -82,6 +82,11 @@ pub(crate) fn permissions() -> Permissions {
 
 pub(crate) fn request_permissions() {}
 
+/// Linux has no privilege separation between applications' input (no UIPI).
+pub(crate) fn is_elevated() -> bool {
+    false
+}
+
 /// The connection broke: drop it and reconnect later.
 struct Broken;
 
@@ -295,7 +300,8 @@ impl XConn {
         let instance = parts.next().unwrap_or_default();
         let class_name = parts.next().filter(|c| !c.is_empty()).unwrap_or(instance);
         let pid = pid.and_then(|r| r.value32().and_then(|mut v| v.next())).unwrap_or(0);
-        Ok(Some(ForegroundApp { process: process_name(pid), title, app_id: class_name, pid }))
+        let process = process_name(pid);
+        Ok(Some(ForegroundApp { process, title, app_id: class_name, pid, elevated: false }))
     }
 }
 

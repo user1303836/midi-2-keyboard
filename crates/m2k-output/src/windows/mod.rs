@@ -19,16 +19,19 @@
 //! subject to the pointer speed / acceleration settings like a real mouse (games reading raw
 //! input get the exact counts); absolute movement addresses the whole virtual desktop.
 //!
-//! Every event carries [`crate::INJECTION_TAG`] in `dwExtraInfo`. Windows refuses input into
-//! windows of more privileged processes (UIPI) and on secure desktops; that is reported as
-//! [`OutputError::Permission`].
+//! Every event carries [`crate::INJECTION_TAG`] in `dwExtraInfo`. Windows keeps input of a
+//! normal program out of windows of programs running as administrator (UIPI), often without
+//! telling `SendInput`'s caller, and refuses it on secure desktops. So after sending, keyboard
+//! input is checked against the focused window and clicks / wheel against the window under the
+//! pointer (cached per window); either case is reported as [`OutputError::Permission`] saying
+//! what to do. Pointer movement is not affected by UIPI and not checked.
 
 pub(crate) mod platform;
 
 use std::collections::HashSet;
 use std::mem::size_of;
 
-use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError, HWND, POINT};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayout, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE,
@@ -38,8 +41,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, MapVirtualKeyExW, SendInput,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId, SM_CXVIRTUALSCREEN,
-    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WHEEL_DELTA, XBUTTON1, XBUTTON2,
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowThreadProcessId,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WHEEL_DELTA,
+    WindowFromPoint, XBUTTON1, XBUTTON2,
 };
 
 use crate::keymap::{self, WinKey};
@@ -62,6 +66,8 @@ pub(crate) fn create(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
         inputs: Vec::new(),
         down: HashSet::new(),
         buttons: HashSet::new(),
+        focus: Target::default(),
+        pointer: Target::default(),
     }))
 }
 
@@ -72,6 +78,31 @@ pub(crate) struct SendInputInjector {
     /// Keys and buttons held through this injector, released on drop as a safety net.
     down: HashSet<Key>,
     buttons: HashSet<MouseButton>,
+    /// Where keyboard input went last (the focused window) and pointer input (the window under
+    /// the pointer).
+    focus: Target,
+    pointer: Target,
+}
+
+/// A window input went to, and whether its program runs above us; looked up once per window.
+#[derive(Default)]
+struct Target {
+    hwnd: usize,
+    elevated: Option<String>,
+}
+
+impl Target {
+    /// `Permission` when `hwnd` belongs to a program Windows keeps our input away from.
+    fn check(&mut self, hwnd: HWND) -> Result<()> {
+        if self.hwnd != hwnd as usize {
+            self.hwnd = hwnd as usize;
+            self.elevated = platform::elevated_owner(hwnd);
+        }
+        match &self.elevated {
+            Some(name) => Err(blocked_by_elevation(name)),
+            None => Ok(()),
+        }
+    }
 }
 
 impl SendInputInjector {
@@ -130,7 +161,8 @@ impl SendInputInjector {
         }
         self.inputs.clear();
         self.push_key(key, up, &mut Layout::default())?;
-        self.send()
+        self.send()?;
+        self.focus.check(unsafe { GetForegroundWindow() })
     }
 
     fn mouse(&mut self, dx: i32, dy: i32, data: u32, flags: u32) -> Result<()> {
@@ -188,7 +220,8 @@ impl Injector for SendInputInjector {
                 }
             }
         }
-        self.send()
+        self.send()?;
+        self.focus.check(unsafe { GetForegroundWindow() })
     }
 
     fn mouse_button(&mut self, button: MouseButton, down: bool) -> Result<()> {
@@ -204,7 +237,8 @@ impl Injector for SendInputInjector {
         } else {
             self.buttons.remove(&button);
         }
-        self.mouse(0, 0, data, if down { down_flag } else { up_flag })
+        self.mouse(0, 0, data, if down { down_flag } else { up_flag })?;
+        self.pointer.check(window_under_pointer())
     }
 
     fn mouse_move_relative(&mut self, dx: i32, dy: i32) -> Result<()> {
@@ -236,7 +270,8 @@ impl Injector for SendInputInjector {
         self.inputs.clear();
         self.push_notches(dy, MOUSEEVENTF_WHEEL);
         self.push_notches(dx, MOUSEEVENTF_HWHEEL);
-        self.send()
+        self.send()?;
+        self.pointer.check(window_under_pointer())
     }
 }
 
@@ -306,22 +341,38 @@ fn send_inputs(inputs: &[INPUT]) -> Result<()> {
     // UIPI does not set a dedicated error code; on current Windows versions it shows up as
     // ERROR_ACCESS_DENIED, or as no error at all.
     if error == ERROR_ACCESS_DENIED || error == 0 {
-        let target = match platform::foreground_process_name() {
-            Some(name) if !name.is_empty() => format!("the focused window ({name})"),
-            _ => "the focused window".to_string(),
-        };
-        return Err(OutputError::Permission(format!(
-            "Windows blocked the input: {target} belongs to a program with higher privileges \
-             than midi-2-keyboard (for example one running as administrator), or a secure \
-             desktop (UAC prompt, lock screen) is active. Run midi-2-keyboard as administrator \
-             to control elevated programs."
-        )));
+        if let Some(name) = platform::elevated_owner(unsafe { GetForegroundWindow() }) {
+            return Err(blocked_by_elevation(&name));
+        }
+        return Err(OutputError::Permission(
+            "Windows blocked the input: a secure screen (lock screen, UAC prompt or \
+             Ctrl+Alt+Del) is active, or the target belongs to a program running as \
+             administrator; start MIDI 2 Keyboard as administrator to control such programs."
+                .into(),
+        ));
     }
     Err(OutputError::Other(format!(
         "SendInput delivered {sent} of {} events: {}",
         inputs.len(),
         std::io::Error::from_raw_os_error(error as i32)
     )))
+}
+
+/// Input into a program that runs as administrator while we do not.
+fn blocked_by_elevation(program: &str) -> OutputError {
+    let program = if program.is_empty() { "The target program" } else { program };
+    OutputError::Permission(format!(
+        "Windows blocked the input: {program} runs as administrator; start MIDI 2 Keyboard as \
+         administrator to control it."
+    ))
+}
+
+fn window_under_pointer() -> HWND {
+    let mut point = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut point) } == 0 {
+        return std::ptr::null_mut();
+    }
+    unsafe { WindowFromPoint(point) }
 }
 
 fn unsupported(key: Key) -> OutputError {

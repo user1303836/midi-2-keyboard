@@ -340,10 +340,10 @@ export function createMockBackend(): Backend {
     async requestPermissions() {},
     async runningApps() {
       return [
-        { process: "Ableton Live 12 Suite.exe", title: "Untitled - Ableton Live 12 Suite", app_id: "", pid: 1 },
-        { process: "chrome.exe", title: "New Tab - Google Chrome", app_id: "", pid: 2 },
-        { process: "Photoshop.exe", title: "Untitled-1 @ 100%", app_id: "", pid: 3 },
-        { process: "obs64.exe", title: "OBS Studio", app_id: "", pid: 4 },
+        { process: "Ableton Live 12 Suite.exe", title: "Untitled - Ableton Live 12 Suite", app_id: "", pid: 1, elevated: false },
+        { process: "chrome.exe", title: "New Tab - Google Chrome", app_id: "", pid: 2, elevated: false },
+        { process: "Photoshop.exe", title: "Untitled-1 @ 100%", app_id: "", pid: 3, elevated: false },
+        { process: "obs64.exe", title: "OBS Studio", app_id: "", pid: 4, elevated: false },
       ];
     },
     async revealConfig() {},

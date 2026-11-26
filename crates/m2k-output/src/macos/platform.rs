@@ -41,7 +41,8 @@ pub(crate) fn foreground_app() -> Option<ForegroundApp> {
         } else {
             String::new()
         };
-        Some(ForegroundApp { process, title, app_id, pid: u32::try_from(pid).unwrap_or(0) })
+        let pid = u32::try_from(pid).unwrap_or(0);
+        Some(ForegroundApp { process, title, app_id, pid, elevated: false })
     })
 }
 
@@ -60,7 +61,13 @@ pub(crate) fn running_apps() -> Vec<ForegroundApp> {
                 continue;
             }
             let pid = u32::try_from(app.processIdentifier()).unwrap_or(0);
-            apps.push(ForegroundApp { process, title: String::new(), app_id, pid });
+            apps.push(ForegroundApp {
+                process,
+                title: String::new(),
+                app_id,
+                pid,
+                elevated: false,
+            });
         }
         apps.sort_by_cached_key(|app| app.process.to_lowercase());
         apps
@@ -84,6 +91,11 @@ pub(crate) fn request_permissions() {
     let options = CFDictionary::<CFString, CFBoolean>::from_slices(&[key], &[CFBoolean::new(true)]);
     // SAFETY: the dictionary maps CFString keys to CFBoolean values, as the API expects.
     unsafe { AXIsProcessTrustedWithOptions(Some(options.as_opaque())) };
+}
+
+/// macOS has no privilege separation between applications' input (no UIPI).
+pub(crate) fn is_elevated() -> bool {
+    false
 }
 
 fn focused_window_title(pid: i32) -> Option<String> {

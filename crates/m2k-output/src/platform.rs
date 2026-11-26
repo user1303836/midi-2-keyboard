@@ -20,6 +20,11 @@ pub struct ForegroundApp {
     pub app_id: String,
     /// Process id, 0 when unknown.
     pub pid: u32,
+    /// The application runs with higher privileges than midi-2-keyboard (Windows: as
+    /// administrator), so Windows refuses to deliver our input into it until midi-2-keyboard
+    /// runs as administrator too. Always `false` on other platforms.
+    #[serde(default)]
+    pub elevated: bool,
 }
 
 /// State of the OS permissions input injection depends on.
@@ -72,6 +77,12 @@ pub fn request_permissions() {
     let _ = catch_unwind(AssertUnwindSafe(imp::request_permissions));
 }
 
+/// Whether midi-2-keyboard itself runs with elevated privileges (Windows: as administrator,
+/// which it needs to send input into other elevated programs). Always `false` elsewhere.
+pub fn is_elevated() -> bool {
+    catch_unwind(imp::is_elevated).unwrap_or(false)
+}
+
 #[cfg(target_os = "linux")]
 use crate::linux::platform as imp;
 #[cfg(target_os = "macos")]
@@ -96,4 +107,8 @@ mod imp {
     }
 
     pub fn request_permissions() {}
+
+    pub fn is_elevated() -> bool {
+        false
+    }
 }

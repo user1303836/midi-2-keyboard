@@ -20,4 +20,10 @@ app_id: string,
 /**
  * Process id, 0 when unknown.
  */
-pid: number, };
+pid: number, 
+/**
+ * The application runs with higher privileges than midi-2-keyboard (Windows: as
+ * administrator), so Windows refuses to deliver our input into it until midi-2-keyboard
+ * runs as administrator too. Always `false` on other platforms.
+ */
+elevated: boolean, };

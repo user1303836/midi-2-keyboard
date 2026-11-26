@@ -329,6 +329,7 @@ fn parse_line(rest: &str, now: &mut u64) -> Result<Step, String> {
                 title: tokens.get(2).cloned().unwrap_or_default(),
                 app_id: String::new(),
                 pid: 0,
+                elevated: false,
             })),
         },
         "pause" => Step::Paused(true),

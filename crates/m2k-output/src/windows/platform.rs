@@ -1,14 +1,22 @@
 //! Windows platform probes.
 
 use std::collections::HashSet;
+use std::ptr::null_mut;
+use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, GetLastError,
+    HANDLE, HWND, LPARAM,
 };
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+use windows_sys::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
+    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenElevation, TokenIntegrityLevel,
+};
 use windows_sys::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GW_OWNER, GWL_EXSTYLE, GetForegroundWindow, GetWindow,
@@ -22,25 +30,23 @@ use crate::platform::{ForegroundApp, Permissions};
 /// Host process of UWP / WinUI app windows; the real app owns a child window.
 const FRAME_HOST: &str = "ApplicationFrameHost.exe";
 
+/// Mandatory integrity levels (the last sub-authority of the label SID).
+const MEDIUM_INTEGRITY: u32 = 0x2000;
+const HIGH_INTEGRITY: u32 = 0x3000;
+
 pub(crate) fn foreground_app() -> Option<ForegroundApp> {
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.is_null() {
         return None;
     }
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
-    if pid == 0 {
-        return None;
-    }
-    let mut info = process_info(pid).unwrap_or_default();
-    if info.name.eq_ignore_ascii_case(FRAME_HOST)
-        && let Some(app_pid) = hosted_app_pid(hwnd, pid)
-        && let Some(app) = process_info(app_pid)
-    {
-        pid = app_pid;
-        info = app;
-    }
-    Some(ForegroundApp { process: info.name, title: window_title(hwnd), app_id: info.app_id, pid })
+    let (pid, info) = window_process(hwnd)?;
+    Some(ForegroundApp {
+        process: info.name,
+        title: window_title(hwnd),
+        app_id: info.app_id,
+        pid,
+        elevated: info.elevated,
+    })
 }
 
 pub(crate) fn running_apps() -> Vec<ForegroundApp> {
@@ -76,6 +82,7 @@ pub(crate) fn running_apps() -> Vec<ForegroundApp> {
             title: window_title(hwnd),
             app_id: info.app_id,
             pid,
+            elevated: info.elevated,
         });
     }
     apps.sort_by_cached_key(|app| app.process.to_lowercase());
@@ -107,15 +114,60 @@ fn is_app_window(hwnd: HWND) -> bool {
 }
 
 pub(crate) fn permissions() -> Permissions {
-    // SendInput needs no permission. Elevated target windows (UIPI) are reported per event.
+    // SendInput needs no permission. Elevated target windows (UIPI) are reported per event and
+    // through `ForegroundApp::elevated`.
     Permissions { can_inject: true, can_detect_foreground: true, hint: String::new() }
 }
 
 pub(crate) fn request_permissions() {}
 
-/// Executable name of the process owning the foreground window (for error messages).
-pub(crate) fn foreground_process_name() -> Option<String> {
-    foreground_app().map(|app| app.process)
+/// Whether this process runs elevated (as administrator).
+pub(crate) fn is_elevated() -> bool {
+    let mut token: HANDLE = null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return own_integrity() >= HIGH_INTEGRITY;
+    }
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut len = 0u32;
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut len,
+        )
+    };
+    unsafe { CloseHandle(token) };
+    if ok != 0 { elevation.TokenIsElevated != 0 } else { own_integrity() >= HIGH_INTEGRITY }
+}
+
+/// When the process owning `hwnd` runs at a higher integrity level than we do (so Windows keeps
+/// our input out of the window): its executable name, possibly empty. `None` otherwise.
+pub(crate) fn elevated_owner(hwnd: HWND) -> Option<String> {
+    if hwnd.is_null() {
+        return None;
+    }
+    let (_, info) = window_process(hwnd)?;
+    info.elevated.then_some(info.name)
+}
+
+/// The process behind a window, with UWP frames resolved to the hosted app.
+fn window_process(hwnd: HWND) -> Option<(u32, ProcessInfo)> {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    if pid == 0 {
+        return None;
+    }
+    let mut info = process_info(pid).unwrap_or_default();
+    if info.name.eq_ignore_ascii_case(FRAME_HOST)
+        && let Some(app_pid) = hosted_app_pid(hwnd, pid)
+        && let Some(app) = process_info(app_pid)
+    {
+        pid = app_pid;
+        info = app;
+    }
+    Some((pid, info))
 }
 
 #[derive(Default)]
@@ -124,6 +176,8 @@ struct ProcessInfo {
     name: String,
     /// AppUserModelID of packaged (Store / MSIX) apps, empty otherwise.
     app_id: String,
+    /// Runs at a higher integrity level than this process (UIPI blocks our input into it).
+    elevated: bool,
 }
 
 fn process_info(pid: u32) -> Option<ProcessInfo> {
@@ -131,14 +185,63 @@ fn process_info(pid: u32) -> Option<ProcessInfo> {
     // few protected system processes only.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if handle.is_null() {
-        return None;
+        // A process we may not even look at is more privileged than we are.
+        let denied = unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+        return denied.then(|| ProcessInfo { elevated: true, ..ProcessInfo::default() });
     }
     let info = ProcessInfo {
         name: image_file_name(handle).unwrap_or_default(),
         app_id: app_user_model_id(handle).unwrap_or_default(),
+        elevated: match integrity_level(handle) {
+            Ok(level) => level > own_integrity(),
+            Err(error) => error == ERROR_ACCESS_DENIED,
+        },
     };
     unsafe { CloseHandle(handle) };
     Some(info)
+}
+
+/// The mandatory integrity level of a process (`0x2000` medium, `0x3000` high = administrator,
+/// `0x4000` system), or the Win32 error that prevented reading it.
+fn integrity_level(process: HANDLE) -> Result<u32, u32> {
+    let mut token: HANDLE = null_mut();
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+        return Err(unsafe { GetLastError() });
+    }
+    // TOKEN_MANDATORY_LABEL followed by the SID it points to; u64 for alignment.
+    let mut buffer = [0u64; 16];
+    let mut len = 0u32;
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            buffer.as_mut_ptr().cast(),
+            size_of_val(&buffer) as u32,
+            &mut len,
+        )
+    };
+    let error = unsafe { GetLastError() };
+    unsafe { CloseHandle(token) };
+    if ok == 0 {
+        return Err(error);
+    }
+    // SAFETY: on success the buffer starts with a TOKEN_MANDATORY_LABEL whose SID lies in it.
+    unsafe {
+        let label = &*(buffer.as_ptr() as *const TOKEN_MANDATORY_LABEL);
+        let sid = label.Label.Sid;
+        let count = *GetSidSubAuthorityCount(sid);
+        if count == 0 {
+            return Err(0);
+        }
+        Ok(*GetSidSubAuthority(sid, u32::from(count) - 1))
+    }
+}
+
+/// Our own integrity level, read once.
+fn own_integrity() -> u32 {
+    static LEVEL: OnceLock<u32> = OnceLock::new();
+    *LEVEL
+        .get_or_init(|| integrity_level(unsafe { GetCurrentProcess() }).unwrap_or(MEDIUM_INTEGRITY))
 }
 
 fn image_file_name(process: HANDLE) -> Option<String> {
