@@ -49,6 +49,7 @@ options:
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
   --track-foreground  poll the real foreground application (default: only `foreground` lines)
+  --panic-sink <N>  the event sink panics on its Nth event (tests that the engine survives)
   --quiet-status    do not print status events";
 
 fn say(line: std::fmt::Arguments<'_>) {
@@ -585,6 +586,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut text_chunk: Option<usize> = None;
     let mut settle_ms = 1000u64;
     let mut track_foreground = false;
+    let mut panic_sink: Option<u64> = None;
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
     let mut iter = args.iter();
@@ -595,6 +597,13 @@ pub fn run(args: &[String]) -> i32 {
             "--quiet-status" => print.quiet_status = true,
             "--repeats" => repeats = true,
             "--track-foreground" => track_foreground = true,
+            "--panic-sink" => match iter.next().and_then(|v| v.parse().ok()) {
+                Some(n) => panic_sink = Some(n),
+                None => {
+                    eprintln!("--panic-sink needs an event number");
+                    return 2;
+                }
+            },
             "--fail" | "--panic" => match iter.next().and_then(parse_key) {
                 Some(key) if arg == "--fail" => fail.push(key),
                 Some(key) => panic_key = Some(key),
@@ -707,11 +716,17 @@ pub fn run(args: &[String]) -> i32 {
     let engine = {
         let clock = clock.clone();
         let tally = tally.clone();
-        Engine::start(
-            config,
-            EngineOptions { injector: Box::new(injector), track_foreground },
-            move |event| print_event(&clock, print, &tally, &event),
-        )
+        Engine::start(config, EngineOptions { injector: Box::new(injector), track_foreground }, {
+            let seen = std::sync::atomic::AtomicU64::new(0);
+            move |event| {
+                let n = seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                if panic_sink == Some(n) {
+                    clock.print("SINK", format!("panicking on event {n} (--panic-sink)"));
+                    panic!("simulated sink panic");
+                }
+                print_event(&clock, print, &tally, &event)
+            }
+        })
     };
 
     let mut parsers: HashMap<String, Parser> = HashMap::new();
