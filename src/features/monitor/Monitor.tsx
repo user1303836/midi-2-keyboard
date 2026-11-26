@@ -551,7 +551,8 @@ export function LastEvent() {
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 text-fg-faint">{deviceLabel(midi.device, config)}</span>
       <span className="shrink-0 font-medium text-midi">
-        {view.label === "CC" ? "" : `${view.label} `}
+        {/* "Note On C4", but not "Program Program 1": the kind is only named where the subject does not. */}
+        {view.subject.toLowerCase().includes(view.label.toLowerCase()) ? "" : `${view.label} `}
         {view.subject}
       </span>
       <span className="shrink-0 font-mono text-fg-muted tabular-nums">{view.detail}</span>
