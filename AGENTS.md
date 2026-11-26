@@ -146,6 +146,12 @@ There is no test suite (see the ground rules). Verify by exercising the real thi
   output back while its own window has focus.
 - This injects real input into the owner's desktop: only ever into a window you opened, keep
   runs short, and make sure nothing is left held (`snapshot().engine.held_keys` must be empty).
+- The owner may be sitting at the machine. A run that takes the foreground or sends real input
+  steals their keystrokes (one of theirs once ended up as the key of a test mapping) and can put
+  yours into their window. Before every such run, read how long the desktop has been idle
+  (`GetLastInputInfo` from user32 against `GetTickCount` from kernel32, not
+  `Environment.TickCount`, which counts from somewhere else) and hold off while somebody is
+  typing; your own injected input resets that clock, so check before you start, not during.
 - Only one instance of the app runs per login session (the single-instance guard), **across
   agents too**: while somebody else's instance is up, your launch just hands over to theirs and
   exits, and your script never connects. Look first (`Get-CimInstance Win32_Process -Filter

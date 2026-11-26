@@ -17,6 +17,7 @@ import {
   Plus,
   Power,
   Search,
+  SlidersHorizontal,
   Timer,
   Trash2,
   X,
@@ -53,6 +54,7 @@ import { cn, plural } from "@/lib/utils";
 
 import { bulk, pickedMappings } from "./BulkPanel";
 import { NoteRunDialog } from "./NoteRunDialog";
+import { ZonesDialog } from "./ZonesDialog";
 import { BehaviorSummary, SourceIcon } from "./tokens";
 
 const FLASH: Keyframe[] = [
@@ -312,6 +314,7 @@ export function MappingList({ profile }: { profile: Profile }) {
   const config = useApp((state) => state.config);
   const octave = useOctave();
   const [runOpen, setRunOpen] = useState(false);
+  const [zonesOpen, setZonesOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   // One right-click menu for the whole list (not one per row): which row it is for, if any.
@@ -473,11 +476,18 @@ export function MappingList({ profile }: { profile: Profile }) {
                   <div className="text-sm text-fg-faint">A stretch of keys or pads to a row of computer keys</div>
                 </div>
               </MenuItem>
+              <MenuItem icon={<SlidersHorizontal size={14} />} className="h-auto py-1.5" onSelect={() => setZonesOpen(true)}>
+                <div>
+                  <div>Split a knob into zones…</div>
+                  <div className="text-sm text-fg-faint">A knob or fader as a selector switch: a key per position</div>
+                </div>
+              </MenuItem>
             </MenuContent>
           </Menu>
         </div>
       </div>
       <NoteRunDialog open={runOpen} onOpenChange={setRunOpen} />
+      <ZonesDialog open={zonesOpen} onOpenChange={setZonesOpen} />
 
       {profile.mappings.length === 0 ? (
         <EmptyState onAdd={quickAdd} />
@@ -540,6 +550,9 @@ export function MappingList({ profile }: { profile: Profile }) {
                 </ContextMenuItem>
                 <ContextMenuItem icon={<Piano size={14} />} onSelect={() => setRunOpen(true)}>
                   Map a run of notes…
+                </ContextMenuItem>
+                <ContextMenuItem icon={<SlidersHorizontal size={14} />} onSelect={() => setZonesOpen(true)}>
+                  Split a knob into zones…
                 </ContextMenuItem>
               </>
             )}

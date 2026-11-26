@@ -20,7 +20,7 @@ type Scale = "all" | "white" | "black";
 type Mode = "hold" | "tap";
 
 /** Captures keys one after another, in the order they are pressed (not as a combination). */
-function KeySequenceInput({ keys, onChange }: { keys: Key[]; onChange: (keys: Key[]) => void }) {
+export function KeySequenceInput({ keys, onChange }: { keys: Key[]; onChange: (keys: Key[]) => void }) {
   const [armed, setArmed] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
   const latest = useRef({ keys, onChange });
