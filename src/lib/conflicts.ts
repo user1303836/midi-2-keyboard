@@ -58,7 +58,9 @@ export function listensTo(source: Source, device: string, message: MidiMessage):
 /**
  * Why a message that no live mapping reacted to did nothing, when the configuration can tell:
  * its mapping is switched off, the value is outside what its mapping reacts to, or it is only
- * mapped in a profile that is not live right now. `null` = nothing listens to it anywhere.
+ * mapped in a profile that is not live right now. `null` = nothing listens to it anywhere;
+ * `""` = a live mapping does listen to this control (the message is simply older than the
+ * mapping, or not one it acts on), so there is nothing to explain.
  */
 export function silentReason(
   config: Config,
@@ -67,6 +69,7 @@ export function silentReason(
   message: MidiMessage,
 ): string | null {
   let outside = false;
+  let listening = false;
   let elsewhere: string | null = null;
   for (const profile of config.profiles) {
     const live = profile.always_on || profile.id === liveProfileId;
@@ -77,6 +80,7 @@ export function silentReason(
         continue;
       }
       if (!mapping.enabled) return "its mapping is switched off";
+      listening = true;
       const event = mapping.source.event;
       if (event.type === "note" && message.type === "note_on" && message.velocity > 0) {
         outside ||= !within(event.velocity, message.velocity);
@@ -86,6 +90,7 @@ export function silentReason(
     }
   }
   if (outside) return "outside the range its mapping reacts to";
+  if (listening) return "";
   return elsewhere ? `only mapped in “${elsewhere}”` : null;
 }
 

@@ -548,6 +548,8 @@ export function LastEvent() {
   if (!shown) return <span className="truncate text-fg-faint">No MIDI received yet</span>;
   const { midi, fired } = shown;
   const view = viewMessage(midi.message, octave);
+  // Why nothing happened ("" = a mapping for this control exists by now: nothing to explain).
+  const silent = silentReason(config, useApp.getState().engine.effective_profile, midi.device, midi.message);
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 text-fg-faint">{deviceLabel(midi.device, config)}</span>
@@ -570,12 +572,10 @@ export function LastEvent() {
           {fired.note && !fired.earlier && <span className="truncate text-fg-faint">({fired.note})</span>}
         </>
       )}
-      {!fired && midi.mappings.length === 0 && (
+      {!fired && midi.mappings.length === 0 && silent !== "" && (
         <>
           <ArrowRight size={12} className="shrink-0 text-fg-faint" />
-          <span className="truncate text-fg-faint">
-            {silentReason(config, useApp.getState().engine.effective_profile, midi.device, midi.message) ?? "no mapping"}
-          </span>
+          <span className="truncate text-fg-faint">{silent ?? "no mapping"}</span>
         </>
       )}
     </span>
