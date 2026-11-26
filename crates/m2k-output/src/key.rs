@@ -208,6 +208,57 @@ impl Key {
     pub fn code(self) -> String {
         format!("{self:?}")
     }
+
+    /// A short human label for logs and the CLI (`"A"`, `"1"`, `"Ctrl"`, `"Up"`, `"F13"`).
+    /// The UI has its own, platform-aware labels.
+    pub fn label(self) -> String {
+        let code = self.code();
+        if let Some(letter) = code.strip_prefix("Key")
+            && letter.len() == 1
+        {
+            return letter.to_string();
+        }
+        if let Some(digit) = code.strip_prefix("Digit") {
+            return digit.to_string();
+        }
+        if let Some(rest) = code.strip_prefix("Numpad") {
+            return format!("Num {rest}");
+        }
+        let label = match self {
+            Key::ControlLeft => "Ctrl",
+            Key::ControlRight => "Right Ctrl",
+            Key::ShiftLeft => "Shift",
+            Key::ShiftRight => "Right Shift",
+            Key::AltLeft => "Alt",
+            Key::AltRight => "Right Alt",
+            Key::MetaLeft => "Meta",
+            Key::MetaRight => "Right Meta",
+            Key::ArrowUp => "Up",
+            Key::ArrowDown => "Down",
+            Key::ArrowLeft => "Left",
+            Key::ArrowRight => "Right",
+            Key::Escape => "Esc",
+            Key::Backquote => "`",
+            Key::Minus => "-",
+            Key::Equal => "=",
+            Key::BracketLeft => "[",
+            Key::BracketRight => "]",
+            Key::Backslash => "\\",
+            Key::Semicolon => ";",
+            Key::Quote => "'",
+            Key::Comma => ",",
+            Key::Period => ".",
+            Key::Slash => "/",
+            Key::AudioVolumeUp => "Volume Up",
+            Key::AudioVolumeDown => "Volume Down",
+            Key::AudioVolumeMute => "Mute",
+            Key::MediaPlayPause => "Play/Pause",
+            Key::MediaTrackNext => "Next Track",
+            Key::MediaTrackPrevious => "Previous Track",
+            _ => return code,
+        };
+        label.to_string()
+    }
 }
 
 /// Mouse buttons.

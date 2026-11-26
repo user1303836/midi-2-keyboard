@@ -79,6 +79,13 @@ pub trait Injector: Send {
     /// Whether `key` can be sent by this backend.
     fn supports(&self, key: Key) -> bool;
 
+    /// `true` when the OS itself auto-repeats keys that are held down through this backend
+    /// (X11, uinput). When `false` (Windows, macOS) the engine emulates keyboard auto-repeat by
+    /// calling [`Injector::key_down`] again for the held key.
+    fn repeats_held_keys(&self) -> bool {
+        false
+    }
+
     /// Presses a key. Calling this for a key that is already down sends another key-down
     /// (an auto-repeat event where the platform distinguishes them).
     fn key_down(&mut self, key: Key) -> Result<()>;
