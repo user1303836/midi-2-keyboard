@@ -281,6 +281,11 @@ export function createMockBackend(): Backend {
     emit([{ type: "midi", time_us: now(), device, message, derived: [], mappings: matched }, ...fired]);
   };
 
+  // Lets scripts and the browser console play MIDI into the mock: __m2k.send("Dev", [0x90, 60, 100]).
+  (window as unknown as Record<string, unknown>).__m2k = {
+    send: (device: string, bytes: number[]) => handle(device, parse(bytes)),
+  };
+
   return {
     async snapshot(): Promise<Snapshot> {
       return {

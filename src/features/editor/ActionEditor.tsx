@@ -1,5 +1,22 @@
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  ArrowUp,
+  ChevronDown,
+  ExternalLink,
+  Keyboard,
+  Layers,
+  ListOrdered,
+  Mouse,
+  MousePointerClick,
+  Move,
+  Pause,
+  Plus,
+  Terminal,
+  Trash2,
+  Type,
+} from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { EngineOp } from "@/bindings/EngineOp";
@@ -9,10 +26,11 @@ import type { MouseButton } from "@/bindings/MouseButton";
 import type { SequenceStep } from "@/bindings/SequenceStep";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch, TextArea, TextInput } from "@/components/ui/inputs";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/overlays";
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tooltip } from "@/components/ui/overlays";
 import { MOUSE_BUTTONS } from "@/lib/keys";
 import {
   ACTION_TYPES,
+  actionTypeInfo,
   defaultAction,
   defaultStep,
   knownLayers,
@@ -25,12 +43,57 @@ import { cn, move } from "@/lib/utils";
 
 import { KeyComboInput } from "./KeyComboInput";
 
-const ACTION_OPTIONS = ACTION_TYPES.map((info) => ({
-  value: info.type,
-  label: info.label,
-  hint: info.hint,
-  group: info.group,
-}));
+const ACTION_ICONS: Record<ActionType, ReactNode> = {
+  keys: <Keyboard size={15} />,
+  text: <Type size={15} />,
+  sequence: <ListOrdered size={15} />,
+  mouse_click: <MousePointerClick size={15} />,
+  mouse_scroll: <Mouse size={15} />,
+  mouse_move: <Move size={15} />,
+  switch_profile: <ArrowLeftRight size={15} />,
+  layer: <Layers size={15} />,
+  engine: <Pause size={15} />,
+  run: <Terminal size={15} />,
+  open: <ExternalLink size={15} />,
+};
+
+const TARGET_ICONS: Record<HoldTarget["type"], ReactNode> = {
+  keys: <Keyboard size={15} />,
+  mouse_button: <MousePointerClick size={15} />,
+  layer: <Layers size={15} />,
+};
+
+/** The compact "what kind of thing is this" button at the end of an action row. */
+function TypeMenu({
+  label,
+  icon,
+  tall,
+  children,
+}: {
+  label: string;
+  icon: ReactNode;
+  tall: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Menu>
+      <Tooltip content={label}>
+        <MenuTrigger
+          aria-label={label}
+          className={cn(
+            "inline-flex w-[44px] shrink-0 items-center justify-center gap-0.5 rounded-md border border-line-strong bg-app text-fg-muted transition-colors",
+            "hover:border-fg-faint hover:text-fg data-[state=open]:border-accent data-[state=open]:text-fg",
+            tall ? "h-[34px]" : "h-[28px]",
+          )}
+        >
+          {icon}
+          <ChevronDown size={11} className="text-fg-faint" />
+        </MenuTrigger>
+      </Tooltip>
+      <MenuContent className="w-[270px]">{children}</MenuContent>
+    </Menu>
+  );
+}
 
 const ENGINE_OPTIONS: { value: EngineOp; label: string; hint: string }[] = [
   { value: "toggle_pause", label: "Pause / resume", hint: "Flip between sending and not sending" },
@@ -328,13 +391,30 @@ export function ActionEditor({
             <SequenceEditor steps={action.steps} onChange={(steps, key) => onChange({ ...action, steps }, key)} />
           )}
         </div>
-        <Select
-          aria-label="Action type"
-          className={cn("shrink-0", action.type === "keys" ? "h-[34px] w-[128px]" : "w-[128px]")}
-          value={action.type}
-          options={ACTION_OPTIONS}
-          onChange={(type: ActionType) => onChange(defaultAction(type, viewProfileId ?? ""))}
-        />
+        <TypeMenu
+          label={`Action: ${actionTypeInfo(action.type).label}. Click to send something else`}
+          tall={action.type === "keys"}
+          icon={ACTION_ICONS[action.type]}
+        >
+          {(["Keyboard", "Mouse", "App", "System"] as const).map((group) => (
+            <div key={group}>
+              <MenuLabel>{group}</MenuLabel>
+              {ACTION_TYPES.filter((info) => info.group === group).map((info) => (
+                <MenuItem
+                  key={info.type}
+                  icon={ACTION_ICONS[info.type]}
+                  className="h-auto py-1"
+                  onSelect={() => info.type !== action.type && onChange(defaultAction(info.type, viewProfileId ?? ""))}
+                >
+                  <div>
+                    <div className={cn(info.type === action.type && "font-semibold text-accent")}>{info.label}</div>
+                    <div className="text-sm text-fg-faint">{info.hint}</div>
+                  </div>
+                </MenuItem>
+              ))}
+            </div>
+          ))}
+        </TypeMenu>
       </div>
 
       {action.type === "keys" && action.keys.length > 0 && (
@@ -397,25 +477,40 @@ export function TargetEditor({
           <LayerInput value={target.layer} onChange={(layer) => onChange({ ...target, layer }, "layer")} />
         )}
       </div>
-      <Select
-        aria-label="What to hold"
-        className={cn("w-[128px] shrink-0", target.type === "keys" && "h-[34px]")}
-        value={target.type}
-        options={[
-          { value: "keys", label: "Keys", hint: "Hold keys down" },
-          { value: "mouse_button", label: "Mouse button", hint: "Hold a mouse button (drag)" },
-          { value: "layer", label: "Layer", hint: "A shift layer for other mappings" },
-        ]}
-        onChange={(type) =>
-          onChange(
-            type === "keys"
-              ? { type, keys: [] }
-              : type === "mouse_button"
-                ? { type, button: "left" }
-                : { type, layer: "shift" },
-          )
-        }
-      />
+      <TypeMenu
+        label="What to hold. Click to hold something else"
+        tall={target.type === "keys"}
+        icon={TARGET_ICONS[target.type]}
+      >
+        {(
+          [
+            ["keys", "Keys", "Hold keys down"],
+            ["mouse_button", "Mouse button", "Hold a mouse button (for dragging)"],
+            ["layer", "Layer", "A shift layer other mappings can depend on"],
+          ] as const
+        ).map(([type, label, hint]) => (
+          <MenuItem
+            key={type}
+            icon={TARGET_ICONS[type]}
+            className="h-auto py-1"
+            onSelect={() =>
+              type !== target.type &&
+              onChange(
+                type === "keys"
+                  ? { type, keys: [] }
+                  : type === "mouse_button"
+                    ? { type, button: "left" }
+                    : { type, layer: "shift" },
+              )
+            }
+          >
+            <div>
+              <div className={cn(type === target.type && "font-semibold text-accent")}>{label}</div>
+              <div className="text-sm text-fg-faint">{hint}</div>
+            </div>
+          </MenuItem>
+        ))}
+      </TypeMenu>
     </div>
   );
 }

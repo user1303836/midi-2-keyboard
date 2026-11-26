@@ -7,7 +7,7 @@ import type { Mapping } from "@/bindings/Mapping";
 import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
 import { Switch } from "@/components/ui/inputs";
-import { Badge, Collapsible, Kbd } from "@/components/ui/misc";
+import { Badge, Collapsible } from "@/components/ui/misc";
 import {
   Menu,
   MenuContent,
@@ -325,6 +325,8 @@ function Wizard({
 }) {
   const [stage, setStage] = useState<"learn" | "action">("learn");
   const [learned, setLearned] = useState<LearnResult | null>(null);
+  // Which action slot is listening for keys: the first one, then the next empty one.
+  const [armedSlot, setArmedSlot] = useState<number | null>(0);
   const multipleDevices = useApp((state) => state.ports.filter((p) => p.state === "connected").length > 1);
   const noDevices = useApp((state) => state.ports.filter((p) => p.state === "connected").length === 0);
   const config = useApp((state) => state.config);
@@ -333,6 +335,7 @@ function Wizard({
   const learn = useLearn(stage === "learn", { pinDevice: multipleDevices }, (result) => {
     setLearned(result);
     onSource(result);
+    setArmedSlot(0);
     setStage("action");
   });
 
@@ -371,8 +374,8 @@ function Wizard({
                 </>
               ) : (
                 <div className="flex items-center gap-2">
-                  <SourceIcon event={mapping.source.event} className="text-midi" />
-                  <span className="text-lg font-semibold">{sourceTitle(mapping.source.event, octave)}</span>
+                  <SourceIcon event={mapping.source.event} className="shrink-0 text-midi" />
+                  <span className="shrink-0 text-lg font-semibold whitespace-nowrap">{sourceTitle(mapping.source.event, octave)}</span>
                   <span className="truncate text-fg-muted">
                     {[learned?.what, ...sourceQualifiers(mapping.source, config)].filter(Boolean).join(" · ")}
                   </span>
@@ -420,8 +423,13 @@ function Wizard({
               key={mapping.behavior.type}
               behavior={mapping.behavior}
               shape={shape}
-              autoCapture
-              onChange={onBehavior}
+              armedSlot={armedSlot}
+              onCaptured={(slot) => setArmedSlot(slot + 1)}
+              onChange={(behavior, key) => {
+                // Choosing another behavior starts over with its first slot.
+                if (behavior.type !== mapping.behavior.type) setArmedSlot(0);
+                onBehavior(behavior, key);
+              }}
             />
           )}
         </div>
@@ -437,9 +445,7 @@ function Wizard({
               </button>
             </>
           ) : (
-            <>
-              Rate limits, conditions and more are under <Kbd>All options</Kbd>
-            </>
+            "Rate limits, conditions, macros and more are one click away."
           )}
         </span>
         <Button onClick={onDone}>All options</Button>

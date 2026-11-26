@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
+import type { HoldTarget } from "@/bindings/HoldTarget";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented } from "@/components/ui/inputs";
 import { Tooltip } from "@/components/ui/overlays";
@@ -24,6 +25,7 @@ import {
   behaviorTypeInfo,
   defaultBehavior,
   emptyKeys,
+  isEmptyAction,
   type BehaviorType,
   type SourceShape,
 } from "@/lib/model";
@@ -140,20 +142,30 @@ export function BehaviorEditor({
   behavior,
   shape,
   onChange,
-  autoCapture = false,
+  armedSlot = null,
   onCaptured,
 }: {
   behavior: Behavior;
   shape: SourceShape;
   onChange: (behavior: Behavior, coalesceKey?: string) => void;
-  /** Arm the first key field immediately (quick-add flow). */
-  autoCapture?: boolean;
-  onCaptured?: () => void;
+  /** Which action slot (0 = first) should start capturing keys right away (quick-add flow). */
+  armedSlot?: number | null;
+  /** A slot finished capturing a shortcut. */
+  onCaptured?: (slot: number) => void;
 }) {
   const settings = useApp((state) => state.config.settings);
   const b = behavior;
   const info = behaviorTypeInfo(b.type);
   const pulse = shape === "pulse";
+  // Only empty slots are armed, so walking through the quick-add never overwrites a shortcut.
+  const arm = (slot: number, action: Action | null) => ({
+    autoCapture: armedSlot === slot && isEmptyAction(action),
+    onCaptured: () => onCaptured?.(slot),
+  });
+  const armTarget = (slot: number, target: HoldTarget) => ({
+    autoCapture: armedSlot === slot && target.type === "keys" && target.keys.length === 0,
+    onCaptured: () => onCaptured?.(slot),
+  });
 
   return (
     <div className="flex flex-col gap-3">
@@ -166,8 +178,7 @@ export function BehaviorEditor({
             <Slot label={b.on_release ? "Press" : "Send"} onRemove={b.on_release ? () => onChange({ ...b, on_press: null }) : undefined}>
               <ActionEditor
                 action={b.on_press}
-                autoCapture={autoCapture}
-                onCaptured={onCaptured}
+                {...arm(0, b.on_press)}
                 onChange={(on_press, key) => onChange({ ...b, on_press }, key && `press:${key}`)}
               />
             </Slot>
@@ -210,8 +221,7 @@ export function BehaviorEditor({
           <Slot label="Hold">
             <TargetEditor
               target={b.target}
-              autoCapture={autoCapture}
-              onCaptured={onCaptured}
+              {...armTarget(0, b.target)}
               onChange={(target, key) => onChange({ ...b, target }, key && `target:${key}`)}
             />
           </Slot>
@@ -235,8 +245,7 @@ export function BehaviorEditor({
         <Slot label="Latch">
           <TargetEditor
             target={b.target}
-            autoCapture={autoCapture}
-            onCaptured={onCaptured}
+            {...armTarget(0, b.target)}
             onChange={(target, key) => onChange({ ...b, target }, key && `target:${key}`)}
           />
         </Slot>
@@ -246,8 +255,7 @@ export function BehaviorEditor({
         <Slot label="Send">
           <ActionEditor
             action={b.action}
-            autoCapture={autoCapture}
-            onCaptured={onCaptured}
+            {...arm(0, b.action)}
             onChange={(action, key) => onChange({ ...b, action }, key && `action:${key}`)}
           />
         </Slot>
@@ -258,13 +266,13 @@ export function BehaviorEditor({
           <StepSlot
             label={<><ArrowUp size={14} /> Up</>}
             action={b.up}
-            autoCapture={autoCapture}
-            onCaptured={onCaptured}
+            {...arm(0, b.up)}
             onChange={(up, key) => onChange({ ...b, up }, key && `up:${key}`)}
           />
           <StepSlot
             label={<><ArrowDown size={14} /> Down</>}
             action={b.down}
+            {...arm(1, b.down)}
             onChange={(down, key) => onChange({ ...b, down }, key && `down:${key}`)}
           />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-fg-muted">
@@ -275,10 +283,13 @@ export function BehaviorEditor({
             </span>
             <InlineSwitch label="Reverse direction" checked={b.invert} onChange={(invert) => onChange({ ...b, invert })} />
           </div>
-          <div className="flex items-center gap-2 text-sm text-fg-faint">
-            At most
+          <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+            <span className="whitespace-nowrap">Fire at most</span>
             <NumberInput aria-label="Maximum actions per message" className="w-[60px]" min={0} max={1000} value={b.max_burst} onChange={(max_burst) => onChange({ ...b, max_burst }, "burst")} />
-            actions from a single message (0 = no limit). Protects against sudden jumps.
+            <span className="whitespace-nowrap">times per message</span>
+            <span className="text-fg-faint" title="A fast spin or a jump of the control can ask for dozens of steps at once. This caps it. 0 = no limit.">
+              (tames sudden jumps)
+            </span>
           </div>
         </div>
       )}
@@ -289,8 +300,7 @@ export function BehaviorEditor({
             <Slot label="Tap" onRemove={() => onChange({ ...b, tap: null })}>
               <ActionEditor
                 action={b.tap}
-                autoCapture={autoCapture}
-                onCaptured={onCaptured}
+                {...arm(0, b.tap)}
                 onChange={(tap, key) => onChange({ ...b, tap }, key && `tap:${key}`)}
               />
             </Slot>
@@ -319,9 +329,9 @@ export function BehaviorEditor({
                 }
               />
               {b.hold_target ? (
-                <TargetEditor target={b.hold_target} onChange={(hold_target, key) => onChange({ ...b, hold_target }, key && `ht:${key}`)} />
+                <TargetEditor target={b.hold_target} {...armTarget(1, b.hold_target)} onChange={(hold_target, key) => onChange({ ...b, hold_target }, key && `ht:${key}`)} />
               ) : (
-                <ActionEditor action={b.hold ?? emptyKeys()} onChange={(hold, key) => onChange({ ...b, hold }, key && `hold:${key}`)} />
+                <ActionEditor action={b.hold ?? emptyKeys()} {...arm(1, b.hold)} onChange={(hold, key) => onChange({ ...b, hold }, key && `hold:${key}`)} />
               )}
             </div>
           </Slot>
@@ -346,8 +356,7 @@ export function BehaviorEditor({
               <Slot key={field} label={label} onRemove={() => onChange({ ...b, [field]: null })}>
                 <ActionEditor
                   action={action}
-                  autoCapture={autoCapture && index === 0}
-                  onCaptured={onCaptured}
+                  {...arm(index, action)}
                   onChange={(next, key) => onChange({ ...b, [field]: next }, key && `${field}:${key}`)}
                 />
               </Slot>
@@ -375,8 +384,7 @@ export function BehaviorEditor({
             >
               <ActionEditor
                 action={action}
-                autoCapture={autoCapture && index === 0}
-                onCaptured={onCaptured}
+                {...arm(index, action)}
                 onChange={(next, key) =>
                   onChange({ ...b, actions: b.actions.map((a, i) => (i === index ? next : a)) }, key && `c${index}:${key}`)
                 }

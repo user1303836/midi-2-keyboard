@@ -43,6 +43,11 @@ export function KeyComboInput({
   const latest = useRef({ onChange, onCaptured });
   latest.current = { onChange, onCaptured };
 
+  // The quick-add flow arms fields one after another.
+  useEffect(() => {
+    if (autoCapture) setCapturing(true);
+  }, [autoCapture]);
+
   const finish = useCallback((combo: Key[]) => {
     setCapturing(false);
     setLive([]);
@@ -126,7 +131,7 @@ export function KeyComboInput({
           }
         }}
         className={cn(
-          "flex min-h-[34px] min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 rounded-md border bg-app px-2 py-[4px] transition-colors",
+          "group/combo flex min-h-[34px] min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 rounded-md border bg-app px-2 py-[4px] transition-colors",
           capturing
             ? "animate-listen border-key ring-2 ring-key-soft [--ring-color:var(--key-line)]"
             : "border-line-strong hover:border-fg-faint",
@@ -144,6 +149,20 @@ export function KeyComboInput({
         )}
         {capturing && unknown && (
           <span className="ml-1 text-sm text-warn">That key can’t be captured — add it from the list →</span>
+        )}
+        {!capturing && keys.length > 0 && !single && (
+          <button
+            type="button"
+            aria-label="Clear shortcut"
+            title="Clear (Backspace)"
+            onClick={(event) => {
+              event.stopPropagation();
+              onChange([]);
+            }}
+            className="ml-auto inline-flex size-[18px] shrink-0 items-center justify-center rounded text-fg-faint opacity-0 transition-opacity group-hover/combo:opacity-100 hover:bg-hover hover:text-fg focus-visible:opacity-100"
+          >
+            <X size={12} />
+          </button>
         )}
       </div>
 
@@ -171,19 +190,6 @@ export function KeyComboInput({
           />
         </PopoverContent>
       </Popover>
-
-      {keys.length > 0 && !single && (
-        <Tooltip content="Clear">
-          <button
-            type="button"
-            aria-label="Clear shortcut"
-            onClick={() => onChange([])}
-            className="inline-flex w-[26px] shrink-0 items-center justify-center rounded-md text-fg-faint hover:bg-hover hover:text-fg"
-          >
-            <X size={14} />
-          </button>
-        </Tooltip>
-      )}
     </div>
   );
 }
