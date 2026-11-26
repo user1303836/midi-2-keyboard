@@ -305,6 +305,7 @@ export const useApp = create<State>((set, get) => {
           future: [],
           viewProfileId: viewed,
           selectedMappingId: selected,
+          multi: [],
           wizardMappingId: null,
           draft: null,
         });
@@ -618,6 +619,8 @@ export const useApp = create<State>((set, get) => {
         }),
       }));
       if (get().selectedMappingId === id) set({ selectedMappingId: null });
+      // A selection of several is about the profile in view; it does not follow a mapping out.
+      if (get().multi.includes(id)) set({ multi: [] });
     },
 
     copyMappingToProfile(id, profileId) {
