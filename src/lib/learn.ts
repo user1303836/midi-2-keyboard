@@ -52,6 +52,8 @@ interface ParamCandidate {
 export interface LearnOptions {
   /** Pin the learned source to the device it came from (worth doing when several are connected). */
   pinDevice: boolean;
+  /** Learn a chord: collect every note held together until the first one is let go. */
+  chord?: boolean;
 }
 
 export class Learner {
@@ -59,6 +61,8 @@ export class Learner {
   private param: ParamCandidate | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private finished = false;
+  /** Chord mode: the notes struck so far, and where they came from. */
+  private chord: { device: string; channel: number; notes: Set<number> } | null = null;
 
   constructor(
     private readonly options: LearnOptions,
@@ -86,8 +90,49 @@ export class Learner {
     this.timer = setTimeout(run, delay);
   }
 
+  /** Chord mode: every note held together counts; letting go of one finishes the chord. */
+  private feedChord(log: MidiLog): void {
+    const message = log.message;
+    const isOn = message.type === "note_on" && message.velocity > 0;
+    const isOff = message.type === "note_off" || (message.type === "note_on" && message.velocity === 0);
+    if (isOn && message.type === "note_on") {
+      if (!this.chord) this.chord = { device: log.device, channel: message.channel, notes: new Set() };
+      if (this.chord.device !== log.device || this.chord.channel !== message.channel) return;
+      this.chord.notes.add(message.note);
+      this.emit({
+        phase: "detecting",
+        preview: this.chordResult(),
+        hint:
+          this.chord.notes.size === 1
+            ? "Keep holding it and add the other notes of the chord…"
+            : "Add more notes, or let go to finish.",
+      });
+    } else if (isOff && this.chord && this.chord.notes.size > 0) {
+      this.done(this.chordResult());
+    }
+  }
+
+  private chordResult(): LearnResult {
+    const chord = this.chord!;
+    const notes = [...chord.notes].sort((a, b) => a - b);
+    const base = { device: this.device(chord.device), channel: chord.channel, hysteresis: 0 };
+    if (notes.length === 1) {
+      return {
+        source: { ...base, event: { type: "note", notes: { min: notes[0], max: notes[0] }, velocity: { min: 1, max: 127 } } },
+        shape: "button",
+        what: "a single key",
+      };
+    }
+    return {
+      source: { ...base, event: { type: "chord", notes, window_ms: 0 } },
+      shape: "button",
+      what: `a chord of ${notes.length} notes`,
+    };
+  }
+
   feed(log: MidiLog): void {
     if (this.finished) return;
+    if (this.options.chord) return this.feedChord(log);
     const message = log.message;
     const pulse = (source: Source, what: string) => this.done({ source, shape: sourceShape(source.event), what });
 
@@ -334,12 +379,13 @@ export function useLearn(active: boolean, options: LearnOptions, onDone: (result
   const callback = useRef(onDone);
   callback.current = onDone;
   const pinDevice = options.pinDevice;
+  const chord = options.chord ?? false;
 
   useEffect(() => {
     if (!active) return;
     setState({ phase: "listening" });
     void api().then((backend) => backend.setLearning(true));
-    const learner = new Learner({ pinDevice }, (next) => {
+    const learner = new Learner({ pinDevice, chord }, (next) => {
       setState(next);
       if (next.phase === "done") callback.current(next.result);
     });
@@ -349,7 +395,7 @@ export function useLearn(active: boolean, options: LearnOptions, onDone: (result
       learner.dispose();
       void api().then((backend) => backend.setLearning(false));
     };
-  }, [active, pinDevice]);
+  }, [active, pinDevice, chord]);
 
   return state;
 }

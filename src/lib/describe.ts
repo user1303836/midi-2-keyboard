@@ -123,6 +123,8 @@ export function sourceQualifiers(source: Source, config: Config | null): string[
       }
     }
   }
+  if (event.type === "chord" && event.window_ms > 0) parts.push(`within ${event.window_ms} ms`);
+  if (source.hysteresis > 0 && !isFullRange(event)) parts.push(`slack ${source.hysteresis}`);
   if (source.device) parts.push(deviceLabel(source.device, config));
   return parts;
 }

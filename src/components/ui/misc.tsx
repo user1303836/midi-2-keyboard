@@ -29,7 +29,7 @@ export function Field({
   label,
   hint,
   children,
-  align = "center",
+  align: alignProp,
   className,
 }: {
   label: ReactNode;
@@ -38,6 +38,8 @@ export function Field({
   align?: "center" | "start";
   className?: string;
 }) {
+  // With a hint underneath, the label belongs next to the control, not the middle of the block.
+  const align = alignProp ?? (hint ? "start" : "center");
   return (
     <div className={cn("flex gap-3", align === "center" ? "items-center" : "items-start", className)}>
       <div className={cn("w-[104px] shrink-0 text-fg-muted", align === "start" && "pt-[5px]")}>{label}</div>

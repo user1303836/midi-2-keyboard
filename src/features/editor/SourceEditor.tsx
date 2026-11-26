@@ -1,4 +1,4 @@
-import { CircleDot, Radio, Square } from "lucide-react";
+import { CircleDot, Radio, Square, X } from "lucide-react";
 import { useState } from "react";
 
 import type { Source } from "@/bindings/Source";
@@ -11,10 +11,11 @@ import { Collapsible, Field } from "@/components/ui/misc";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/overlays";
 import { sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
 import { useLearn, type LearnResult } from "@/lib/learn";
-import { ccName, normalizeSysExPattern, SYSEX_PRESETS } from "@/lib/midi";
+import { ccName, normalizeSysExPattern, noteName, SYSEX_PRESETS } from "@/lib/midi";
 import {
   defaultSourceEvent,
   FULL7,
+  isFullRange,
   rangeLimit,
   SOURCE_TYPES,
   sourceShape,
@@ -25,7 +26,7 @@ import {
 import { useApp, useOctave } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-import { ChannelSelect, DeviceSelect, NoteInput, RangeEditor, useLiveValue } from "./fields";
+import { ChannelSelect, DeviceSelect, NoteInput, parseNote, RangeEditor, useLiveValue } from "./fields";
 import { SourceIcon } from "../mappings/tokens";
 
 const TYPE_OPTIONS = SOURCE_TYPES.map((info) => ({ value: info.type, label: info.label, hint: info.hint }));
@@ -63,7 +64,7 @@ export function SourceEditor({
   const octave = useOctave();
   const live = useLiveValue(source);
 
-  const learn = useLearn(learning, { pinDevice: multipleDevices }, (result) => {
+  const learn = useLearn(learning, { pinDevice: multipleDevices, chord: source.event.type === "chord" }, (result) => {
     setLearning(false);
     onLearned(result);
   });
@@ -93,7 +94,11 @@ export function SourceEditor({
               {learn.phase === "listening" && (
                 <>
                   <div className="font-medium text-fg">Listening…</div>
-                  <div className="text-sm text-fg-muted">Press a key or pad, turn a knob, move a fader.</div>
+                  <div className="text-sm text-fg-muted">
+                    {event.type === "chord"
+                      ? "Hold all the notes of the chord together, then let go."
+                      : "Press a key or pad, turn a knob, move a fader."}
+                  </div>
                 </>
               )}
               {learn.phase === "detecting" && (
@@ -208,6 +213,38 @@ export function SourceEditor({
             >
               {event.notes.min === event.notes.max ? "use a range" : "single note"}
             </button>
+          </div>
+        </Field>
+      )}
+
+      {event.type === "chord" && (
+        <Field
+          label="Notes"
+          align="start"
+          hint="Fires when all of these are held together. Press Learn and play the chord, or add notes one by one."
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            {event.notes.map((note) => (
+              <span
+                key={note}
+                className="inline-flex h-[26px] items-center gap-0.5 rounded-md border border-midi-line bg-midi-soft pr-0.5 pl-2 font-medium text-midi"
+              >
+                {noteName(note, octave)}
+                <button
+                  type="button"
+                  aria-label={`Remove ${noteName(note, octave)}`}
+                  onClick={() => setEvent({ ...event, notes: event.notes.filter((n) => n !== note) })}
+                  className="inline-flex size-[20px] items-center justify-center rounded text-midi/70 hover:bg-midi/20 hover:text-midi"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            <AddNote
+              onAdd={(note) =>
+                setEvent({ ...event, notes: Array.from(new Set([...event.notes, note])).sort((a, b) => a - b) })
+              }
+            />
           </div>
         </Field>
       )}
@@ -408,6 +445,8 @@ export function SourceEditor({
         title="More"
         summary={[
           event.type === "note" && (event.velocity.min > 1 || event.velocity.max < 127) && "velocity range",
+          event.type === "chord" && event.window_ms > 0 && `within ${event.window_ms} ms`,
+          source.hysteresis > 0 && `slack ${source.hysteresis}`,
           source.device && "one device",
         ]
           .filter(Boolean)
@@ -445,12 +484,77 @@ export function SourceEditor({
               />
             </Field>
           )}
+          {event.type === "chord" && (
+            <Field
+              label="Struck within"
+              hint="0 = no limit: holding some notes and adding the rest later counts. Set a short time (try 60 ms) so only notes hit together count."
+            >
+              <NumberInput
+                aria-label="Chord window"
+                suffix="ms"
+                className="w-[92px]"
+                min={0}
+                max={10000}
+                value={event.window_ms}
+                onChange={(window_ms) => setEvent({ ...event, window_ms }, "window")}
+              />
+            </Field>
+          )}
+          {limit !== null && "range" in event && !isFullRange(event) && sourceShape(event) === "button" && (
+            <Field
+              label="Slack"
+              hint="How far past the edge of the range the value must go before it counts as released. Stops a jittery pedal or fader from flickering on and off."
+            >
+              <NumberInput
+                aria-label="Hysteresis"
+                className="w-[76px]"
+                min={0}
+                max={Math.floor(limit / 2)}
+                value={source.hysteresis}
+                onChange={(hysteresis) => onChange({ ...source, hysteresis }, "hysteresis")}
+              />
+            </Field>
+          )}
           <Field label="Device" hint="Limit this mapping to one controller.">
             <DeviceSelect value={source.device} onChange={(device) => onChange({ ...source, device })} />
           </Field>
         </div>
       </Collapsible>
     </div>
+  );
+}
+
+/** A small "type a note and press Enter" field for building chords by hand. */
+function AddNote({ onAdd }: { onAdd: (note: number) => void }) {
+  const octave = useOctave();
+  const [text, setText] = useState("");
+  const [bad, setBad] = useState(false);
+  const commit = () => {
+    if (!text.trim()) return;
+    const note = parseNote(text, octave);
+    if (note === null) {
+      setBad(true);
+      return;
+    }
+    onAdd(note);
+    setText("");
+  };
+  return (
+    <input
+      aria-label="Add a note"
+      placeholder="+ note"
+      value={text}
+      onChange={(event) => {
+        setText(event.target.value);
+        setBad(false);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => event.key === "Enter" && commit()}
+      className={cn(
+        "h-[26px] w-[72px] rounded-md border bg-app px-2 outline-hidden placeholder:text-fg-faint focus:border-accent",
+        bad ? "border-danger" : "border-line-strong hover:border-fg-faint",
+      )}
+    />
   );
 }
 

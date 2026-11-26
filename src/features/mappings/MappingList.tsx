@@ -119,9 +119,9 @@ const MappingRow = memo(function MappingRow({
 
       {/* When */}
       <div className={cn("flex w-[150px] shrink-0 items-center gap-2 @min-[700px]:w-[236px]", !mapping.enabled && "opacity-45")}>
-        <span className="flex h-[26px] shrink-0 items-center gap-1.5 rounded-md border border-midi-line bg-midi-soft px-2 font-semibold text-midi">
-          <SourceIcon event={event} size={14} />
-          <span className="whitespace-nowrap">{sourceTitle(event, octave)}</span>
+        <span className="flex h-[26px] max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-midi-line bg-midi-soft px-2 font-semibold text-midi">
+          <SourceIcon event={event} size={14} className="shrink-0" />
+          <span className="truncate">{sourceTitle(event, octave)}</span>
         </span>
         <span className="min-w-0 truncate text-sm text-fg-muted">
           {[nickname, ...qualifiers].filter(Boolean).join(" · ")}
