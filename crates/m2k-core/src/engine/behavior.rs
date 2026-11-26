@@ -177,6 +177,21 @@ impl MappingRt {
                 self.instances.swap_remove(pos);
                 Some(Edge::Release)
             }
+            Obs::Level { inside, band } => match self.instances.iter().position(|i| i.key == key) {
+                Some(pos) if band => {
+                    self.instances[pos].ctx = ctx;
+                    Some(Edge::Update)
+                }
+                Some(pos) => {
+                    self.instances.swap_remove(pos);
+                    Some(Edge::Release)
+                }
+                None if inside => {
+                    self.instances.push(Inst { key, ctx });
+                    Some(Edge::Press)
+                }
+                None => None,
+            },
             Obs::Pulse => Some(Edge::Pulse),
             Obs::Ticks(n) => Some(Edge::Ticks(n)),
         }

@@ -6,6 +6,8 @@
 //! before the command arrived; handle the command; fire what is due now; deliver events. Each
 //! iteration runs inside `catch_unwind`: a panic releases everything, resets the volatile state,
 //! reports an error and the engine keeps running.
+//!
+//! The MIDI side (message -> observations -> behaviors, device bookkeeping) is in `dispatch`.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -14,26 +16,25 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
-use m2k_midi::{Derived, MidiMessage, ParameterChange, ParameterKind};
+use m2k_midi::MidiMessage;
 use m2k_output::Injector;
 use m2k_output::platform::ForegroundApp;
 
 use super::EngineOptions;
 use super::behavior::{self, MappingRt};
-use super::compile::{self, CAction, CSourceKind, CompiledConfig, SourceIndex, system_index};
+use super::compile::{self, CAction, CompiledConfig, SourceIndex};
 use super::cx::{Ctx, Cx, Gate, OwnerInfo, Request, TimerKind};
 use super::executor::Executor;
 use super::foreground::Tracker;
 use super::launch::Launcher;
 use super::output::Output;
 use super::pattern::Foreground;
-use super::source::{DeviceId, InstKey, Obs, SENSING_TIMEOUT, relative_ticks};
 use super::sys::TimerResolution;
 use super::timers::TimerId;
-use crate::events::{EngineEvent, EngineStatus, MidiLog, Outcome};
-use crate::model::{
-    Action, Config, EngineOp, ProfileTarget, SystemMessage, ValueEncoding, ValueRange,
-};
+use crate::events::{EngineEvent, EngineStatus, Outcome};
+use crate::model::{Action, Config, EngineOp, ProfileTarget};
+
+mod dispatch;
 
 /// A command with the time it was posted (MIDI timing is measured from arrival, not from when
 /// the engine got to it).
@@ -75,6 +76,9 @@ pub struct Shared {
 /// delivered).
 const STATUS_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How often releases the backend refused are retried (see `Output`'s stuck keys).
+const STUCK_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+
 #[derive(Default)]
 struct Profiles {
     /// The profile the user selected (resolved).
@@ -112,6 +116,8 @@ pub struct Worker {
     profiles: Profiles,
     status: StatusState,
     tests: HashMap<u64, CAction>,
+    /// Pending retry of stuck keys / buttons.
+    retry_timer: Option<TimerId>,
     next_test: u64,
     test_info: OwnerInfo,
     cx: Cx,
@@ -177,6 +183,7 @@ impl Worker {
             profiles: Profiles::default(),
             status: StatusState::default(),
             tests: HashMap::new(),
+            retry_timer: None,
             next_test: 0,
             test_info: OwnerInfo::test(),
             cx,
@@ -273,51 +280,13 @@ impl Worker {
                 }
             }
             TimerKind::Sensing(dev) => self.on_sensing_timer(dev, id),
+            TimerKind::RetryStuck => {
+                if self.retry_timer == Some(id) {
+                    self.retry_timer = None;
+                    self.cx.out.retry_stuck();
+                }
+            }
         }
-    }
-
-    /// Active Sensing watchdog: a device that sends it and then goes silent has lost its
-    /// connection (MIDI spec: receivers turn their notes off). Release what it was holding.
-    fn on_sensing_timer(&mut self, dev: DeviceId, id: TimerId) {
-        let state = self.cx.devices.get_mut(dev);
-        if state.sensing_timer != Some(id) {
-            return;
-        }
-        state.sensing_timer = None;
-        if !state.sensing {
-            return;
-        }
-        let deadline = state.last_heard.map(|at| at + SENSING_TIMEOUT);
-        if let Some(deadline) = deadline
-            && deadline > self.cx.now
-        {
-            let timer = self.cx.timers.schedule(deadline, TimerKind::Sensing(dev));
-            self.cx.devices.get_mut(dev).sensing_timer = Some(timer);
-            return;
-        }
-        let name = state.name.clone();
-        if self.release_device(dev) {
-            self.cx.error(format!(
-                "\"{name}\" stopped sending (its Active Sensing went silent; was a cable \
-                 unplugged?). Everything it was holding has been released."
-            ));
-        }
-    }
-
-    /// Forgets a device's state and releases whatever its notes and controls were holding.
-    /// Returns whether it was holding anything.
-    fn release_device(&mut self, dev: DeviceId) -> bool {
-        let mut released = false;
-        for i in 0..self.maps.len() {
-            released |=
-                behavior::drop_device(&mut self.maps[i], &self.cfg.mappings[i], &mut self.cx, dev);
-        }
-        let state = self.cx.devices.get_mut(dev);
-        state.reset();
-        let mut timer = state.sensing_timer.take();
-        self.cx.timers.cancel_slot(&mut timer);
-        self.cx.dirty = true;
-        released
     }
 
     fn apply_requests(&mut self) {
@@ -581,12 +550,6 @@ impl Worker {
         self.cx.dirty = true;
     }
 
-    fn device_disconnected(&mut self, name: &str) {
-        if let Some(device) = self.cx.devices.id(name) {
-            self.release_device(device);
-        }
-    }
-
     // -----------------------------------------------------------------------------------------
     // Actions run from the UI
     // -----------------------------------------------------------------------------------------
@@ -605,494 +568,6 @@ impl Worker {
     fn run_test(&mut self, action: &CAction) {
         let info = self.test_info.clone();
         self.cx.execute(&info, action, Ctx::default(), false);
-    }
-
-    // -----------------------------------------------------------------------------------------
-    // MIDI
-    // -----------------------------------------------------------------------------------------
-
-    fn on_midi(&mut self, device: String, message: MidiMessage) {
-        let dev = self.cx.devices.id_or_insert(&device);
-        let now = self.cx.now;
-        let state = self.cx.devices.get_mut(dev);
-        state.last_heard = Some(now);
-        if message == MidiMessage::ActiveSensing {
-            state.sensing = true;
-        }
-        if state.sensing && state.sensing_timer.is_none() {
-            let timer = self.cx.timers.schedule(now + SENSING_TIMEOUT, TimerKind::Sensing(dev));
-            self.cx.devices.get_mut(dev).sensing_timer = Some(timer);
-        }
-        let derived = self.cx.devices.get_mut(dev).midi.update(&message);
-        let mark = self.cx.outbox.len();
-        let mut matched = Vec::new();
-        let index = Arc::clone(&self.index);
-        self.dispatch(&index, dev, &device, &message, &mut matched);
-        for event in derived.iter() {
-            self.dispatch_derived(&index, dev, &device, event, &mut matched);
-        }
-        let log = MidiLog {
-            time_us: self.cx.time_us(),
-            device,
-            message,
-            derived: derived.iter().collect(),
-            mappings: matched,
-        };
-        self.cx.outbox.insert(mark, EngineEvent::Midi(log));
-    }
-
-    /// Hands one observation to mapping `i` (if live) and runs its behavior.
-    fn feed(&mut self, i: usize, inst: InstKey, obs: Obs, ctx: Ctx, matched: &mut Vec<String>) {
-        let def = &self.cfg.mappings[i];
-        let rt = &mut self.maps[i];
-        if !rt.live {
-            return;
-        }
-        let was_active = !rt.instances.is_empty();
-        let Some(edge) = rt.observe(inst, obs, def.source.retriggers(), ctx) else {
-            return;
-        };
-        if !matched.iter().any(|id| id.as_str() == &*def.id) {
-            matched.push(def.id.to_string());
-        }
-        behavior::on_edge(rt, def, &mut self.cx, inst, edge, ctx, was_active);
-    }
-
-    /// Continuous sources: active while the value is inside the source's range.
-    #[allow(clippy::too_many_arguments)]
-    fn continuous(
-        &mut self,
-        list: &[usize],
-        name: &str,
-        channel: Option<u8>,
-        inst: InstKey,
-        value: u16,
-        ctx: Ctx,
-        matched: &mut Vec<String>,
-        range_of: impl Fn(&CSourceKind) -> Option<ValueRange>,
-    ) {
-        for &i in list {
-            let source = &self.cfg.mappings[i].source;
-            if !source.accepts(name, channel) {
-                continue;
-            }
-            let Some(range) = range_of(&source.kind) else {
-                continue;
-            };
-            let obs = if range.contains(value) { Obs::Active } else { Obs::Inactive };
-            self.feed(i, inst, obs, ctx, matched);
-        }
-    }
-
-    /// Pulse sources (press and release at once) whose filter accepts the message.
-    #[allow(clippy::too_many_arguments)]
-    fn pulse(
-        &mut self,
-        list: &[usize],
-        name: &str,
-        channel: Option<u8>,
-        inst: InstKey,
-        ctx: Ctx,
-        matched: &mut Vec<String>,
-        accept: impl Fn(&CSourceKind) -> bool,
-    ) {
-        for &i in list {
-            let source = &self.cfg.mappings[i].source;
-            if !source.accepts(name, channel) || !accept(&source.kind) {
-                continue;
-            }
-            self.feed(i, inst, Obs::Pulse, ctx, matched);
-        }
-    }
-
-    fn dispatch(
-        &mut self,
-        index: &SourceIndex,
-        dev: DeviceId,
-        name: &str,
-        message: &MidiMessage,
-        matched: &mut Vec<String>,
-    ) {
-        let base = Ctx { device: dev, ..Ctx::default() };
-        let system = InstKey::new(dev, 0, 0);
-        match *message {
-            MidiMessage::NoteOn { channel, note, .. }
-            | MidiMessage::NoteOff { channel, note, .. } => {
-                let Some(event) = message.note_event() else {
-                    return;
-                };
-                self.cx.devices.get_mut(dev).set_note(channel, note, event.on);
-                let ctx = Ctx {
-                    channel,
-                    note: Some(note),
-                    velocity: Some(event.velocity),
-                    value: i32::from(event.velocity),
-                    ..base
-                };
-                let inst = InstKey::new(dev, channel, u16::from(note));
-                for &i in &index.note {
-                    let source = &self.cfg.mappings[i].source;
-                    let CSourceKind::Note { notes, velocity } = &source.kind else {
-                        continue;
-                    };
-                    if !source.accepts(name, Some(channel)) || !notes.contains(u16::from(note)) {
-                        continue;
-                    }
-                    let obs = if !event.on {
-                        Obs::Inactive
-                    } else if velocity.contains(u16::from(event.velocity)) {
-                        Obs::Active
-                    } else {
-                        continue;
-                    };
-                    self.feed(i, inst, obs, ctx, matched);
-                }
-                if !event.on {
-                    self.after_note_off(index, dev, channel, note, matched);
-                }
-            }
-            MidiMessage::ControlChange { channel, controller, value } => {
-                let ctx = Ctx {
-                    channel,
-                    controller: Some(u16::from(controller)),
-                    value: i32::from(value),
-                    ..base
-                };
-                let inst = InstKey::new(dev, channel, u16::from(controller));
-                for &i in &index.cc[usize::from(controller & 127)] {
-                    let source = &self.cfg.mappings[i].source;
-                    let CSourceKind::Cc { range, encoding, .. } = &source.kind else {
-                        continue;
-                    };
-                    if !source.accepts(name, Some(channel)) {
-                        continue;
-                    }
-                    let (obs, ctx) = match encoding {
-                        ValueEncoding::Absolute => {
-                            let active = range.contains(u16::from(value));
-                            (if active { Obs::Active } else { Obs::Inactive }, ctx)
-                        }
-                        relative => {
-                            let ticks = relative_ticks(value, *relative);
-                            if ticks == 0 {
-                                continue;
-                            }
-                            (Obs::Ticks(ticks), Ctx { value: ticks, ..ctx })
-                        }
-                    };
-                    self.feed(i, inst, obs, ctx, matched);
-                }
-                match controller {
-                    // All sound off, all notes off, omni/mono/poly: every note is released.
-                    120 | 123..=127 => self.release_notes(index, dev, Some(channel), matched),
-                    121 => self.reset_controllers(index, dev, channel, matched),
-                    _ => {}
-                }
-            }
-            MidiMessage::ProgramChange { channel, program } => {
-                let ctx = Ctx { channel, value: i32::from(program), ..base };
-                let inst = InstKey::new(dev, channel, 0);
-                self.pulse(&index.program, name, Some(channel), inst, ctx, matched, |kind| {
-                    matches!(kind, CSourceKind::Program { programs } if programs.contains(u16::from(program)))
-                });
-            }
-            MidiMessage::PitchBend { channel, value } => {
-                let ctx = Ctx { channel, value: i32::from(value), ..base };
-                let inst = InstKey::new(dev, channel, 0);
-                self.continuous(
-                    &index.pitch_bend,
-                    name,
-                    Some(channel),
-                    inst,
-                    value,
-                    ctx,
-                    matched,
-                    |kind| match kind {
-                        CSourceKind::PitchBend { range } => Some(*range),
-                        _ => None,
-                    },
-                );
-            }
-            MidiMessage::ChannelPressure { channel, pressure } => {
-                let ctx = Ctx { channel, value: i32::from(pressure), ..base };
-                let inst = InstKey::new(dev, channel, 0);
-                self.continuous(
-                    &index.channel_pressure,
-                    name,
-                    Some(channel),
-                    inst,
-                    u16::from(pressure),
-                    ctx,
-                    matched,
-                    |kind| match kind {
-                        CSourceKind::ChannelPressure { range } => Some(*range),
-                        _ => None,
-                    },
-                );
-            }
-            MidiMessage::PolyPressure { channel, note, pressure } => {
-                let ctx = Ctx { channel, note: Some(note), value: i32::from(pressure), ..base };
-                let inst = InstKey::new(dev, channel, u16::from(note));
-                self.continuous(
-                    &index.poly_pressure,
-                    name,
-                    Some(channel),
-                    inst,
-                    u16::from(pressure),
-                    ctx,
-                    matched,
-                    |kind| match kind {
-                        CSourceKind::PolyPressure { notes, range }
-                            if notes.contains(u16::from(note)) =>
-                        {
-                            Some(*range)
-                        }
-                        _ => None,
-                    },
-                );
-            }
-            MidiMessage::SysEx { ref data } => {
-                self.pulse(&index.sysex, name, None, system, base, matched, |kind| {
-                    matches!(kind, CSourceKind::SysEx { pattern: Some(pattern) } if pattern.matches(data))
-                });
-            }
-            MidiMessage::Clock => {
-                let state = self.cx.devices.get_mut(dev);
-                let tick = state.clock_ticks;
-                state.clock_ticks += 1;
-                self.pulse(&index.clock, name, None, system, base, matched, |kind| {
-                    matches!(kind, CSourceKind::Clock { divisor } if tick % u64::from((*divisor).max(1)) == 0)
-                });
-            }
-            MidiMessage::SongSelect { song } => {
-                let ctx = Ctx { value: i32::from(song), ..base };
-                self.pulse(&index.song_select, name, None, system, ctx, matched, |kind| {
-                    matches!(kind, CSourceKind::SongSelect { songs } if songs.contains(u16::from(song)))
-                });
-            }
-            MidiMessage::SongPosition { position } => {
-                let ctx = Ctx { value: i32::from(position), ..base };
-                self.continuous(
-                    &index.song_position,
-                    name,
-                    None,
-                    system,
-                    position,
-                    ctx,
-                    matched,
-                    |kind| match kind {
-                        CSourceKind::SongPosition { range } => Some(*range),
-                        _ => None,
-                    },
-                );
-            }
-            MidiMessage::Start => {
-                self.cx.devices.get_mut(dev).clock_ticks = 0;
-                self.system(index, SystemMessage::Start, name, system, base, matched);
-            }
-            MidiMessage::Continue => {
-                self.system(index, SystemMessage::Continue, name, system, base, matched)
-            }
-            MidiMessage::Stop => {
-                self.system(index, SystemMessage::Stop, name, system, base, matched)
-            }
-            MidiMessage::TuneRequest => {
-                self.system(index, SystemMessage::TuneRequest, name, system, base, matched)
-            }
-            MidiMessage::ActiveSensing => {
-                self.system(index, SystemMessage::ActiveSensing, name, system, base, matched)
-            }
-            MidiMessage::Reset => {
-                self.system(index, SystemMessage::Reset, name, system, base, matched);
-                // A reset device has no notes down and its controllers are at their defaults.
-                self.release_notes(index, dev, None, matched);
-                for channel in 1..=16 {
-                    self.reset_controllers(index, dev, channel, matched);
-                }
-                self.cx.devices.get_mut(dev).clock_ticks = 0;
-            }
-            MidiMessage::MtcQuarterFrame { .. } | MidiMessage::Unknown { .. } => {}
-        }
-    }
-
-    fn system(
-        &mut self,
-        index: &SourceIndex,
-        message: SystemMessage,
-        name: &str,
-        inst: InstKey,
-        ctx: Ctx,
-        matched: &mut Vec<String>,
-    ) {
-        self.pulse(&index.system[system_index(message)], name, None, inst, ctx, matched, |_| true);
-    }
-
-    fn dispatch_derived(
-        &mut self,
-        index: &SourceIndex,
-        dev: DeviceId,
-        name: &str,
-        event: Derived,
-        matched: &mut Vec<String>,
-    ) {
-        match event {
-            Derived::Parameter(param) => {
-                let list = match param.kind {
-                    ParameterKind::Nrpn => &index.nrpn,
-                    ParameterKind::Rpn => &index.rpn,
-                };
-                let base = Ctx {
-                    device: dev,
-                    channel: param.channel,
-                    controller: Some(param.number),
-                    ..Ctx::default()
-                };
-                let inst = InstKey::new(dev, param.channel, param.number);
-                for &i in list {
-                    let source = &self.cfg.mappings[i].source;
-                    let CSourceKind::Param { number, range, hires, .. } = &source.kind else {
-                        continue;
-                    };
-                    if *number != param.number || !source.accepts(name, Some(param.channel)) {
-                        continue;
-                    }
-                    let absolute = |value: u16| {
-                        let obs = if range.contains(value) { Obs::Active } else { Obs::Inactive };
-                        (obs, Ctx { value: i32::from(value), ..base })
-                    };
-                    let (obs, ctx) = match param.change {
-                        ParameterChange::DataMsb if !*hires => absolute(u16::from(param.value7())),
-                        ParameterChange::DataLsb if *hires => absolute(param.value14()),
-                        ParameterChange::Increment => (Obs::Ticks(1), Ctx { value: 1, ..base }),
-                        ParameterChange::Decrement => (Obs::Ticks(-1), Ctx { value: -1, ..base }),
-                        _ => continue,
-                    };
-                    self.feed(i, inst, obs, ctx, matched);
-                }
-            }
-            Derived::ControlChange14(cc) => {
-                let ctx = Ctx {
-                    device: dev,
-                    channel: cc.channel,
-                    controller: Some(u16::from(cc.controller)),
-                    value: i32::from(cc.value),
-                    ..Ctx::default()
-                };
-                let inst = InstKey::new(dev, cc.channel, u16::from(cc.controller));
-                let list = &index.cc14[usize::from(cc.controller & 31)];
-                self.continuous(
-                    list,
-                    name,
-                    Some(cc.channel),
-                    inst,
-                    cc.value,
-                    ctx,
-                    matched,
-                    |kind| match kind {
-                        CSourceKind::Cc14 { range, .. } => Some(*range),
-                        _ => None,
-                    },
-                );
-            }
-        }
-    }
-
-    /// After a note off: the released note's aftertouch is gone, and channel pressure cannot
-    /// outlast the last held note of its channel (some keyboards never send pressure 0).
-    fn after_note_off(
-        &mut self,
-        index: &SourceIndex,
-        dev: DeviceId,
-        channel: u8,
-        note: u8,
-        matched: &mut Vec<String>,
-    ) {
-        let ctx = Ctx { device: dev, channel, note: Some(note), ..Ctx::default() };
-        let inst = InstKey::new(dev, channel, u16::from(note));
-        for &i in &index.poly_pressure {
-            self.feed(i, inst, Obs::Inactive, ctx, matched);
-        }
-        if !self.cx.devices.get(dev).any_note_held(channel) {
-            let inst = InstKey::new(dev, channel, 0);
-            let ctx = Ctx { note: None, ..ctx };
-            for &i in &index.channel_pressure {
-                self.feed(i, inst, Obs::Inactive, ctx, matched);
-            }
-        }
-    }
-
-    /// Releases every active note (and aftertouch) instance of the device, on one channel or
-    /// all, exactly as if the note offs had arrived.
-    fn release_notes(
-        &mut self,
-        index: &SourceIndex,
-        dev: DeviceId,
-        channel: Option<u8>,
-        matched: &mut Vec<String>,
-    ) {
-        self.cx.devices.get_mut(dev).clear_notes(channel);
-        let lists = [&index.note, &index.poly_pressure, &index.channel_pressure];
-        for &i in lists.into_iter().flatten() {
-            let active = self.maps[i]
-                .active(|key| key.device() == dev && channel.is_none_or(|c| key.channel() == c));
-            for (key, ctx) in active {
-                let ctx = Ctx { velocity: ctx.velocity.map(|_| 0), value: 0, ..ctx };
-                self.feed(i, key, Obs::Inactive, ctx, matched);
-            }
-        }
-    }
-
-    /// Reset All Controllers (CC 121): controls that reset to a value outside a mapping's range
-    /// release, as if that value had arrived (the RP-015 set, as tracked by `MidiState`).
-    fn reset_controllers(
-        &mut self,
-        index: &SourceIndex,
-        dev: DeviceId,
-        channel: u8,
-        matched: &mut Vec<String>,
-    ) {
-        self.release_outside(&index.pitch_bend, dev, channel, None, 8192, matched);
-        self.release_outside(&index.channel_pressure, dev, channel, None, 0, matched);
-        self.release_outside(&index.poly_pressure, dev, channel, None, 0, matched);
-        for (controller, value) in [(1u16, 0u16), (11, 127), (64, 0), (65, 0), (66, 0), (67, 0)] {
-            let list = &index.cc[usize::from(controller)];
-            self.release_outside(list, dev, channel, Some(controller), value, matched);
-        }
-        for (controller, value) in [(1u16, 0u16), (11, 127 << 7)] {
-            let list = &index.cc14[usize::from(controller)];
-            self.release_outside(list, dev, channel, Some(controller), value, matched);
-        }
-    }
-
-    fn release_outside(
-        &mut self,
-        list: &[usize],
-        dev: DeviceId,
-        channel: u8,
-        number: Option<u16>,
-        value: u16,
-        matched: &mut Vec<String>,
-    ) {
-        for &i in list {
-            let range = match &self.cfg.mappings[i].source.kind {
-                CSourceKind::PitchBend { range }
-                | CSourceKind::ChannelPressure { range }
-                | CSourceKind::PolyPressure { range, .. }
-                | CSourceKind::Cc { range, encoding: ValueEncoding::Absolute, .. }
-                | CSourceKind::Cc14 { range, .. } => *range,
-                _ => continue,
-            };
-            if range.contains(value) {
-                continue;
-            }
-            let active = self.maps[i].active(|key| key.device() == dev && key.channel() == channel);
-            for (key, ctx) in active {
-                if number.is_some_and(|n| ctx.controller != Some(n)) {
-                    continue;
-                }
-                self.feed(i, key, Obs::Inactive, Ctx { value: i32::from(value), ..ctx }, matched);
-            }
-        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1116,6 +591,11 @@ impl Worker {
             if self.cx.outbox.is_empty() {
                 self.cx.outbox = events;
             }
+        }
+        // A release the backend refused: keep retrying until the OS accepts it.
+        if self.cx.out.has_stuck() && self.retry_timer.is_none() {
+            let at = self.cx.now.max(Instant::now()) + STUCK_RETRY_INTERVAL;
+            self.retry_timer = Some(self.cx.timers.schedule(at, TimerKind::RetryStuck));
         }
         if self.cx.out.changed {
             self.cx.out.changed = false;
@@ -1227,6 +707,7 @@ impl Worker {
         self.profiles.effective = None;
         self.refresh_liveness(true);
         self.tests.clear();
+        self.retry_timer = None;
         self.status.timer = None;
         self.status.pending = true;
         self.cx.dirty = true;
@@ -1236,8 +717,17 @@ impl Worker {
     fn stop(&mut self) {
         let _ = catch_unwind(AssertUnwindSafe(|| {
             self.release_outputs(true);
+            // Last chances for releases the backend refused (the thread is about to end, so a
+            // short wait no longer delays anything).
+            for _ in 0..3 {
+                if !self.cx.out.retry_stuck() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
             self.tracker = None;
             self.cx.timers.clear();
+            self.retry_timer = None;
             self.flush(true);
         }));
     }

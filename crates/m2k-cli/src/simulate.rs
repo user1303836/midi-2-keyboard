@@ -43,6 +43,7 @@ options:
   --repeats         the backend auto-repeats held keys by itself (like X11 / uinput)
   --fail <Key>      the backend rejects this key (repeatable), e.g. --fail F13
   --panic <Key>     the backend panics when this key goes down (tests recovery)
+  --fail-up <Key>[:N]  the backend refuses the first N (default 1) releases of this key
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
   --quiet-status    do not print status events";
@@ -98,6 +99,9 @@ struct LogInjector {
     fail: Vec<Key>,
     /// Pressing this key panics inside the backend (exercises the engine's panic recovery).
     panic: Option<Key>,
+    /// Releases of these keys are refused this many more times (like Windows UIPI while an
+    /// elevated window has focus). Shared by all backends of the run.
+    fail_up: Arc<Mutex<HashMap<Key, u32>>>,
 }
 
 impl Injector for LogInjector {
@@ -132,6 +136,18 @@ impl Injector for LogInjector {
     }
 
     fn key_up(&mut self, key: Key) -> Result<(), OutputError> {
+        {
+            let mut fail_up = self.fail_up.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(left) = fail_up.get_mut(&key)
+                && *left > 0
+            {
+                *left -= 1;
+                drop(fail_up);
+                self.clock
+                    .print("KEY", format!("up   {key:?}  -> refused (--fail-up), still down"));
+                return Err(OutputError::Permission("blocked by the simulation".into()));
+            }
+        }
         let was_down = {
             let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
             held.key_ups += 1;
@@ -546,6 +562,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut repeats = false;
     let mut fail = Vec::new();
     let mut panic_key = None;
+    let mut fail_up: HashMap<Key, u32> = HashMap::new();
     let mut settle_ms = 1000u64;
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
@@ -564,6 +581,19 @@ pub fn run(args: &[String]) -> i32 {
                     return 2;
                 }
             },
+            "--fail-up" => {
+                let spec = iter.next().cloned().unwrap_or_default();
+                let (key, count) = spec.split_once(':').unwrap_or((spec.as_str(), "1"));
+                match (parse_key(&key.to_string()), count.parse::<u32>()) {
+                    (Some(key), Ok(count)) => {
+                        fail_up.insert(key, count);
+                    }
+                    _ => {
+                        eprintln!("--fail-up needs a key code and an optional count, e.g. KeyA:3");
+                        return 2;
+                    }
+                }
+            }
             "--settle" => match iter.next().and_then(|v| v.parse().ok()) {
                 Some(ms) => settle_ms = ms,
                 None => {
@@ -626,6 +656,7 @@ pub fn run(args: &[String]) -> i32 {
     let clock = Arc::new(Clock(Instant::now()));
     let held = Arc::new(Mutex::new(Held::default()));
     let tally = Arc::new(Mutex::new(Tally::default()));
+    let fail_up = Arc::new(Mutex::new(fail_up));
     let backend = |name: &'static str| LogInjector {
         name,
         clock: clock.clone(),
@@ -633,6 +664,7 @@ pub fn run(args: &[String]) -> i32 {
         repeats,
         fail: fail.clone(),
         panic: panic_key,
+        fail_up: fail_up.clone(),
     };
     let injector = backend("simulate");
     let engine = {

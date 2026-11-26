@@ -69,6 +69,8 @@ pub enum TimerKind {
     RunAction(u64),
     /// Active Sensing watchdog of a device.
     Sensing(DeviceId),
+    /// Retry releasing keys / buttons the backend refused to release.
+    RetryStuck,
     /// Coalesced status emission.
     Status,
 }

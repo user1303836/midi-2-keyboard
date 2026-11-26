@@ -10,6 +10,7 @@ use m2k_output::{Key, MouseButton};
 
 use super::cx::Ctx;
 use super::pattern::{AppRule, SysExPattern};
+use super::source::Obs;
 use super::text::{TextTemplate, shorten, type_label};
 use crate::model::*;
 
@@ -76,6 +77,8 @@ pub struct CSource {
     pub device: Option<Box<str>>,
     pub channel: Option<u8>,
     pub kind: CSourceKind,
+    /// [`Source::hysteresis`] (0 for sources it does not apply to).
+    pub hysteresis: u16,
 }
 
 impl CSource {
@@ -91,7 +94,18 @@ impl CSource {
     /// Whether a second "active" message for an already active instance is a fresh press (a
     /// note retriggered without note off) rather than a value update.
     pub fn retriggers(&self) -> bool {
-        matches!(self.kind, CSourceKind::Note { .. })
+        matches!(self.kind, CSourceKind::Note { .. } | CSourceKind::Chord { .. })
+    }
+
+    /// The observation for an absolute `value` of a ranged source: it activates when the value
+    /// enters `range` and, with hysteresis, deactivates only once it leaves the widened band.
+    pub fn level(&self, range: ValueRange, value: u16) -> Obs {
+        let inside = range.contains(value);
+        let band = inside
+            || (self.hysteresis > 0
+                && value >= range.min.saturating_sub(self.hysteresis)
+                && value <= range.max.saturating_add(self.hysteresis));
+        Obs::Level { inside, band }
     }
 }
 
@@ -99,6 +113,12 @@ pub enum CSourceKind {
     Note {
         notes: ValueRange,
         velocity: ValueRange,
+    },
+    /// `notes` sorted and unique; `mask` has a bit per note (0 = empty chord, never matches).
+    Chord {
+        notes: Vec<u8>,
+        mask: u128,
+        window_ms: u32,
     },
     Cc {
         controller: u8,
@@ -344,9 +364,13 @@ fn compile_mapping(
         SourceEvent::Note { notes, velocity } => {
             CSourceKind::Note { notes: *notes, velocity: *velocity }
         }
-        // TODO(engine): chord sources and `source.hysteresis` are new in the model and not
-        // matched yet; an inert source keeps the build green until they are implemented.
-        SourceEvent::Chord { .. } => CSourceKind::SysEx { pattern: None },
+        SourceEvent::Chord { notes, window_ms } => {
+            let mut notes: Vec<u8> = notes.iter().copied().filter(|n| *n < 128).collect();
+            notes.sort_unstable();
+            notes.dedup();
+            let mask = notes.iter().fold(0u128, |mask, n| mask | (1u128 << n));
+            CSourceKind::Chord { notes, mask, window_ms: *window_ms }
+        }
         SourceEvent::ControlChange { controller, range, encoding } => CSourceKind::Cc {
             controller: (*controller).min(127),
             range: *range,
@@ -389,10 +413,22 @@ fn compile_mapping(
         SourceEvent::SongPosition { range } => CSourceKind::SongPosition { range: *range },
         SourceEvent::System { message } => CSourceKind::System { message: *message },
     };
+    // Hysteresis only means something for ranged, absolute values.
+    let ranged = match &kind {
+        CSourceKind::Cc { encoding, .. } => *encoding == ValueEncoding::Absolute,
+        CSourceKind::Cc14 { .. }
+        | CSourceKind::Param { .. }
+        | CSourceKind::PitchBend { .. }
+        | CSourceKind::ChannelPressure { .. }
+        | CSourceKind::PolyPressure { .. }
+        | CSourceKind::SongPosition { .. } => true,
+        _ => false,
+    };
     let source = CSource {
         device: mapping.source.device.as_deref().filter(|d| !d.is_empty()).map(Box::from),
         channel: mapping.source.channel,
         kind,
+        hysteresis: if ranged { mapping.source.hysteresis } else { 0 },
     };
 
     let behavior = match &mapping.behavior {
@@ -746,6 +782,7 @@ fn sequence_label(steps: &[SequenceStep]) -> String {
 /// [`CompiledConfig::mappings`]). Rebuilt whenever the set of live mappings changes.
 pub struct SourceIndex {
     pub note: Vec<usize>,
+    pub chord: Vec<usize>,
     pub poly_pressure: Vec<usize>,
     pub channel_pressure: Vec<usize>,
     pub pitch_bend: Vec<usize>,
@@ -779,6 +816,7 @@ impl SourceIndex {
     pub fn build(mappings: &[CMapping], live: impl Fn(usize) -> bool) -> Self {
         let mut index = SourceIndex {
             note: Vec::new(),
+            chord: Vec::new(),
             poly_pressure: Vec::new(),
             channel_pressure: Vec::new(),
             pitch_bend: Vec::new(),
@@ -799,6 +837,11 @@ impl SourceIndex {
             }
             match &mapping.source.kind {
                 CSourceKind::Note { .. } => index.note.push(i),
+                CSourceKind::Chord { mask, .. } => {
+                    if *mask != 0 {
+                        index.chord.push(i);
+                    }
+                }
                 CSourceKind::Cc { controller, .. } => {
                     index.cc[usize::from(*controller & 127)].push(i)
                 }

@@ -37,10 +37,14 @@ impl InstKey {
 /// turns it into an edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Obs {
-    /// The instance is active with this message (note on in range, value inside the range).
+    /// The instance is active with this message (note on in range, chord complete).
     Active,
-    /// The instance is inactive with this message (note off, value outside the range).
+    /// The instance is inactive with this message (note off, forced release).
     Inactive,
+    /// A ranged absolute value: whether it is inside the source's range, and inside the range
+    /// widened by the source's hysteresis. An inactive instance activates only `inside`; an
+    /// active one stays active while inside the `band`.
+    Level { inside: bool, band: bool },
     /// Active and inactive at once (program change, SysEx, clock, ...).
     Pulse,
     /// Relative movement: signed ticks from an endless encoder or NRPN/RPN increment/decrement.
@@ -74,9 +78,11 @@ pub const SENSING_TIMEOUT: Duration = Duration::from_millis(350);
 pub struct DeviceState {
     pub name: Arc<str>,
     pub midi: MidiState,
-    /// Notes held per channel (bit per note). Kept by the engine because releases of
-    /// pressure sources depend on "no note held on this channel any more".
+    /// Notes held per channel (bit per note). Kept by the engine because chords and the
+    /// releases of pressure sources depend on which notes are down.
     held: [u128; 16],
+    /// When each note was last struck (microseconds of engine time), for chord windows.
+    struck: Box<[[u64; 128]; 16]>,
     /// MIDI clock ticks since the last Start (or since the clock was first seen).
     pub clock_ticks: u64,
     /// The device sends Active Sensing, so silence means the connection is gone (a cable pulled
@@ -93,6 +99,7 @@ impl DeviceState {
             name,
             midi: MidiState::new(),
             held: [0; 16],
+            struck: Box::new([[0; 128]; 16]),
             clock_ticks: 0,
             sensing: false,
             last_heard: None,
@@ -108,14 +115,29 @@ impl DeviceState {
         self.sensing = false;
     }
 
-    pub fn set_note(&mut self, channel: u8, note: u8, on: bool) {
+    /// Records a note on (struck at `time_us`) or note off.
+    pub fn set_note(&mut self, channel: u8, note: u8, on: bool, time_us: u64) {
         if let (Some(ci), true) = (channel_index(channel), note < 128) {
             let bit = 1u128 << note;
             if on {
                 self.held[ci] |= bit;
+                self.struck[ci][usize::from(note)] = time_us;
             } else {
                 self.held[ci] &= !bit;
             }
+        }
+    }
+
+    /// The notes held on `channel` (bit per note).
+    pub fn held_notes(&self, channel: u8) -> u128 {
+        channel_index(channel).map_or(0, |ci| self.held[ci])
+    }
+
+    /// When `note` was last struck on `channel` (engine time in microseconds).
+    pub fn struck_at(&self, channel: u8, note: u8) -> u64 {
+        match (channel_index(channel), note < 128) {
+            (Some(ci), true) => self.struck[ci][usize::from(note)],
+            _ => 0,
         }
     }
 

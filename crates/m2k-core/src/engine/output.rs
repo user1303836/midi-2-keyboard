@@ -3,11 +3,16 @@
 //!
 //! Every holder (a hold engagement, a toggle latch, a running action) is identified by an owner
 //! key. A press always reaches the OS (a tap of a key that something else holds must still
-//! register as a key down); a release only reaches the OS when the last holder lets go. Whatever
-//! is still counted when the output is dropped is released, so the engine thread cannot exit (or
-//! swap backends) with a key stuck down.
+//! register as a key down); a release only reaches the OS when the last holder lets go.
+//!
+//! A release the backend refuses (Windows UIPI while an elevated window has focus, a revoked
+//! macOS Accessibility permission, ...) leaves the key down at the OS. Such keys and buttons are
+//! kept as *stuck*: they are still reported as held, every [`Output::release_everything`]
+//! retries them, and the engine retries them on a timer until the OS accepts the release.
+//! Whatever is still held or stuck when the output is dropped is released, so the engine thread
+//! cannot exit (or swap backends) with a key down.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use m2k_output::{Injector, Key, MouseButton, OutputError};
 
@@ -54,6 +59,10 @@ pub struct Output {
     injector: Box<dyn Injector>,
     keys: BTreeMap<Key, Holders>,
     buttons: BTreeMap<MouseButton, Holders>,
+    /// Nobody holds these any more, but the backend refused their release: still down at the
+    /// OS until a retry succeeds.
+    stuck_keys: BTreeSet<Key>,
+    stuck_buttons: BTreeSet<MouseButton>,
     /// Set whenever the set of held keys changes (for the status snapshot).
     pub changed: bool,
 }
@@ -62,7 +71,14 @@ type Result = std::result::Result<(), OutputError>;
 
 impl Output {
     pub fn new(injector: Box<dyn Injector>) -> Self {
-        Output { injector, keys: BTreeMap::new(), buttons: BTreeMap::new(), changed: true }
+        Output {
+            injector,
+            keys: BTreeMap::new(),
+            buttons: BTreeMap::new(),
+            stuck_keys: BTreeSet::new(),
+            stuck_buttons: BTreeSet::new(),
+            changed: true,
+        }
     }
 
     pub fn name(&self) -> &'static str {
@@ -84,6 +100,8 @@ impl Output {
     /// Presses `key` for `owner`. Always sends a key down. The reference is counted even when
     /// the backend fails, so the matching release stays balanced.
     pub fn press_key(&mut self, key: Key, owner: u64) -> Result {
+        // A stuck key that is pressed again is simply held again; its next release retries.
+        self.stuck_keys.remove(&key);
         let holders = self.keys.entry(key).or_default();
         if holders.total == 0 {
             self.changed = true;
@@ -103,10 +121,21 @@ impl Output {
         }
         if holders.total == 0 {
             self.keys.remove(&key);
-            self.changed = true;
-            return self.injector.key_up(key);
+            return self.key_up(key);
         }
         Ok(())
+    }
+
+    /// Sends a key up for a key nobody holds; a refused one becomes stuck.
+    fn key_up(&mut self, key: Key) -> Result {
+        let result = self.injector.key_up(key);
+        if result.is_err() {
+            self.stuck_keys.insert(key);
+        } else {
+            self.stuck_keys.remove(&key);
+        }
+        self.changed = true;
+        result
     }
 
     /// Keyboard auto-repeat emulation: another key down for a key that is held.
@@ -119,10 +148,11 @@ impl Output {
         if self.key_count(key) > 0 {
             return Ok(());
         }
-        self.injector.key_up(key)
+        self.key_up(key)
     }
 
     pub fn press_button(&mut self, button: MouseButton, owner: u64) -> Result {
+        self.stuck_buttons.remove(&button);
         self.buttons.entry(button).or_default().add(owner);
         self.injector.mouse_button(button, true)
     }
@@ -136,16 +166,26 @@ impl Output {
         }
         if holders.total == 0 {
             self.buttons.remove(&button);
-            return self.injector.mouse_button(button, false);
+            return self.button_up(button);
         }
         Ok(())
+    }
+
+    fn button_up(&mut self, button: MouseButton) -> Result {
+        let result = self.injector.mouse_button(button, false);
+        if result.is_err() {
+            self.stuck_buttons.insert(button);
+        } else {
+            self.stuck_buttons.remove(&button);
+        }
+        result
     }
 
     pub fn button_up_unheld(&mut self, button: MouseButton) -> Result {
         if self.button_count(button) > 0 {
             return Ok(());
         }
-        self.injector.mouse_button(button, false)
+        self.button_up(button)
     }
 
     pub fn text(&mut self, text: &str) -> Result {
@@ -182,8 +222,7 @@ impl Output {
                 holders.remove_all(owner);
                 if holders.total == 0 {
                     self.keys.remove(&key);
-                    self.changed = true;
-                    if let Err(error) = self.injector.key_up(key) {
+                    if let Err(error) = self.key_up(key) {
                         errors.push(error);
                     }
                 }
@@ -200,7 +239,7 @@ impl Output {
                 holders.remove_all(owner);
                 if holders.total == 0 {
                     self.buttons.remove(&button);
-                    if let Err(error) = self.injector.mouse_button(button, false) {
+                    if let Err(error) = self.button_up(button) {
                         errors.push(error);
                     }
                 }
@@ -210,31 +249,54 @@ impl Output {
     }
 
     /// Releases everything that is held, whoever holds it (non-modifier keys first, then
-    /// modifiers, then mouse buttons).
+    /// modifiers, then mouse buttons), and retries what is stuck. Returns the errors of
+    /// releases that failed for the first time (repeated failures of stuck ones stay quiet).
     pub fn release_everything(&mut self) -> Vec<OutputError> {
         let mut errors = Vec::new();
         let keys: Vec<Key> = std::mem::take(&mut self.keys).into_keys().collect();
-        if !keys.is_empty() {
-            self.changed = true;
-        }
         for key in release_order(keys) {
-            if let Err(error) = self.injector.key_up(key) {
+            if let Err(error) = self.key_up(key) {
                 errors.push(error);
             }
         }
         for button in std::mem::take(&mut self.buttons).into_keys() {
-            if let Err(error) = self.injector.mouse_button(button, false) {
+            if let Err(error) = self.button_up(button) {
                 errors.push(error);
             }
         }
+        self.retry_stuck();
         errors
     }
 
-    pub fn held_keys(&self) -> Vec<Key> {
-        self.keys.keys().copied().collect()
+    /// Tries again to release what the backend refused earlier. Returns whether something is
+    /// still stuck.
+    pub fn retry_stuck(&mut self) -> bool {
+        let keys: Vec<Key> = self.stuck_keys.iter().copied().collect();
+        for key in release_order(keys) {
+            let _ = self.key_up(key);
+        }
+        let buttons: Vec<MouseButton> = self.stuck_buttons.iter().copied().collect();
+        for button in buttons {
+            let _ = self.button_up(button);
+        }
+        self.has_stuck()
     }
 
-    /// Swaps the backend. Call [`Output::release_everything`] first.
+    pub fn has_stuck(&self) -> bool {
+        !self.stuck_keys.is_empty() || !self.stuck_buttons.is_empty()
+    }
+
+    /// Keys down at the OS because of the engine: held ones and stuck ones.
+    pub fn held_keys(&self) -> Vec<Key> {
+        let mut keys: Vec<Key> = self.keys.keys().copied().collect();
+        keys.extend(self.stuck_keys.iter().copied());
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Swaps the backend. Call [`Output::release_everything`] first; keys the old backend could
+    /// not release are retried through the new one (both inject into the same OS).
     pub fn replace_injector(&mut self, injector: Box<dyn Injector>) -> Box<dyn Injector> {
         self.changed = true;
         std::mem::replace(&mut self.injector, injector)
