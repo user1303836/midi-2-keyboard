@@ -84,11 +84,45 @@ from the tray with no browser view loaded at all (about 30 MB).
 
 Everything else is under **All options** in the editor. The **Monitor** (bottom right, `Ctrl+M`)
 shows what is going on, and its *Virtual controller* tab lets you play notes and turn knobs
-without any hardware. Ready-made profiles to import and pick apart are in [`examples/`](examples).
+without any hardware. Ready-made profiles (gaming, streaming, video editing, presenting, …) are
+one click away: the import button at the top of the profile list, or *start from an example* in
+an empty profile. The files are in [`examples/`](examples).
 
 Keys are not sent while the app's own window is in front (so a mapping cannot type into the
-editor) — switch to the application you want to control to try a mapping. Closing the window
-keeps the app running in the tray; quit from the tray icon's menu.
+editor) — switch to the application you want to control to try a mapping. If nothing happens,
+look at the status bar at the bottom: it shows the last message that came in and, when nothing
+was sent, why (no mapping, its mapping is switched off, only mapped in another profile, held
+back by a rate limit, …).
+
+To stop all output, click **Active** at the top right (it turns into **Paused**). If a key ever
+seems stuck, the *release* link next to "holding …" in the status bar lets go of everything.
+
+Closing the window keeps the app running in the tray (the first time, it says so). Click the
+tray icon (on Linux: *Open* in its menu) or simply start the app again to get the window back.
+The tray menu also pauses output, releases all keys, switches profiles and quits. To make
+closing the window quit the app instead, turn off *Keep running when the window is closed* in
+Settings; *Launch at login* is there too.
+
+### Keyboard shortcuts
+
+| Key | What it does |
+| --- | --- |
+| `N` | Add a mapping: touch a control, then press the key or shortcut to send |
+| `Enter` | Open the focused mapping |
+| `Esc` | Cancel a key capture; close the quick add, the editor, a menu or a dialog |
+| `↑` / `↓` | Previous / next mapping |
+| `Alt+↑` / `Alt+↓` | Move the mapping up / down |
+| `Del` | Delete the focused mapping (the message that follows has *Undo*) |
+| `Ctrl+D` | Duplicate the focused mapping |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo (`Ctrl+Y` redoes too) |
+| `Ctrl+F` | Search mappings |
+| `Ctrl+M` | Show / hide the monitor |
+| `Ctrl+,` | Settings |
+| `F2` | Rename the profile that has the focus in the sidebar |
+| Right-click, `Shift+F10` | The menu of a mapping: edit, duplicate, disable, move up / down, move or copy to another profile, delete. On empty space: add a mapping, map a run of notes |
+
+On a Mac, use `Cmd` instead of `Ctrl`; the ⌫ key deletes too. To send `Esc` itself, pick it from
+the list (the button right of the shortcut field): pressing `Esc` there cancels the capture.
 
 Good to know:
 
@@ -103,9 +137,12 @@ Good to know:
   and rpm packages install the udev rule for that; with the AppImage the app shows the rule to
   add. Per-application profiles need X11.
 
-The configuration is a single JSON file (Settings → *Show config file*), saved atomically with a
-backup copy; a corrupt file is set aside and the backup restored. You can edit it by hand while
-the app is running.
+The configuration is a single JSON file, `config.json` in `%APPDATA%\midi-2-keyboard` (Windows),
+`~/Library/Application Support/midi-2-keyboard` (macOS) or `~/.config/midi-2-keyboard` (Linux);
+Settings → *Show config file* takes you there. It is saved atomically with a backup copy
+(`config.backup.json`); a corrupt file is set aside and the backup restored. You can edit it by
+hand while the app is running. To keep a separate setup (for example a portable one), set the
+environment variable `M2K_CONFIG_DIR` to another folder before starting the app.
 
 ### Writing the config by hand
 
@@ -180,7 +217,7 @@ m2k simulate config.json script.txt           # replay scripted MIDI and print w
 crates/m2k-midi     MIDI parsing, state tracking (NRPN/RPN/14-bit), device input with hot-plug
 crates/m2k-output   key model and OS input injection (SendInput / CGEvent / uinput / XTest)
 crates/m2k-core     config model, persistence, the engine, the application runtime
-crates/m2k-cli      headless tools (devices, monitor, simulate)
+crates/m2k-cli      headless tools (devices, monitor, run, simulate)
 src-tauri           the desktop shell (Tauri v2): commands, tray, autostart, single instance
 src                 the UI (React + TypeScript)
 ```
