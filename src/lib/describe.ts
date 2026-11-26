@@ -323,6 +323,8 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
       what = [
         b.up && `up: ${actionText(b.up, config)}`,
         b.down && `down: ${actionText(b.down, config)}`,
+        b.fast?.up && `fast up: ${actionText(b.fast.up, config)}`,
+        b.fast?.down && `fast down: ${actionText(b.fast.down, config)}`,
       ]
         .filter(Boolean)
         .join("; ");

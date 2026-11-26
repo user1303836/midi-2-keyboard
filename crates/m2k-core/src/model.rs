@@ -483,7 +483,25 @@ pub enum Behavior {
         /// Swap the directions.
         #[serde(default)]
         invert: bool,
+        /// A second speed for fast movement (coarse steps for a quick spin, fine steps for a
+        /// slow one).
+        #[serde(default)]
+        fast: Option<FastStep>,
     },
+}
+
+/// The "turned fast" half of [`Behavior::Step`]: when a single message moves the control by at
+/// least `ticks` steps at once (an accelerating encoder spun quickly, a knob swept quickly),
+/// the fast action of that direction fires **once**, instead of the normal action once per
+/// step. A direction without a fast action keeps its normal behavior.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct FastStep {
+    /// How many steps in one message count as fast (at least 2).
+    pub ticks: u16,
+    #[serde(default)]
+    pub up: Option<Action>,
+    #[serde(default)]
+    pub down: Option<Action>,
 }
 
 fn default_step() -> u16 {

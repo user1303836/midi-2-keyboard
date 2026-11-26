@@ -106,6 +106,7 @@ function sampleConfig(): Config {
               step: 1,
               max_burst: 8,
               invert: false,
+              fast: null,
             },
             conditions: [],
             rate_limit: null,

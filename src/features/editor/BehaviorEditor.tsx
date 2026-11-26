@@ -303,6 +303,38 @@ export function BehaviorEditor({
             </span>
             <InlineSwitch label="Reverse direction" checked={b.invert} onChange={(invert) => onChange({ ...b, invert })} />
           </div>
+          <InlineSwitch
+            label="Do something else when it is turned fast"
+            hint="Fine steps for a slow turn, a coarser action for a quick spin (e.g. Right for one frame, Shift+Right for ten)"
+            checked={b.fast !== null}
+            onChange={(on) => onChange({ ...b, fast: on ? { ticks: 3, up: emptyKeys(), down: emptyKeys() } : null })}
+          />
+          {b.fast && (
+            <div className="flex flex-col gap-2.5 rounded-lg border bg-surface p-2.5">
+              <StepSlot
+                label={<><ArrowUp size={14} /> Fast</>}
+                action={b.fast.up}
+                onChange={(up, key) => onChange({ ...b, fast: { ...b.fast!, up } }, key && `fup:${key}`)}
+              />
+              <StepSlot
+                label={<><ArrowDown size={14} /> Fast</>}
+                action={b.fast.down}
+                onChange={(down, key) => onChange({ ...b, fast: { ...b.fast!, down } }, key && `fdown:${key}`)}
+              />
+              <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                Fast means at least
+                <NumberInput
+                  aria-label="Steps that count as fast"
+                  className="w-[60px]"
+                  min={2}
+                  max={127}
+                  value={b.fast.ticks}
+                  onChange={(ticks) => onChange({ ...b, fast: { ...b.fast!, ticks } }, "fticks")}
+                />
+                steps in one message. The fast action then fires once instead of the normal one per step.
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
             <span className="whitespace-nowrap">Fire at most</span>
             <NumberInput aria-label="Maximum actions per message" className="w-[60px]" min={0} max={1000} value={b.max_burst} onChange={(max_burst) => onChange({ ...b, max_burst }, "burst")} />

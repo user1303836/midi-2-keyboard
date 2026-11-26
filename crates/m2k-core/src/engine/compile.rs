@@ -504,7 +504,8 @@ fn compile_mapping(
             }
         }
         Behavior::Change { action } => CBehavior::Change { action: act(action) },
-        Behavior::Step { up, down, step, max_burst, invert } => CBehavior::Step {
+        // TODO(engine): `fast` (a second action for fast movement) is new in the model.
+        Behavior::Step { up, down, step, max_burst, invert, .. } => CBehavior::Step {
             up: up.as_ref().map(act),
             down: down.as_ref().map(act),
             step: (*step).max(1),

@@ -257,7 +257,12 @@ fn sanitize_mapping(mapping: &mut Mapping) {
             *window_ms = (*window_ms).clamp(50, 5_000);
             *hold_ms = (*hold_ms).clamp(100, 10_000);
         }
-        Behavior::Step { step, .. } => *step = (*step).max(1),
+        Behavior::Step { step, fast, .. } => {
+            *step = (*step).max(1);
+            if let Some(fast) = fast {
+                fast.ticks = fast.ticks.max(2);
+            }
+        }
         Behavior::Trigger { repeat: Some(repeat), .. } => {
             repeat.interval_ms = repeat.interval_ms.max(5);
         }

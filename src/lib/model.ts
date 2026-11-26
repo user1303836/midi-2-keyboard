@@ -306,7 +306,7 @@ export function defaultBehavior(type: BehaviorType, previous?: Behavior): Behavi
     case "change":
       return { type, action };
     case "step":
-      return { type, up: action, down: emptyKeys(), step: 1, max_burst: 8, invert: false };
+      return { type, up: action, down: emptyKeys(), step: 1, max_burst: 8, invert: false, fast: null };
   }
 }
 
@@ -555,6 +555,8 @@ export function knownLayers(config: Config): string[] {
         case "step":
           visitAction(b.up);
           visitAction(b.down);
+          visitAction(b.fast?.up ?? null);
+          visitAction(b.fast?.down ?? null);
           break;
       }
     }
