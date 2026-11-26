@@ -4,7 +4,7 @@ import type { Profile } from "@/bindings/Profile";
 import { IconButton } from "@/components/ui/button";
 import { Badge, KeyCombo } from "@/components/ui/misc";
 import { Tooltip } from "@/components/ui/overlays";
-import { useApp } from "@/lib/store";
+import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 import { LastEvent } from "../monitor/Monitor";
@@ -147,6 +147,15 @@ export function StatusBar() {
       {held.length > 0 && (
         <span className="flex shrink-0 items-center gap-1.5 text-fg-faint">
           holding <KeyCombo keys={held} small />
+          <Tooltip content="Let go of everything the app is holding down (also unlatches toggles)">
+            <button
+              type="button"
+              className="rounded px-1 font-medium text-fg-muted underline underline-offset-2 hover:text-fg"
+              onClick={async () => (await api()).releaseAll()}
+            >
+              release
+            </button>
+          </Tooltip>
         </span>
       )}
       {layers.length > 0 && (

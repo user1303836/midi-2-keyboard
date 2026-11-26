@@ -163,7 +163,13 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
                   {profiles
                     .filter((p) => !p.mappings.some((m) => m.id === mapping.id))
                     .map((p) => (
-                      <MenuItem key={p.id} onSelect={() => moveMappingToProfile(mapping.id, p.id)}>
+                      <MenuItem
+                        key={p.id}
+                        onSelect={() => {
+                          moveMappingToProfile(mapping.id, p.id);
+                          toast(`Moved to “${p.name}”`, { action: { label: "Undo", run: undo } });
+                        }}
+                      >
                         {p.name}
                       </MenuItem>
                     ))}

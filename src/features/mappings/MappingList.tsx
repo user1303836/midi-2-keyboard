@@ -4,10 +4,14 @@ import {
   Copy,
   CopyPlus,
   Filter,
+  FolderInput,
+  FolderPlus,
   GripVertical,
   MoreHorizontal,
+  Pencil,
   Piano,
   Plus,
+  Power,
   Search,
   Timer,
   Trash2,
@@ -21,7 +25,22 @@ import type { Profile } from "@/bindings/Profile";
 import { Button, IconButton } from "@/components/ui/button";
 import { Switch } from "@/components/ui/inputs";
 import { Badge, Kbd } from "@/components/ui/misc";
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tooltip } from "@/components/ui/overlays";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+  Tooltip,
+} from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
 import { findConflicts, type Conflict } from "@/lib/conflicts";
 import { EXAMPLES, importExample } from "@/lib/examples";
@@ -85,10 +104,13 @@ const MappingRow = memo(function MappingRow({
   onDragEnd,
   draggable,
   conflicts,
+  menuTarget,
 }: {
   mapping: Mapping;
   index: number;
   selected: boolean;
+  /** The right-click menu is open for this row. */
+  menuTarget: boolean;
   engaged: boolean;
   conflicts: Conflict[] | undefined;
   dragging: boolean;
@@ -116,6 +138,7 @@ const MappingRow = memo(function MappingRow({
   return (
     <div
       role="row"
+      data-mapping-id={mapping.id}
       aria-selected={selected}
       tabIndex={0}
       draggable={draggable}
@@ -142,6 +165,7 @@ const MappingRow = memo(function MappingRow({
       className={cn(
         "group relative flex min-h-[46px] cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 outline-hidden transition-colors",
         selected ? "border-accent-line bg-accent-soft" : "border-transparent hover:bg-hover focus-visible:border-accent-line",
+        menuTarget && !selected && "border-line-strong bg-hover",
         dragging && "opacity-40",
         dropBefore && "before:absolute before:-top-[3px] before:right-2 before:left-2 before:h-[2px] before:rounded-full before:bg-accent",
       )}
@@ -276,6 +300,10 @@ export function MappingList({ profile }: { profile: Profile }) {
   const [runOpen, setRunOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // One right-click menu for the whole list (not one per row): which row it is for, if any.
+  const [menu, setMenu] = useState<{ id: string | null; open: boolean }>({ id: null, open: false });
+  const menuMapping = menu.id ? (profile.mappings.find((m) => m.id === menu.id) ?? null) : null;
+  const otherProfiles = useMemo(() => config.profiles.filter((p) => p.id !== profile.id), [config.profiles, profile.id]);
   // Latest drag state for the stable row callbacks below.
   const drag = useRef({ dragId, dropIndex, mappings: profile.mappings });
   drag.current = { dragId, dropIndex, mappings: profile.mappings };
@@ -377,10 +405,16 @@ export function MappingList({ profile }: { profile: Profile }) {
       {profile.mappings.length === 0 ? (
         <EmptyState onAdd={quickAdd} />
       ) : (
+        <ContextMenu onOpenChange={(open) => setMenu((current) => ({ ...current, open }))}>
+          <ContextMenuTrigger asChild>
         <div
           role="grid"
           aria-label="Mappings"
           className="@container min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          onContextMenu={(e) => {
+            const row = (e.target as HTMLElement).closest<HTMLElement>("[data-mapping-id]");
+            setMenu({ id: row?.dataset.mappingId ?? null, open: true });
+          }}
           onDragOver={(e) => {
             if (dragId) e.preventDefault();
           }}
@@ -394,6 +428,7 @@ export function MappingList({ profile }: { profile: Profile }) {
               mapping={mapping}
               index={index}
               selected={mapping.id === selectedId}
+              menuTarget={menu.open && menu.id === mapping.id}
               engaged={engaged.includes(mapping.id)}
               conflicts={conflicts.get(mapping.id)}
               draggable={reorderable}
@@ -407,8 +442,95 @@ export function MappingList({ profile }: { profile: Profile }) {
           ))}
           {dropIndex === visible.length && dragId && <div className="mx-2 h-[2px] rounded-full bg-accent" />}
         </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            {menuMapping ? (
+              <RowMenu mapping={menuMapping} otherProfiles={otherProfiles} />
+            ) : (
+              <>
+                <ContextMenuItem icon={<Plus size={14} />} shortcut="N" onSelect={quickAdd}>
+                  Add mapping
+                </ContextMenuItem>
+                <ContextMenuItem icon={<Piano size={14} />} onSelect={() => setRunOpen(true)}>
+                  Map a run of notes…
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
       )}
     </div>
+  );
+}
+
+/** What a right click on a mapping offers. */
+function RowMenu({ mapping, otherProfiles }: { mapping: Mapping; otherProfiles: Profile[] }) {
+  const act = useApp.getState;
+  const undoable = (message: string) => act().toast(message, { action: { label: "Undo", run: act().undo } });
+  return (
+    <>
+      <ContextMenuItem icon={<Pencil size={14} />} shortcut="Enter" onSelect={() => act().selectMapping(mapping.id)}>
+        Edit
+      </ContextMenuItem>
+      <ContextMenuItem icon={<Copy size={14} />} shortcut="Ctrl+D" onSelect={() => act().cloneMapping(mapping.id)}>
+        Duplicate
+      </ContextMenuItem>
+      <ContextMenuItem
+        icon={<Power size={14} />}
+        onSelect={() => act().updateMapping(mapping.id, (m) => ({ ...m, enabled: !m.enabled }))}
+      >
+        {mapping.enabled ? "Disable" : "Enable"}
+      </ContextMenuItem>
+      {otherProfiles.length > 0 && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuSub>
+            <ContextMenuSubTrigger icon={<FolderInput size={14} />}>Move to profile</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {otherProfiles.map((p) => (
+                <ContextMenuItem
+                  key={p.id}
+                  onSelect={() => {
+                    act().moveMappingToProfile(mapping.id, p.id);
+                    undoable(`Moved to “${p.name}”`);
+                  }}
+                >
+                  {p.name}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger icon={<FolderPlus size={14} />}>Copy to profile</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {otherProfiles.map((p) => (
+                <ContextMenuItem
+                  key={p.id}
+                  onSelect={() => {
+                    act().copyMappingToProfile(mapping.id, p.id);
+                    undoable(`Copied to “${p.name}”`);
+                  }}
+                >
+                  {p.name}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        </>
+      )}
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        tone="danger"
+        icon={<Trash2 size={14} />}
+        shortcut="Del"
+        onSelect={() => {
+          act().removeMapping(mapping.id);
+          undoable("Mapping deleted");
+        }}
+      >
+        Delete
+      </ContextMenuItem>
+    </>
   );
 }
 

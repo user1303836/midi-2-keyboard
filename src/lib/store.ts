@@ -96,6 +96,8 @@ interface State {
   addLayerVariant(id: string, layer: string): void;
   moveMapping(id: string, toIndex: number): void;
   moveMappingToProfile(id: string, profileId: string): void;
+  /** Puts a copy of the mapping at the end of another profile (the original stays). */
+  copyMappingToProfile(id: string, profileId: string): void;
   selectMapping(id: string | null): void;
   /** Opens the quick-add flow with a fresh draft mapping. */
   startWizard(): void;
@@ -577,6 +579,16 @@ export const useApp = create<State>((set, get) => {
         }),
       }));
       if (get().selectedMappingId === id) set({ selectedMappingId: null });
+    },
+
+    copyMappingToProfile(id, profileId) {
+      const owner = profileOfMapping(get().config, id);
+      const mapping = owner?.mappings.find((m) => m.id === id);
+      if (!owner || !mapping) return;
+      const copy = duplicateMapping(mapping);
+      get().edit((config) =>
+        mapProfile(config, profileId, (profile) => ({ ...profile, mappings: [...profile.mappings, copy] })),
+      );
     },
 
     selectMapping(id) {

@@ -1,4 +1,11 @@
-import { AlertDialog, Dialog as RDialog, DropdownMenu, Popover as RPopover, Tooltip as RTooltip } from "radix-ui";
+import {
+  AlertDialog,
+  ContextMenu as RContextMenu,
+  Dialog as RDialog,
+  DropdownMenu,
+  Popover as RPopover,
+  Tooltip as RTooltip,
+} from "radix-ui";
 import { Check, X } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
@@ -235,6 +242,78 @@ export function MenuLabel({ children }: { children: ReactNode }) {
     <DropdownMenu.Label className="px-2 pt-1.5 pb-1 text-xs font-semibold tracking-wide text-fg-faint uppercase">
       {children}
     </DropdownMenu.Label>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Context menu (right click)
+// ---------------------------------------------------------------------------------------------
+
+export const ContextMenu = RContextMenu.Root;
+export const ContextMenuTrigger = RContextMenu.Trigger;
+
+export function ContextMenuContent({ className, ...props }: ComponentProps<typeof RContextMenu.Content>) {
+  return (
+    <RContextMenu.Portal>
+      <RContextMenu.Content
+        collisionPadding={8}
+        className={cn(
+          "z-50 min-w-[200px] animate-pop-in rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop",
+          className,
+        )}
+        {...props}
+      />
+    </RContextMenu.Portal>
+  );
+}
+
+export function ContextMenuItem({
+  icon,
+  shortcut,
+  tone,
+  children,
+  className,
+  ...props
+}: ComponentProps<typeof RContextMenu.Item> & { icon?: ReactNode; shortcut?: string; tone?: "danger" }) {
+  return (
+    <RContextMenu.Item
+      className={cn(ITEM, tone === "danger" && "text-danger data-[highlighted]:bg-danger-soft", className)}
+      {...props}
+    >
+      <span className="flex w-4 justify-center text-fg-muted">{icon}</span>
+      <span className="flex-1">{children}</span>
+      {shortcut && <span className="pl-4 text-sm text-fg-faint">{shortcut}</span>}
+    </RContextMenu.Item>
+  );
+}
+
+export function ContextMenuSeparator() {
+  return <RContextMenu.Separator className="mx-1 my-1 h-px bg-line" />;
+}
+
+export const ContextMenuSub = RContextMenu.Sub;
+
+export function ContextMenuSubTrigger({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+  return (
+    <RContextMenu.SubTrigger className={cn(ITEM, "data-[state=open]:bg-hover")}>
+      <span className="flex w-4 justify-center text-fg-muted">{icon}</span>
+      <span className="flex-1">{children}</span>
+      <span className="text-fg-faint">›</span>
+    </RContextMenu.SubTrigger>
+  );
+}
+
+export function ContextMenuSubContent({ children }: { children: ReactNode }) {
+  return (
+    <RContextMenu.Portal>
+      <RContextMenu.SubContent
+        sideOffset={4}
+        collisionPadding={8}
+        className="z-50 max-h-[320px] min-w-[170px] animate-pop-in overflow-y-auto rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop"
+      >
+        {children}
+      </RContextMenu.SubContent>
+    </RContextMenu.Portal>
   );
 }
 
