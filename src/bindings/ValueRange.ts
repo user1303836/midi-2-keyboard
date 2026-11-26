@@ -3,5 +3,9 @@
 /**
  * An inclusive range. Used for 7-bit values (0..=127), 14-bit values (0..=16383), note numbers
  * and program numbers alike.
+ *
+ * Always written as `{"min": .., "max": ..}`. When reading, a single number means just that
+ * value (`60`), and either end may be left out (`{"min": 64}` = 64 and up, `{"max": 63}` = up
+ * to 63; a missing `max` reads as the largest value, which loading clamps to the type's limit).
  */
 export type ValueRange = { min: number, max: number, };

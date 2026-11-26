@@ -105,6 +105,44 @@ The configuration is a single JSON file (Settings → *Show config file*), saved
 backup copy; a corrupt file is set aside and the backup restored. You can edit it by hand while
 the app is running.
 
+### Writing the config by hand
+
+A hand-written file only needs what makes each mapping what it is; everything else has a
+default (ids are assigned, velocities default to 1–127, a rate limit is a throttle, and so on).
+Saved while the app runs, it is picked up within a couple of seconds; a mistake is reported with
+its line and column, and the previous configuration stays active.
+
+```json
+{
+  "profiles": [{
+    "name": "My controller",
+    "mappings": [
+      { "source": { "event": { "type": "note", "notes": 60 } },
+        "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ArrowUp"] } } },
+      { "source": { "channel": 2, "event": { "type": "control_change", "controller": 20 } },
+        "behavior": { "type": "change", "action": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyO"] } },
+        "rate_limit": { "interval_ms": 500 } },
+      { "source": { "event": { "type": "control_change", "controller": 64 } },
+        "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Space"] } } }
+    ]
+  }]
+}
+```
+
+Shorthands:
+
+- A range can be a single number (`"notes": 60`), or leave out an end: `{"min": 64}` is 64 and
+  up, `{"max": 63}` up to 63.
+- A knob, fader, pedal or pitch bend written without `range` gets the one its behavior needs:
+  the whole range for `change` and `step` (they follow the value), the "pressed" upper half for
+  everything that presses and releases (`trigger`, `hold`, `toggle`, ...). For pitch bend that
+  half starts above the resting center.
+- Keys are named like the browser's `KeyboardEvent.code`: `KeyA`, `Digit1`, `ArrowUp`, `Space`,
+  `ControlLeft`, `ShiftLeft`, `F13`, `NumpadAdd`, `AudioVolumeUp`.
+- Leaving out `version`, `id`, `name`, `velocity`, a tap-hold's `hold_ms` or a multi-tap's
+  `window_ms` is fine; the full format is what the app writes back when you change anything in
+  it.
+
 ## Building from source
 
 Prerequisites: [Rust](https://rustup.rs) (stable) and Node.js 20+.

@@ -508,10 +508,6 @@ impl Inner {
                 }
             }
             Err(error) => {
-                // The typed parse reports line and column for type errors too.
-                let error = serde_json::from_str::<Config>(&text)
-                    .err()
-                    .map_or(error, |positioned| positioned.to_string());
                 self.emit_error(format!(
                     "{shown} has a problem and was not loaded: {error}. The previous \
                      configuration stays active until the file is fixed."

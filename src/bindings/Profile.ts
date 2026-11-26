@@ -2,7 +2,15 @@
 import type { AppMatcher } from "./AppMatcher";
 import type { Mapping } from "./Mapping";
 
-export type Profile = { id: string, name: string, 
+export type Profile = { 
+/**
+ * Empty (or missing) = one is assigned when the config is loaded.
+ */
+id: string, 
+/**
+ * Empty (or missing) = "Untitled".
+ */
+name: string, 
 /**
  * Mappings of an always-on profile are active no matter which profile is selected
  * (use it for global controls such as "switch profile" pads).

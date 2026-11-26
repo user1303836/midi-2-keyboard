@@ -4,7 +4,11 @@ import type { Condition } from "./Condition";
 import type { RateLimit } from "./RateLimit";
 import type { Source } from "./Source";
 
-export type Mapping = { id: string, 
+export type Mapping = { 
+/**
+ * Empty (or missing) = one is assigned when the config is loaded.
+ */
+id: string, 
 /**
  * Optional user label. Empty = the UI shows an auto-generated summary.
  */

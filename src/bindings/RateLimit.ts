@@ -8,7 +8,11 @@ import type { RateLimitMode } from "./RateLimitMode";
  * `RateLimit { mode: Throttle, interval_ms: 500, trailing: false }` sends the hotkey at most
  * once every 500 ms no matter how fast the knob is turned.
  */
-export type RateLimit = { mode: RateLimitMode, interval_ms: number, 
+export type RateLimit = { 
+/**
+ * Default: throttle.
+ */
+mode: RateLimitMode, interval_ms: number, 
 /**
  * Throttle only: if input was swallowed during the interval, fire once more when the
  * interval ends (so the final movement is never lost).

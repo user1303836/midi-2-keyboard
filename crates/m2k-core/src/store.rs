@@ -75,7 +75,8 @@ fn recover(path: &Path, error: &str) -> Loaded {
     let aside = path.with_extension(format!("corrupt-{stamp}.json"));
     let moved = fs::rename(path, &aside).is_ok();
     let mut warnings = vec![format!(
-        "The config file could not be parsed ({error}).{}",
+        "The config file {} has a problem and was not loaded: {error}.{}",
+        path.display(),
         if moved { format!(" It was kept as {}.", aside.display()) } else { String::new() }
     )];
     if let Ok(text) = fs::read_to_string(backup_path(path))
@@ -89,13 +90,119 @@ fn recover(path: &Path, error: &str) -> Loaded {
     Loaded { config: Config::default(), created: false, warnings }
 }
 
-/// Parses config JSON (any supported schema version), migrating and repairing it.
+/// Parses config JSON (any supported schema version), migrating and repairing it. Errors say
+/// what is wrong and where (line and column).
 pub fn parse(text: &str) -> Result<(Config, Vec<String>), String> {
     let mut value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     migrate(&mut value)?;
-    let mut config: Config = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    fill_missing_ranges(&mut value);
+    let mut config: Config = match serde_json::from_value(value) {
+        Ok(config) => config,
+        Err(error) => {
+            // A `Value` has no positions; reading the same text again does (the steps above
+            // only add what is missing, so it fails the same way).
+            let positioned = serde_json::from_str::<Config>(text).err();
+            let message = positioned.map_or_else(|| error.to_string(), |e| e.to_string());
+            return Err(tidy_error(message));
+        }
+    };
     let warnings = sanitize(&mut config);
     Ok((config, warnings))
+}
+
+/// serde lists every possible name when one is unknown (a misspelled key lists ~180 of them).
+/// Keep the message readable: suggest the closest name instead of the whole list.
+fn tidy_error(message: String) -> String {
+    const LIST: &str = "`, expected one of ";
+    let Some(start) = message.find("unknown variant `") else {
+        return message;
+    };
+    let name_start = start + "unknown variant `".len();
+    let Some(list_start) = message[name_start..].find(LIST).map(|i| name_start + i) else {
+        return message;
+    };
+    let name = &message[name_start..list_start];
+    let rest = &message[list_start + LIST.len()..];
+    let (list, position) = match rest.rfind(" at line ") {
+        Some(at) => (&rest[..at], &rest[at..]),
+        None => (rest, ""),
+    };
+    let candidates: Vec<&str> = list.split(", ").map(|c| c.trim_matches('`')).collect();
+    if candidates.len() <= 8 {
+        return message;
+    }
+    let closest = candidates
+        .iter()
+        .map(|c| (edit_distance(&name.to_lowercase(), &c.to_lowercase()), *c))
+        .min()
+        .filter(|(distance, _)| *distance <= (name.chars().count() / 3).max(2));
+    let hint = match closest {
+        Some((_, suggestion)) => format!("did you mean `{suggestion}`?"),
+        None => format!("{} names are possible, such as `{}`", candidates.len(), candidates[0]),
+    };
+    format!("{}unknown name `{name}` ({hint}){position}", &message[..start])
+}
+
+/// Levenshtein distance (small inputs: names).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let substitute = diagonal + usize::from(ca != *cb);
+            diagonal = row[j + 1];
+            row[j + 1] = substitute.min(row[j] + 1).min(row[j + 1] + 1);
+        }
+    }
+    row[b.len()]
+}
+
+/// A ranged, absolute source written without `range` (by hand) gets the range its behavior
+/// needs: everything for `change` and `step`, which follow the value, and the "pressed" half
+/// for press/release behaviors, which would otherwise be pressed forever: 64..=127 for 7-bit
+/// values, 8192..=16383 for 14-bit ones, and 12288..=16383 for pitch bend (8192 is where the
+/// wheel rests). Relative encoders ignore the range and are left alone.
+fn fill_missing_ranges(value: &mut Value) {
+    let Some(profiles) = value.get_mut("profiles").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for profile in profiles {
+        let Some(mappings) = profile.get_mut("mappings").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for mapping in mappings {
+            let follows_value = matches!(
+                mapping.pointer("/behavior/type").and_then(Value::as_str),
+                Some("change" | "step")
+            );
+            let Some(event) = mapping.pointer_mut("/source/event").and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            if event.contains_key("range") {
+                continue;
+            }
+            let hires = event.get("hires").and_then(Value::as_bool).unwrap_or(false);
+            let (pressed, max) = match event.get("type").and_then(Value::as_str) {
+                Some("control_change") => {
+                    let encoding = event.get("encoding").and_then(Value::as_str);
+                    if encoding.is_some_and(|e| e != "absolute") {
+                        continue;
+                    }
+                    (64, 127)
+                }
+                Some("channel_pressure" | "poly_pressure") => (64, 127),
+                Some("nrpn" | "rpn") if !hires => (64, 127),
+                Some("nrpn" | "rpn" | "control_change14" | "song_position") => (8_192, 16_383),
+                Some("pitch_bend") => (12_288, 16_383),
+                _ => continue,
+            };
+            let min = if follows_value { 0 } else { pressed };
+            event.insert("range".into(), serde_json::json!({ "min": min, "max": max }));
+        }
+    }
 }
 
 /// Upgrades older schema versions in place. Add a step here whenever the schema changes in a way

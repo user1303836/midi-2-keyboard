@@ -26,12 +26,23 @@
 //! A source that matches several notes/channels/devices tracks each of them separately; the
 //! mapping as a whole is active while at least one of them is.
 //!
+//! # Writing a config by hand
+//!
+//! Everything with an obvious value has a default, so a hand-written file only needs what makes
+//! a mapping what it is (the event type and its note / controller / number / pattern, the
+//! behavior type, the keys). A range can be written as a single number (`"notes": 60`) or with
+//! one end left out (`{"min": 64}` = 64 and up). A ranged source written without `range` gets
+//! the range its behavior needs (see `store::parse`).
+//!
 //! # Compatibility
 //!
 //! Persisted in user config files. Only ever add fields (with `#[serde(default)]`) or enum
 //! variants; never rename or remove without writing a migration in `store.rs`.
 
+use std::fmt;
+
 use m2k_output::{InjectorOptions, Key, MouseButton};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -42,6 +53,10 @@ fn yes() -> bool {
     true
 }
 
+fn default_version() -> u32 {
+    CONFIG_VERSION
+}
+
 // ---------------------------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------------------------
@@ -50,6 +65,7 @@ fn yes() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Config {
+    #[serde(default = "default_version")]
     pub version: u32,
     #[serde(default)]
     pub settings: Settings,
@@ -188,7 +204,11 @@ pub struct DeviceConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Profile {
+    /// Empty (or missing) = one is assigned when the config is loaded.
+    #[serde(default)]
     pub id: String,
+    /// Empty (or missing) = "Untitled".
+    #[serde(default)]
     pub name: String,
     /// Mappings of an always-on profile are active no matter which profile is selected
     /// (use it for global controls such as "switch profile" pads).
@@ -221,6 +241,8 @@ pub struct AppMatcher {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Mapping {
+    /// Empty (or missing) = one is assigned when the config is loaded.
+    #[serde(default)]
     pub id: String,
     /// Optional user label. Empty = the UI shows an auto-generated summary.
     #[serde(default)]
@@ -240,10 +262,86 @@ pub struct Mapping {
 
 /// An inclusive range. Used for 7-bit values (0..=127), 14-bit values (0..=16383), note numbers
 /// and program numbers alike.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+///
+/// Always written as `{"min": .., "max": ..}`. When reading, a single number means just that
+/// value (`60`), and either end may be left out (`{"min": 64}` = 64 and up, `{"max": 63}` = up
+/// to 63; a missing `max` reads as the largest value, which loading clamps to the type's limit).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 pub struct ValueRange {
     pub min: u16,
     pub max: u16,
+}
+
+impl<'de> Deserialize<'de> for ValueRange {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(RangeVisitor)
+    }
+}
+
+/// Reads a [`ValueRange`] from a number or a `{min, max}` object with optional ends.
+struct RangeVisitor;
+
+impl<'de> Visitor<'de> for RangeVisitor {
+    type Value = ValueRange;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(
+            "a number such as 60, or a range such as {\"min\": 60, \"max\": 72} (either end may \
+             be left out)",
+        )
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<ValueRange, E> {
+        match u16::try_from(value) {
+            Ok(value) => Ok(ValueRange::one(value)),
+            Err(_) => Err(E::invalid_value(de::Unexpected::Unsigned(value), &self)),
+        }
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<ValueRange, E> {
+        match u64::try_from(value) {
+            Ok(value) => self.visit_u64(value),
+            Err(_) => Err(E::invalid_value(de::Unexpected::Signed(value), &self)),
+        }
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<ValueRange, E> {
+        // `60.0` is a whole number too.
+        if value.fract() == 0.0 && (0.0..=f64::from(u16::MAX)).contains(&value) {
+            return Ok(ValueRange::one(value as u16));
+        }
+        Err(E::invalid_value(de::Unexpected::Float(value), &self))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<ValueRange, A::Error> {
+        let (mut min, mut max) = (None, None);
+        while let Some(key) = map.next_key::<String>()? {
+            let slot = match key.as_str() {
+                "min" => &mut min,
+                "max" => &mut max,
+                other => return Err(de::Error::unknown_field(other, &["min", "max"])),
+            };
+            if slot.is_some() {
+                return Err(de::Error::custom(format_args!("`{key}` is given twice")));
+            }
+            *slot = Some(map.next_value::<u16>()?);
+        }
+        Ok(ValueRange { min: min.unwrap_or(0), max: max.unwrap_or(u16::MAX) })
+    }
+}
+
+fn all_7bit() -> ValueRange {
+    ValueRange::new(0, 127)
+}
+fn all_14bit() -> ValueRange {
+    ValueRange::new(0, 16_383)
+}
+fn all_velocities() -> ValueRange {
+    ValueRange::new(1, 127)
+}
+/// The upper half of a 7-bit control: a switch or pedal that is "on".
+fn on_7bit() -> ValueRange {
+    ValueRange::new(64, 127)
 }
 
 impl ValueRange {
@@ -304,7 +402,11 @@ pub enum ValueEncoding {
 pub enum SourceEvent {
     /// Note on/off. `notes` selects note numbers (a single note has `min == max`),
     /// `velocity` filters note-on velocity (1..=127).
-    Note { notes: ValueRange, velocity: ValueRange },
+    Note {
+        notes: ValueRange,
+        #[serde(default = "all_velocities")]
+        velocity: ValueRange,
+    },
     /// Several notes held at the same time. Tracked per device and channel: the source is active
     /// while **all** of `notes` are down — it presses when the last of them goes down and
     /// releases as soon as any of them goes up (it can press again once that note returns).
@@ -330,18 +432,24 @@ pub enum SourceEvent {
     /// `MultiTap`; `Hold` stays held).
     ControlChange {
         controller: u8,
+        #[serde(default = "all_7bit")]
         range: ValueRange,
         #[serde(default)]
         encoding: ValueEncoding,
     },
     /// 14-bit control change: MSB `controller` (0..=31) paired with LSB `controller + 32`.
     /// `range` is 0..=16383.
-    ControlChange14 { controller: u8, range: ValueRange },
+    ControlChange14 {
+        controller: u8,
+        #[serde(default = "all_14bit")]
+        range: ValueRange,
+    },
     /// Non-registered parameter. `hires` = 14-bit data (fires on data entry LSB, range
     /// 0..=16383); otherwise 7-bit (fires on data entry MSB, range 0..=127). Data
     /// increment/decrement messages always count as relative ticks (+1 / -1).
     Nrpn {
         number: u16,
+        #[serde(default = "all_14bit")]
         range: ValueRange,
         #[serde(default)]
         hires: bool,
@@ -349,18 +457,33 @@ pub enum SourceEvent {
     /// Registered parameter. Same semantics as [`SourceEvent::Nrpn`].
     Rpn {
         number: u16,
+        #[serde(default = "all_14bit")]
         range: ValueRange,
         #[serde(default)]
         hires: bool,
     },
     /// Program change (a pulse). `programs` selects program numbers 0..=127.
-    ProgramChange { programs: ValueRange },
+    ProgramChange {
+        #[serde(default = "all_7bit")]
+        programs: ValueRange,
+    },
     /// Pitch bend, `range` within 0..=16383 (8192 = center).
-    PitchBend { range: ValueRange },
+    PitchBend {
+        #[serde(default = "all_14bit")]
+        range: ValueRange,
+    },
     /// Channel pressure (mono aftertouch).
-    ChannelPressure { range: ValueRange },
+    ChannelPressure {
+        #[serde(default = "all_7bit")]
+        range: ValueRange,
+    },
     /// Polyphonic key pressure for the selected notes.
-    PolyPressure { notes: ValueRange, range: ValueRange },
+    PolyPressure {
+        #[serde(default = "all_7bit")]
+        notes: ValueRange,
+        #[serde(default = "all_7bit")]
+        range: ValueRange,
+    },
     /// System exclusive message matching `pattern` (a pulse).
     ///
     /// The pattern is space separated hex bytes; `??` matches any one byte, `**` matches any run
@@ -369,11 +492,20 @@ pub enum SourceEvent {
     SysEx { pattern: String },
     /// MIDI clock (a pulse every `divisor` ticks; 24 ticks = one quarter note). The tick counter
     /// restarts on Start.
-    Clock { divisor: u16 },
+    Clock {
+        #[serde(default = "default_divisor")]
+        divisor: u16,
+    },
     /// Song select (a pulse).
-    SongSelect { songs: ValueRange },
+    SongSelect {
+        #[serde(default = "all_7bit")]
+        songs: ValueRange,
+    },
     /// Song position pointer, `range` within 0..=16383.
-    SongPosition { range: ValueRange },
+    SongPosition {
+        #[serde(default = "all_14bit")]
+        range: ValueRange,
+    },
     /// Other system messages (pulses).
     System { message: SystemMessage },
 }
@@ -438,6 +570,7 @@ pub enum Behavior {
         hold: Option<Action>,
         #[serde(default)]
         hold_target: Option<HoldTarget>,
+        #[serde(default = "default_tap_hold_ms")]
         hold_ms: u32,
     },
     /// Single / double / triple press, and optionally a long press, on one control.
@@ -457,6 +590,7 @@ pub enum Behavior {
         double: Option<Action>,
         #[serde(default)]
         triple: Option<Action>,
+        #[serde(default = "default_window_ms")]
         window_ms: u32,
         #[serde(default)]
         hold: Option<Action>,
@@ -497,6 +631,7 @@ pub enum Behavior {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct FastStep {
     /// How many steps in one message count as fast (at least 2).
+    #[serde(default = "default_fast_ticks")]
     pub ticks: u16,
     #[serde(default)]
     pub up: Option<Action>,
@@ -510,6 +645,24 @@ fn default_step() -> u16 {
 fn default_hold_ms() -> u32 {
     500
 }
+fn default_tap_hold_ms() -> u32 {
+    350
+}
+fn default_window_ms() -> u32 {
+    300
+}
+fn default_fast_ticks() -> u16 {
+    3
+}
+fn default_divisor() -> u16 {
+    24
+}
+fn default_repeat_delay() -> u32 {
+    400
+}
+fn default_repeat_interval() -> u32 {
+    100
+}
 fn default_max_burst() -> u16 {
     8
 }
@@ -518,8 +671,10 @@ fn default_max_burst() -> u16 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Repeat {
     /// Time between the press and the first repeat.
+    #[serde(default = "default_repeat_delay")]
     pub delay_ms: u32,
     /// Time between repeats.
+    #[serde(default = "default_repeat_interval")]
     pub interval_ms: u32,
 }
 
@@ -571,7 +726,9 @@ pub enum Action {
     },
     /// Move the pointer, relative (pixels) or to an absolute position.
     MouseMove {
+        #[serde(default)]
         x: i32,
+        #[serde(default)]
         y: i32,
         #[serde(default)]
         absolute: bool,
@@ -580,7 +737,11 @@ pub enum Action {
     Sequence { steps: Vec<SequenceStep> },
     SwitchProfile { target: ProfileTarget },
     /// Turn a named layer on/off. Layers are referenced by [`Condition::Layer`].
-    Layer { layer: String, op: LayerOp },
+    Layer {
+        layer: String,
+        #[serde(default = "default_layer_op")]
+        op: LayerOp,
+    },
     Engine { op: EngineOp },
     /// Launch a program. `command` is the executable (looked up on `PATH`), `args` are passed
     /// verbatim (no shell). The process is detached and never waited for.
@@ -597,6 +758,9 @@ pub enum Action {
 
 fn default_clicks() -> u8 {
     1
+}
+fn default_layer_op() -> LayerOp {
+    LayerOp::Toggle
 }
 
 /// One step of an [`Action::Sequence`].
@@ -627,7 +791,9 @@ pub enum SequenceStep {
         dy: i32,
     },
     MouseMove {
+        #[serde(default)]
         x: i32,
+        #[serde(default)]
         y: i32,
         #[serde(default)]
         absolute: bool,
@@ -679,30 +845,38 @@ pub enum Condition {
         #[serde(default)]
         negate: bool,
     },
-    /// A layer is active (`active: true`) or inactive.
-    Layer { layer: String, active: bool },
+    /// A layer is active (`active: true`, the default) or inactive.
+    Layer {
+        layer: String,
+        #[serde(default = "yes")]
+        active: bool,
+    },
     /// A MIDI note is currently held (`held: true`) or not, on any device.
     /// `channel: None` = any channel. Lets a pad act as a modifier for other controls.
     NoteHeld {
         #[serde(default)]
         channel: Option<u8>,
         note: u8,
+        #[serde(default = "yes")]
         held: bool,
     },
     /// The last value of a controller is inside `range`, on any device (a knob or switch
     /// position selecting what other controls do). False if the controller was never received.
+    /// Without `range`: the controller is "on" (64..=127, a pedal or switch pressed).
     ControlValue {
         #[serde(default)]
         channel: Option<u8>,
         controller: u8,
+        #[serde(default = "on_7bit")]
         range: ValueRange,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum RateLimitMode {
     /// Fire immediately, then swallow everything for `interval_ms`.
+    #[default]
     Throttle,
     /// Wait until the input has been quiet for `interval_ms`, then fire once.
     Debounce,
@@ -715,6 +889,8 @@ pub enum RateLimitMode {
 /// once every 500 ms no matter how fast the knob is turned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct RateLimit {
+    /// Default: throttle.
+    #[serde(default)]
     pub mode: RateLimitMode,
     pub interval_ms: u32,
     /// Throttle only: if input was swallowed during the interval, fire once more when the

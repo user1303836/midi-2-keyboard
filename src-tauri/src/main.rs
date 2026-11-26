@@ -200,9 +200,11 @@ fn parse_profiles(text: &str) -> Result<Vec<Profile>, String> {
         return Ok(config.profiles);
     }
     if value.get("mappings").is_some() {
-        let profile: Profile = serde_json::from_value(value)
+        // A bare profile: give it the same treatment (defaults, repairs, clamped ranges).
+        let wrapper = serde_json::json!({ "version": 1, "profiles": [value] });
+        let (config, _) = store::parse(&wrapper.to_string())
             .map_err(|error| format!("this profile could not be read ({error})"))?;
-        return Ok(vec![profile]);
+        return Ok(config.profiles);
     }
     Err("this file does not contain MIDI 2 Keyboard profiles".into())
 }
