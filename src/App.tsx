@@ -139,9 +139,16 @@ function useShortcuts() {
           focusMappingRow(profile.mappings[index].id);
           return;
         }
-        const next = index < 0 ? 0 : Math.min(profile.mappings.length - 1, Math.max(0, index + step));
-        state.selectMapping(profile.mappings[next].id);
-        focusMappingRow(profile.mappings[next].id);
+        // Walk the rows that are actually shown (a search may hide some of the profile's mappings).
+        const shown = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="row"][data-mapping-id]'),
+          (row) => row.dataset.mappingId!,
+        );
+        if (shown.length === 0) return;
+        const at = shown.indexOf(from ?? "");
+        const next = shown[at < 0 ? 0 : Math.min(shown.length - 1, Math.max(0, at + step))];
+        state.selectMapping(next);
+        focusMappingRow(next);
       }
     };
     window.addEventListener("keydown", onKeyDown);

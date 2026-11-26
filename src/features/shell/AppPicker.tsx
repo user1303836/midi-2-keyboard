@@ -25,8 +25,8 @@ export function AppPicker({
     try {
       const backend = await api();
       const list = await backend.runningApps();
-      // Mapping this app to itself makes no sense.
-      setApps(list.filter((app) => !/^midi-2-keyboard(\.exe)?$/i.test(app.process)));
+      // Mapping this app to itself makes no sense ("MIDI 2 Keyboard" is its name on macOS).
+      setApps(list.filter((app) => !/^midi[- ]2[- ]keyboard(\.exe)?$/i.test(app.process.trim())));
     } catch {
       setApps([]);
     }
