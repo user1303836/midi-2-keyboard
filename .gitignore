@@ -1,0 +1,30 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Tauri
+src-tauri/gen/schemas/
+src-tauri/WixTools/
+
+# Local toolchains and per-agent clones (never commit)
+.tools/
+.agents/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs / scratch
+*.log
+.env
+.env.*
