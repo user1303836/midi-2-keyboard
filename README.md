@@ -219,6 +219,8 @@ npm run bindings                              # regenerate the TypeScript types 
 # m2k, the headless companion (npm run cargo -- run -p m2k-cli -- <command>)
 m2k devices                                   # list MIDI input ports
 m2k monitor [name]                            # print incoming MIDI, decoded
+m2k outputs                                   # list MIDI output ports (opens none of them)
+m2k send <port> <hex bytes>...                # send MIDI to an output once: m2k send wavetable B0 07 64
 m2k run [--config file] [--dry-run]           # run a config without the UI (dry run sends nothing)
 m2k simulate config.json script.txt           # replay scripted MIDI and print what would be sent
 ```
