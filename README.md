@@ -43,7 +43,8 @@ it speaks, acceleration included), or an NRPN parameter.
 
 **Actions** — key combinations, typed text (with `{value}`, `{note_name}`, … placeholders), mouse
 clicks / scrolling / movement, macros with delays, profile switching, layers, pause/resume/panic,
-launching programs, opening files and URLs.
+launching programs, opening files and URLs, sending MIDI (to other gear, or as lights on the
+controller: see [Sending MIDI and lights](#sending-midi-and-lights)).
 
 **Shaping** — rate limits (throttle, throttle with a final trailing fire, debounce), conditions
 (only in a certain application, only while a layer is on, only while another pad is held, only
@@ -81,7 +82,6 @@ from the tray with no browser view loaded at all (about 30 MB).
 
 Not there yet:
 
-- Sending MIDI back to the controller (LED feedback for toggles, layers and profiles).
 - Output that scales with the value (knob position → pointer speed, jog / shuttle rates).
 - Per-application profiles on Wayland (there is no portable way to ask which window is in front).
 - Signed installers: Windows SmartScreen and macOS Gatekeeper warn about the downloads.
@@ -135,6 +135,26 @@ Settings; *Launch at login* is there too.
 
 On a Mac, use `Cmd` instead of `Ctrl`; the ⌫ key deletes too. To send `Esc` itself, pick it from
 the list (the button right of the shortcut field): pressing `Esc` there cancels the capture.
+
+### Sending MIDI and lights
+
+A mapping can send MIDI as well as keys. The **Send MIDI** action (also a macro step) sends a
+note, a control change, a program change or raw bytes (SysEx), with a fixed value or the one that
+came in: pass a control on to other gear, switch a synth's sound. And a mapping can **light its
+pad** (*Light on the controller* in the editor, or one click in the quick add): one message when
+a state turns on, another when it turns off — while the mapping is held or toggled on, while a
+layer is on, or while a profile is active. Most pad controllers light a pad for a note on and
+switch it off for velocity 0. [`examples/pad-lights.json`](examples/pad-lights.json) shows all three.
+
+- **Where it goes.** *The controller it came from* is the output named like the input the message
+  came from (Windows' extra `MIDIIN2 (…)` ports pair with `MIDIOUT2 (…)`); any output can also be
+  picked by name. A light on a mapping that listens to any device goes to the only connected
+  controller that has an output; with several, to the one its control was last touched on.
+- **Outputs are opened only when something is sent to them** (they are listed under *MIDI
+  devices*). Windows' one-program-per-device rule applies to them too: while a DAW holds the
+  controller's output, lights cannot reach it; the output says so and is retried.
+- Lights are sent when their state changes, and all of them again when the controller
+  (re)connects and when output resumes after a pause. While paused, and on exit, nothing is sent.
 
 Good to know:
 
@@ -228,10 +248,10 @@ m2k simulate config.json script.txt           # replay scripted MIDI and print w
 ## How it is put together
 
 ```
-crates/m2k-midi     MIDI parsing, state tracking (NRPN/RPN/14-bit), device input with hot-plug
+crates/m2k-midi     MIDI parsing, state tracking (NRPN/RPN/14-bit), device input and output with hot-plug
 crates/m2k-output   key model and OS input injection (SendInput / CGEvent / uinput / XTest)
 crates/m2k-core     config model, persistence, the engine, the application runtime
-crates/m2k-cli      headless tools (devices, monitor, run, simulate)
+crates/m2k-cli      headless tools (devices, monitor, outputs, send, run, simulate)
 src-tauri           the desktop shell (Tauri v2): commands, tray, autostart, single instance
 src                 the UI (React + TypeScript)
 ```
