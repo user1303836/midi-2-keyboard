@@ -213,13 +213,54 @@ const DEFS: Partial<Record<Key, KeyDef>> = {
   Lang2: { label: "한자", name: "Lang 2 (Hanja / Eisu)", group: "International" },
 };
 
+/**
+ * Legends of the writing-system keys on the user's actual keyboard layout, when the browser can
+ * tell us (Chromium's Keyboard Map API). Our keys are physical positions named after the US
+ * layout; on AZERTY the key we call `KeyQ` is labelled "A" — and that is what should be shown.
+ */
+const layoutLegends = new Map<Key, string>();
+
+const LAYOUT_GROUPS: KeyGroup[] = ["Letters", "Digits", "Punctuation", "International"];
+
+/** Loads the layout legends. Resolves quickly either way; safe to call more than once. */
+export async function loadKeyboardLayout(): Promise<void> {
+  type LayoutMap = { entries(): IterableIterator<[string, string]> };
+  const keyboard = (navigator as unknown as { keyboard?: { getLayoutMap?: () => Promise<LayoutMap> } }).keyboard;
+  if (!keyboard?.getLayoutMap) return;
+  try {
+    const layout = await Promise.race([
+      keyboard.getLayoutMap(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 800)),
+    ]);
+    if (!layout) return;
+    layoutLegends.clear();
+    for (const [code, legend] of layout.entries()) {
+      // Dead keys and multi-character legends are not worth showing on a keycap.
+      if ([...legend].length === 1 && legend.trim() !== "") {
+        layoutLegends.set(code as Key, legend.toLocaleUpperCase());
+      }
+    }
+    cache = null;
+  } catch {
+    // Not available here: the US names stay.
+  }
+}
+
 function build(): Map<Key, KeyInfo> {
   const os = platform();
   const map = new Map<Key, KeyInfo>();
   const add = (key: Key, def: KeyDef) => {
-    const label = def.labels?.[os] ?? def.label;
-    const name = def.names?.[os] ?? def.name ?? def.label;
-    map.set(key, { key, label, name, group: def.group, aliases: def.aliases });
+    let label = def.labels?.[os] ?? def.label;
+    let name = def.names?.[os] ?? def.name ?? def.label;
+    let aliases = def.aliases;
+    const legend = LAYOUT_GROUPS.includes(def.group) ? layoutLegends.get(key) : undefined;
+    if (legend && legend !== def.label.toLocaleUpperCase()) {
+      // Keep the US name searchable and visible in the tooltip.
+      aliases = `${aliases ?? ""} ${def.label} ${name}`;
+      name = `${legend}  (the ${def.label} key on a US keyboard)`;
+      label = legend;
+    }
+    map.set(key, { key, label, name, group: def.group, aliases });
   };
   // Ordered the way the picker should list them.
   (

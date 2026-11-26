@@ -16,6 +16,7 @@ import type { RuntimeEvent } from "@/bindings/RuntimeEvent";
 import type { Settings } from "@/bindings/Settings";
 
 import { getBackend, type Backend } from "./api";
+import { loadKeyboardLayout } from "./keys";
 import { duplicateMapping, duplicateProfile, knownLayers, newMapping, newProfile } from "./model";
 import { pushEngineEvents } from "./monitor";
 import { setPlatform } from "./platform";
@@ -254,7 +255,7 @@ export const useApp = create<State>((set, get) => {
       try {
         backend = await getBackend();
         await backend.subscribe(onRuntimeEvent);
-        const snapshot = await backend.snapshot();
+        const [snapshot] = await Promise.all([backend.snapshot(), loadKeyboardLayout()]);
         setPlatform(snapshot.info.platform);
         set({
           ready: true,

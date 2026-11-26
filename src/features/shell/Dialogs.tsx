@@ -5,7 +5,7 @@ import type { Profile } from "@/bindings/Profile";
 import type { Settings } from "@/bindings/Settings";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch, TextInput } from "@/components/ui/inputs";
-import { Badge, Option } from "@/components/ui/misc";
+import { Badge, Kbd, Option } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlays";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const updateSettings = useApp((state) => state.updateSettings);
   const set = <K extends keyof Settings>(key: K, value: Settings[K], coalesce?: string) =>
     updateSettings((s) => ({ ...s, [key]: value }), coalesce);
+  const mod = info.platform === "macos" ? "⌘" : "Ctrl";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Settings" width={600}>
@@ -162,6 +163,32 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             onChange={(value) => set("middle_c_octave", Number(value))}
           />
         </Option>
+      </Group>
+
+      <Group title="Keyboard shortcuts">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          {(
+            [
+              ["N", "Add a mapping"],
+              ["Esc", "Close the editor"],
+              ["↑ / ↓", "Previous / next mapping"],
+              ["Del", "Delete the selected mapping"],
+              [`${mod}+D`, "Duplicate the selected mapping"],
+              [`${mod}+Z`, "Undo"],
+              [`${mod}+Shift+Z`, "Redo"],
+              [`${mod}+F`, "Search mappings"],
+              [`${mod}+M`, "Show / hide the monitor"],
+              [`${mod}+,`, "Settings"],
+              ["F2", "Rename the selected profile"],
+              ["Backspace", "Clear a focused shortcut field"],
+            ] as const
+          ).map(([keys, what]) => (
+            <div key={what} className="flex items-center justify-between gap-3">
+              <span className="text-fg-muted">{what}</span>
+              <Kbd>{keys}</Kbd>
+            </div>
+          ))}
+        </div>
       </Group>
 
       <Group title="About">
