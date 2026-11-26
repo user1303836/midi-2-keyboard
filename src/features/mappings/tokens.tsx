@@ -2,6 +2,7 @@
 // they appear (list rows, editor, monitor).
 
 import {
+  Cable,
   ArrowDown,
   ArrowUp,
   Binary,
@@ -126,6 +127,8 @@ export function ActionView({ action, small = true }: { action: Action | null; sm
       return <Token icon={<Terminal size={12} />}>{text}</Token>;
     case "open":
       return <Token icon={<ExternalLink size={12} />}>{text}</Token>;
+    case "midi":
+      return <Token icon={<Cable size={12} />}>{text}</Token>;
   }
 }
 

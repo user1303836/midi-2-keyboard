@@ -48,6 +48,8 @@ interface State {
   config: Config;
   engine: EngineStatus;
   ports: PortStatus[];
+  /** MIDI output ports (for "Send MIDI" and lights). */
+  outputs: PortStatus[];
   permissions: Permissions;
   backendError: string;
   /** Keys the output backend on this system cannot send. */
@@ -257,6 +259,9 @@ export const useApp = create<State>((set, get) => {
       case "ports":
         set({ ports: event.ports });
         break;
+      case "outputs":
+        set({ outputs: event.outputs });
+        break;
       case "permissions":
         set({
           permissions: event.permissions,
@@ -328,6 +333,7 @@ export const useApp = create<State>((set, get) => {
     config: EMPTY_CONFIG,
     engine: EMPTY_STATUS,
     ports: [],
+    outputs: [],
     permissions: { can_inject: true, can_detect_foreground: true, hint: "" },
     backendError: "",
     unsupportedKeys: [],
@@ -359,6 +365,7 @@ export const useApp = create<State>((set, get) => {
           config: snapshot.config,
           engine: snapshot.engine,
           ports: snapshot.ports,
+          outputs: snapshot.outputs ?? [],
           permissions: snapshot.permissions,
           backendError: snapshot.backend_error,
           unsupportedKeys: snapshot.unsupported_keys ?? [],

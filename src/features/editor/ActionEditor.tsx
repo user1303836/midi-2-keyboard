@@ -42,6 +42,7 @@ import { useApp, useKnownLayers } from "@/lib/store";
 import { cn, move } from "@/lib/utils";
 
 import { KeyComboInput } from "./KeyComboInput";
+import { MidiSendEditor, OutputSelect } from "./MidiSendEditor";
 
 const ACTION_ICONS: Record<ActionType, ReactNode> = {
   keys: <Keyboard size={15} />,
@@ -129,7 +130,7 @@ function Label({ children }: { children: React.ReactNode }) {
   return <span className="shrink-0 text-sm text-fg-muted">{children}</span>;
 }
 
-function LayerInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+export function LayerInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const layers = useKnownLayers();
   const listId = "m2k-layer-names";
   return (
@@ -416,13 +417,25 @@ export function ActionEditor({
           {action.type === "sequence" && (
             <SequenceEditor steps={action.steps} onChange={(steps, key) => onChange({ ...action, steps }, key)} />
           )}
+          {action.type === "midi" && (
+            <div className="flex flex-col gap-1.5">
+              <MidiSendEditor
+                message={action.message}
+                onChange={(message, key) => onChange({ ...action, message }, key && `midi:${key}`)}
+              />
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 text-sm text-fg-muted">To</span>
+                <OutputSelect className="min-w-0 flex-1" value={action.device} onChange={(device) => onChange({ ...action, device })} />
+              </div>
+            </div>
+          )}
         </div>
         <TypeMenu
           label={`Action: ${actionTypeInfo(action.type).label}. Click to send something else`}
           tall={action.type === "keys"}
           icon={ACTION_ICONS[action.type]}
         >
-          {(["Keyboard", "Mouse", "App", "System"] as const).map((group) => (
+          {(["Keyboard", "Mouse", "App", "System", "MIDI"] as const).map((group) => (
             <div key={group}>
               <MenuLabel>{group}</MenuLabel>
               {ACTION_TYPES.filter((info) => info.group === group).map((info) => (
@@ -590,6 +603,16 @@ function StepEditor({ step, onChange }: { step: SequenceStep; onChange: (step: S
     case "mouse_move":
       return (
         <MoveFields x={step.x} y={step.y} absolute={step.absolute} onChange={(x, y, absolute) => onChange({ ...step, x, y, absolute }, "move")} />
+      );
+    case "midi":
+      return (
+        <div className="flex flex-col gap-1.5">
+          <MidiSendEditor message={step.message} onChange={(message, key) => onChange({ ...step, message }, key && `midi:${key}`)} />
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 text-sm text-fg-muted">To</span>
+            <OutputSelect className="min-w-0 flex-1" value={step.device} onChange={(device) => onChange({ ...step, device })} />
+          </div>
+        </div>
       );
   }
 }

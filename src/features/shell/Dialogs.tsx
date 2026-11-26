@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/overlays";
 import { api, restartAsAdmin, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+import { KeyComboInput } from "../editor/KeyComboInput";
 import { AppPicker } from "./AppPicker";
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
@@ -102,6 +103,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         </Option>
         <Option title="Connect new MIDI devices automatically" description="Off: only devices you enabled under MIDI devices are opened.">
           <Switch aria-label="Connect new devices" checked={settings.connect_new_devices} onChange={(v) => set("connect_new_devices", v)} />
+        </Option>
+        <Option
+          title="Pause from anywhere"
+          description="A shortcut that pauses and resumes all output whichever application is in front — the emergency brake when a mapping misbehaves. Modifier keys plus one key, for example Ctrl+Alt+Pause."
+        >
+          <KeyComboInput
+            className="w-[230px]"
+            placeholder="Click, then press a shortcut"
+            keys={settings.pause_hotkey ?? []}
+            onChange={(keys) => set("pause_hotkey", keys)}
+          />
         </Option>
       </Group>
 
@@ -244,6 +256,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
 export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const ports = useApp((state) => state.ports);
+  const outputs = useApp((state) => state.outputs);
   const devices = useApp((state) => state.config.devices);
   const connectNew = useApp((state) => state.config.settings.connect_new_devices);
   const updateDevice = useApp((state) => state.updateDevice);
@@ -326,6 +339,30 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           );
         })}
       </div>
+      {outputs.length > 0 && (
+        <div className="mt-5">
+          <h3 className="mb-1 text-xs font-semibold tracking-wider text-fg-faint uppercase">Outputs</h3>
+          <div className="mb-2 text-sm text-fg-faint">
+            Where “Send MIDI” actions and lights can go. An output is only opened once something is sent to it.
+          </div>
+          <div className="flex flex-col gap-1">
+            {outputs.map((port) => (
+              <div key={port.name} className="flex items-center gap-3 rounded-md px-1 py-[3px]">
+                <span
+                  className={cn(
+                    "size-[7px] shrink-0 rounded-full",
+                    port.state === "connected" ? "bg-midi shadow-[0_0_6px_var(--midi)]" : port.state === "error" ? "bg-warn" : "bg-line-strong",
+                  )}
+                />
+                <span className="selectable min-w-0 flex-1 truncate">{port.name}</span>
+                <span className={cn("shrink-0 text-sm", port.state === "error" ? "text-warn" : "text-fg-faint")}>
+                  {port.state === "connected" ? "in use" : port.state === "error" ? port.error || "could not be opened" : "available"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Dialog>
   );
 }

@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 
 import { BehaviorEditor } from "./BehaviorEditor";
 import { ConditionsEditor, LearnOnce, RateLimitEditor } from "./ExtrasEditor";
+import { FeedbackEditor } from "./FeedbackEditor";
 import { SourceEditor } from "./SourceEditor";
 import { SourceIcon } from "../mappings/tokens";
 
@@ -268,6 +269,17 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
               <ConditionsEditor
                 value={mapping.conditions}
                 onChange={(conditions, key) => update((m) => ({ ...m, conditions }), key && `cond:${key}`)}
+              />
+            </Collapsible>
+            <Collapsible
+              title="Light on the controller"
+              defaultOpen={mapping.feedback !== null}
+              badge={mapping.feedback && <Badge tone="midi">on</Badge>}
+              summary={mapping.feedback ? undefined : "off — nothing is sent back"}
+            >
+              <FeedbackEditor
+                mapping={mapping}
+                onChange={(feedback, key) => update((m) => ({ ...m, feedback }), key && `fb:${key}`)}
               />
             </Collapsible>
             <Collapsible title="Try it" summary="send the action without touching the controller">
