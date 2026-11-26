@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use m2k_core::{Action, Config, Engine, EngineEvent, EngineOptions, EngineStatus, Outcome, SkipReason};
+use m2k_core::{
+    Action, Config, Engine, EngineEvent, EngineOptions, EngineStatus, Outcome, SkipReason,
+};
 use m2k_midi::{Derived, MidiMessage, ParameterChange, ParameterKind, Parser, names::note_name};
 use m2k_output::platform::ForegroundApp;
 use m2k_output::{Injector, Key, MouseButton, OutputError};
@@ -135,7 +137,10 @@ impl Injector for LogInjector {
             held.key_ups += 1;
             held.keys.remove(&key)
         };
-        self.clock.print("KEY", format!("up   {key:?}{}", if was_down { "" } else { "  (was not down)" }));
+        self.clock.print(
+            "KEY",
+            format!("up   {key:?}{}", if was_down { "" } else { "  (was not down)" }),
+        );
         Ok(())
     }
 
@@ -248,7 +253,8 @@ fn parse_hex(tokens: &[String]) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     for token in tokens.iter().flat_map(|t| t.split(',')).filter(|t| !t.is_empty()) {
         let digits = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")).unwrap_or(token);
-        let byte = u8::from_str_radix(digits, 16).map_err(|_| format!("\"{token}\" is not a hex byte"))?;
+        let byte =
+            u8::from_str_radix(digits, 16).map_err(|_| format!("\"{token}\" is not a hex byte"))?;
         bytes.push(byte);
     }
     if bytes.is_empty() {
@@ -270,10 +276,13 @@ fn parse_line(rest: &str, now: &mut u64) -> Result<Step, String> {
     if let Some(args) = rest.strip_prefix("run ") {
         let args = args.trim_start();
         let (delay_ms, json) = match args.split_once(char::is_whitespace) {
-            Some((first, json)) if first.parse::<u32>().is_ok() => (first.parse().unwrap_or(0), json),
+            Some((first, json)) if first.parse::<u32>().is_ok() => {
+                (first.parse().unwrap_or(0), json)
+            }
             _ => (0, args),
         };
-        let action: Action = serde_json::from_str(json).map_err(|e| format!("bad action JSON: {e}"))?;
+        let action: Action =
+            serde_json::from_str(json).map_err(|e| format!("bad action JSON: {e}"))?;
         return Ok(Step::Run { delay_ms, action: Box::new(action) });
     }
     let tokens = tokenize(rest)?;
@@ -282,7 +291,9 @@ fn parse_line(rest: &str, now: &mut u64) -> Result<Step, String> {
     };
     let arg = |i: usize| tokens.get(i).cloned().ok_or_else(|| format!("{first}: missing argument"));
     Ok(match first.as_str() {
-        _ if rest.starts_with('"') => Step::Midi { device: first.clone(), bytes: parse_hex(&tokens[1..])? },
+        _ if rest.starts_with('"') => {
+            Step::Midi { device: first.clone(), bytes: parse_hex(&tokens[1..])? }
+        }
         "midi" => Step::Midi { device: arg(1)?, bytes: parse_hex(&tokens[2..])? },
         "wait" => {
             *now += arg(1)?.parse::<u64>().map_err(|_| "wait: expected milliseconds")?;
@@ -328,7 +339,9 @@ fn parse_script(text: &str) -> Result<Vec<Line>, String> {
                 let ms: u64 = after[..end].parse().map_err(|_| fail("bad time prefix".into()))?;
                 if absolute {
                     if ms < now {
-                        return Err(fail(format!("@{ms} is earlier than the previous line ({now} ms)")));
+                        return Err(fail(format!(
+                            "@{ms} is earlier than the previous line ({now} ms)"
+                        )));
                     }
                     now = ms;
                 } else {
@@ -394,9 +407,18 @@ fn describe_derived(derived: &Derived) -> String {
                 ParameterChange::Increment => "increment",
                 ParameterChange::Decrement => "decrement",
             };
-            format!("{kind} ch{} #{} {change}: msb {} lsb {} (14-bit {})", p.channel, p.number, p.msb, p.lsb, p.value14())
+            format!(
+                "{kind} ch{} #{} {change}: msb {} lsb {} (14-bit {})",
+                p.channel,
+                p.number,
+                p.msb,
+                p.lsb,
+                p.value14()
+            )
         }
-        Derived::ControlChange14(c) => format!("cc14 ch{} #{} = {}", c.channel, c.controller, c.value),
+        Derived::ControlChange14(c) => {
+            format!("cc14 ch{} #{} = {}", c.channel, c.controller, c.value)
+        }
     }
 }
 
@@ -407,7 +429,10 @@ fn describe_status(status: &EngineStatus) -> String {
         if status.auto_switched { " (auto)" } else { "" }
     );
     if status.selected_profile != status.effective_profile {
-        text.push_str(&format!(" [selected {}]", status.selected_profile.as_deref().unwrap_or("-")));
+        text.push_str(&format!(
+            " [selected {}]",
+            status.selected_profile.as_deref().unwrap_or("-")
+        ));
     }
     let keys: Vec<String> = status.held_keys.iter().map(|k| format!("{k:?}")).collect();
     text.push_str(&format!("  held [{}]", keys.join(" ")));
@@ -415,7 +440,11 @@ fn describe_status(status: &EngineStatus) -> String {
     if !status.layers.is_empty() {
         text.push_str(&format!("  layers [{}]", status.layers.join(" ")));
     }
-    for (flag, name) in [(status.paused, "PAUSED"), (status.focus_suspended, "FOCUS-SUSPENDED"), (status.learning, "LEARNING")] {
+    for (flag, name) in [
+        (status.paused, "PAUSED"),
+        (status.focus_suspended, "FOCUS-SUSPENDED"),
+        (status.learning, "LEARNING"),
+    ] {
         if flag {
             text.push_str("  ");
             text.push_str(name);
@@ -480,7 +509,8 @@ fn print_event(clock: &Clock, options: PrintOptions, tally: &Mutex<Tally>, event
                 Outcome::Skipped { reason } => format!("skipped: {}", skip_reason(*reason)),
                 Outcome::Failed { error } => format!("FAILED: {error}"),
             };
-            let who = if fired.mapping_id.is_empty() { "(test)" } else { fired.mapping_id.as_str() };
+            let who =
+                if fired.mapping_id.is_empty() { "(test)" } else { fired.mapping_id.as_str() };
             clock.print("FIRE", format!("{who}: {}  [{outcome}]", fired.description));
         }
         EngineEvent::Status(status) => clock.print("STAT", describe_status(status)),
@@ -493,8 +523,10 @@ fn print_event(clock: &Clock, options: PrintOptions, tally: &Mutex<Tally>, event
 // ---------------------------------------------------------------------------------------------
 
 fn load_config(path: &PathBuf) -> Result<Config, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let (config, warnings) = m2k_core::store::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let (config, warnings) =
+        m2k_core::store::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     for warning in warnings {
         eprintln!("config warning: {warning}");
     }

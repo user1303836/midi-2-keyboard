@@ -182,7 +182,10 @@ pub struct AppRule {
 
 impl AppRule {
     pub fn new(matcher: &AppMatcher) -> Self {
-        AppRule { process: TextPattern::new(&matcher.process), title: TextPattern::new(&matcher.title) }
+        AppRule {
+            process: TextPattern::new(&matcher.process),
+            title: TextPattern::new(&matcher.title),
+        }
     }
 
     pub fn matches(&self, app: &Foreground) -> bool {

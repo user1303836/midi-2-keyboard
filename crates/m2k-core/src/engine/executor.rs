@@ -288,10 +288,8 @@ impl Cx {
                         run.buttons.remove(pos);
                         self.release_button(info, *button);
                     } else if let Err(error) = self.out.button_up_unheld(*button) {
-                        let what = format!(
-                            "release {} button",
-                            super::compile::button_name(*button)
-                        );
+                        let what =
+                            format!("release {} button", super::compile::button_name(*button));
                         self.report_failure(info, what, error);
                     }
                 }

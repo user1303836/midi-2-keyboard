@@ -4,9 +4,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use m2k_midi::MidiState;
 
+use super::timers::TimerId;
 use crate::model::{ValueEncoding, ValueRange};
 
 /// Index of a device in [`Devices`]. Stable for the life of the engine.
@@ -64,25 +66,46 @@ pub fn relative_ticks(value: u8, encoding: ValueEncoding) -> i32 {
     }
 }
 
+/// How long a device that sends Active Sensing may stay silent before it counts as lost (the
+/// MIDI spec says 300 ms; a little slack for busy systems).
+pub const SENSING_TIMEOUT: Duration = Duration::from_millis(350);
+
 /// Everything the engine knows about one input device.
 pub struct DeviceState {
+    pub name: Arc<str>,
     pub midi: MidiState,
     /// Notes held per channel (bit per note). Kept by the engine because releases of
     /// pressure sources depend on "no note held on this channel any more".
     held: [u128; 16],
     /// MIDI clock ticks since the last Start (or since the clock was first seen).
     pub clock_ticks: u64,
+    /// The device sends Active Sensing, so silence means the connection is gone (a cable pulled
+    /// out of an interface whose port stays present).
+    pub sensing: bool,
+    /// When the last message from this device arrived.
+    pub last_heard: Option<Instant>,
+    pub sensing_timer: Option<TimerId>,
 }
 
 impl DeviceState {
-    fn new() -> Self {
-        DeviceState { midi: MidiState::new(), held: [0; 16], clock_ticks: 0 }
+    fn new(name: Arc<str>) -> Self {
+        DeviceState {
+            name,
+            midi: MidiState::new(),
+            held: [0; 16],
+            clock_ticks: 0,
+            sensing: false,
+            last_heard: None,
+            sensing_timer: None,
+        }
     }
 
+    /// Forgets the device's MIDI state (the caller cancels `sensing_timer`).
     pub fn reset(&mut self) {
         self.midi.reset();
         self.held = [0; 16];
         self.clock_ticks = 0;
+        self.sensing = false;
     }
 
     pub fn set_note(&mut self, channel: u8, note: u8, on: bool) {
@@ -135,8 +158,9 @@ impl Devices {
             return *id;
         }
         let id = self.list.len() as DeviceId;
-        self.list.push(DeviceState::new());
-        self.by_name.insert(Arc::from(name), id);
+        let name: Arc<str> = Arc::from(name);
+        self.list.push(DeviceState::new(name.clone()));
+        self.by_name.insert(name, id);
         id
     }
 
@@ -146,6 +170,14 @@ impl Devices {
 
     pub fn get_mut(&mut self, id: DeviceId) -> &mut DeviceState {
         &mut self.list[usize::from(id)]
+    }
+
+    /// After the timer queue was cleared: no device has a watchdog timer any more (they are
+    /// re-armed by the next message).
+    pub fn forget_timers(&mut self) {
+        for device in &mut self.list {
+            device.sensing_timer = None;
+        }
     }
 
     /// [`crate::model::Condition::NoteHeld`]: the note is held on any device.

@@ -96,29 +96,76 @@ impl CSource {
 }
 
 pub enum CSourceKind {
-    Note { notes: ValueRange, velocity: ValueRange },
-    Cc { controller: u8, range: ValueRange, encoding: ValueEncoding },
-    Cc14 { controller: u8, range: ValueRange },
-    Param { kind: ParameterKind, number: u16, range: ValueRange, hires: bool },
-    Program { programs: ValueRange },
-    PitchBend { range: ValueRange },
-    ChannelPressure { range: ValueRange },
-    PolyPressure { notes: ValueRange, range: ValueRange },
+    Note {
+        notes: ValueRange,
+        velocity: ValueRange,
+    },
+    Cc {
+        controller: u8,
+        range: ValueRange,
+        encoding: ValueEncoding,
+    },
+    Cc14 {
+        controller: u8,
+        range: ValueRange,
+    },
+    Param {
+        kind: ParameterKind,
+        number: u16,
+        range: ValueRange,
+        hires: bool,
+    },
+    Program {
+        programs: ValueRange,
+    },
+    PitchBend {
+        range: ValueRange,
+    },
+    ChannelPressure {
+        range: ValueRange,
+    },
+    PolyPressure {
+        notes: ValueRange,
+        range: ValueRange,
+    },
     /// `None` when the configured pattern is invalid: never matches (reported once).
-    SysEx { pattern: Option<SysExPattern> },
-    Clock { divisor: u16 },
-    SongSelect { songs: ValueRange },
-    SongPosition { range: ValueRange },
-    System { message: SystemMessage },
+    SysEx {
+        pattern: Option<SysExPattern>,
+    },
+    Clock {
+        divisor: u16,
+    },
+    SongSelect {
+        songs: ValueRange,
+    },
+    SongPosition {
+        range: ValueRange,
+    },
+    System {
+        message: SystemMessage,
+    },
 }
 
 pub enum CBehavior {
-    Trigger { on_press: Option<CAction>, on_release: Option<CAction>, repeat: Option<Repeat> },
+    Trigger {
+        on_press: Option<CAction>,
+        on_release: Option<CAction>,
+        repeat: Option<Repeat>,
+    },
     /// `pulse` is what a pulse source (press and release in the same instant) does: a tap of the
     /// target, so the press is long enough to register.
-    Hold { target: CHoldTarget, auto_repeat: bool, pulse: Option<CAction> },
-    Toggle { target: CHoldTarget },
-    Cycle { actions: Vec<CAction>, reset_after_ms: Option<u32> },
+    Hold {
+        target: CHoldTarget,
+        auto_repeat: bool,
+        pulse: Option<CAction>,
+    },
+    Toggle {
+        target: CHoldTarget,
+    },
+    Cycle {
+        actions: Vec<CAction>,
+        reset_after_ms: Option<u32>,
+    },
     TapHold {
         tap: Option<CAction>,
         hold: Option<CAction>,
@@ -126,9 +173,21 @@ pub enum CBehavior {
         hold_ms: u32,
     },
     /// `highest` = the largest press count with an action (0 = nothing configured).
-    MultiTap { actions: [Option<CAction>; 3], highest: u8, window_ms: u32 },
-    Change { action: CAction },
-    Step { up: Option<CAction>, down: Option<CAction>, step: u16, max_burst: u16, invert: bool },
+    MultiTap {
+        actions: [Option<CAction>; 3],
+        highest: u8,
+        window_ms: u32,
+    },
+    Change {
+        action: CAction,
+    },
+    Step {
+        up: Option<CAction>,
+        down: Option<CAction>,
+        step: u16,
+        max_burst: u16,
+        invert: bool,
+    },
 }
 
 pub enum CCondition {
@@ -171,7 +230,10 @@ pub enum ActionKind {
     /// OS input, played step by step through the owner's action queue.
     Output(Vec<Prim>),
     SwitchProfile(ProfileTarget),
-    Layer { layer: Arc<str>, op: LayerOp },
+    Layer {
+        layer: Arc<str>,
+        op: LayerOp,
+    },
     Engine(EngineOp),
     Launch(Launch),
 }
@@ -188,11 +250,21 @@ pub enum Prim {
     Down(Key),
     /// Release a key this action pressed.
     Up(Key),
-    Text { text: TextTemplate, char_delay_ms: u32 },
+    Text {
+        text: TextTemplate,
+        char_delay_ms: u32,
+    },
     ButtonDown(MouseButton),
     ButtonUp(MouseButton),
-    Scroll { dx: i32, dy: i32 },
-    Move { x: i32, y: i32, absolute: bool },
+    Scroll {
+        dx: i32,
+        dy: i32,
+    },
+    Move {
+        x: i32,
+        y: i32,
+        absolute: bool,
+    },
     Wait(u32),
 }
 
@@ -350,7 +422,8 @@ fn compile_mapping(
             hold_ms: *hold_ms,
         },
         Behavior::MultiTap { single, double, triple, window_ms } => {
-            let actions = [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
+            let actions =
+                [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
             let highest = actions.iter().rposition(Option::is_some).map_or(0, |i| i as u8 + 1);
             CBehavior::MultiTap { actions, highest, window_ms: *window_ms }
         }
@@ -407,7 +480,11 @@ fn hold_target(target: &HoldTarget) -> CHoldTarget {
             (HoldWhat::Layer(Arc::from(layer.as_str())), format!("layer \"{layer}\""))
         }
     };
-    CHoldTarget { what, hold_label: format!("hold {label}"), release_label: format!("release {label}") }
+    CHoldTarget {
+        what,
+        hold_label: format!("hold {label}"),
+        release_label: format!("release {label}"),
+    }
 }
 
 /// Compiles one action with the given settings (tap duration, stagger).
@@ -444,11 +521,9 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             Class::Os,
             move_label(*x, *y, *absolute),
         ),
-        Action::Sequence { steps } => (
-            ActionKind::Output(sequence(steps, settings, gap)),
-            Class::Os,
-            sequence_label(steps),
-        ),
+        Action::Sequence { steps } => {
+            (ActionKind::Output(sequence(steps, settings, gap)), Class::Os, sequence_label(steps))
+        }
         Action::SwitchProfile { target } => (
             ActionKind::SwitchProfile(target.clone()),
             Class::Internal,

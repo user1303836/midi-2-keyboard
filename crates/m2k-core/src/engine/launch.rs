@@ -155,7 +155,10 @@ fn init_thread() {
     // ShellExecute may use COM (shell extensions); initialize this thread once.
     // SAFETY: called once on this thread, reserved pointer must be null.
     unsafe {
-        CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32);
+        CoInitializeEx(
+            std::ptr::null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        );
     }
 }
 
@@ -171,7 +174,8 @@ fn open(target: &str) -> Result<(), String> {
     if target.is_empty() {
         return Err("nothing to open".into());
     }
-    let wide = |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
+    let wide =
+        |s: &str| -> Vec<u16> { std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect() };
     let verb = wide("open");
     let file = wide(target);
     // SAFETY: NUL-terminated UTF-16 strings that outlive the call; null window, parameters and

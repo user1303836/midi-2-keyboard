@@ -56,17 +56,37 @@ pub enum TapPhase {
     /// Waiting for `hold_ms` (the timer decides "hold").
     Pending(TimerId),
     /// Decided "hold"; `engaged` = the hold target is engaged.
-    Holding { engaged: bool },
+    Holding {
+        engaged: bool,
+    },
 }
 
 pub enum State {
-    Trigger { repeat: Option<TimerId>, last: Ctx },
-    Hold { engaged: bool },
+    Trigger {
+        repeat: Option<TimerId>,
+        last: Ctx,
+    },
+    Hold {
+        engaged: bool,
+    },
     /// `by` = the device whose press latched it (a disconnect unlatches).
-    Toggle { latched: bool, by: Option<DeviceId> },
-    Cycle { index: usize, last_press: Option<Instant> },
-    TapHold { phase: TapPhase, press: Ctx },
-    MultiTap { count: u8, timer: Option<TimerId>, last: Ctx },
+    Toggle {
+        latched: bool,
+        by: Option<DeviceId>,
+    },
+    Cycle {
+        index: usize,
+        last_press: Option<Instant>,
+    },
+    TapHold {
+        phase: TapPhase,
+        press: Ctx,
+    },
+    MultiTap {
+        count: u8,
+        timer: Option<TimerId>,
+        last: Ctx,
+    },
     Plain,
 }
 
@@ -106,7 +126,11 @@ impl MappingRt {
     pub fn new(key: u64, def: &CMapping) -> Self {
         MappingRt {
             key,
-            info: OwnerInfo { owner: key, profile_id: def.profile_id.clone(), mapping_id: def.id.clone() },
+            info: OwnerInfo {
+                owner: key,
+                profile_id: def.profile_id.clone(),
+                mapping_id: def.id.clone(),
+            },
             live: false,
             instances: Vec::new(),
             step_refs: Vec::new(),
@@ -291,7 +315,13 @@ fn run_slot(
 }
 
 /// At most one "rate limited" report per mapping per interval.
-fn note_rate_limited(rt: &mut MappingRt, cx: &mut Cx, action: &CAction, ctx: &Ctx, interval_ms: u32) {
+fn note_rate_limited(
+    rt: &mut MappingRt,
+    cx: &mut Cx,
+    action: &CAction,
+    ctx: &Ctx,
+    interval_ms: u32,
+) {
     let window = Cx::ms(interval_ms.max(1));
     if rt.limit_reported.is_some_and(|at| cx.now.saturating_duration_since(at) < window) {
         return;
@@ -362,7 +392,11 @@ pub fn on_edge(
                     return;
                 }
                 if !cx.conditions_hold(&def.conditions) {
-                    cx.report_skip(&rt.info, target.hold_label.clone(), SkipReason::ConditionFailed);
+                    cx.report_skip(
+                        &rt.info,
+                        target.hold_label.clone(),
+                        SkipReason::ConditionFailed,
+                    );
                     return;
                 }
                 if cx.engage(&rt.info, target, *auto_repeat) {
@@ -728,14 +762,19 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
 
 /// A device disconnected: forget its instances and Step references; whatever they were holding
 /// is released (without firing release actions); toggles latched from that device unlatch.
-pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: DeviceId) {
+/// Returns whether the device was holding anything here.
+pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: DeviceId) -> bool {
+    let latched_here =
+        matches!(rt.state, State::Toggle { latched: true, by: Some(by) } if by == device);
     let before = rt.instances.len();
     rt.instances.retain(|i| i.key.device() != device);
     rt.step_refs.retain(|(k, _)| k.device() != device);
     let removed = rt.instances.len() != before;
     let idle = rt.instances.is_empty();
     match (&def.behavior, &mut rt.state) {
-        (CBehavior::Hold { target, .. }, State::Hold { engaged }) if removed && idle && *engaged => {
+        (CBehavior::Hold { target, .. }, State::Hold { engaged })
+            if removed && idle && *engaged =>
+        {
             cx.disengage(&rt.info, target, true);
             *engaged = false;
         }
@@ -765,4 +804,5 @@ pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: Devi
         }
         _ => {}
     }
+    removed || latched_here
 }

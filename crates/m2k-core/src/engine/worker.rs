@@ -27,7 +27,7 @@ use super::foreground::Tracker;
 use super::launch::Launcher;
 use super::output::Output;
 use super::pattern::Foreground;
-use super::source::{DeviceId, InstKey, Obs, relative_ticks};
+use super::source::{DeviceId, InstKey, Obs, SENSING_TIMEOUT, relative_ticks};
 use super::sys::TimerResolution;
 use super::timers::TimerId;
 use crate::events::{EngineEvent, EngineStatus, MidiLog, Outcome};
@@ -151,7 +151,13 @@ impl Worker {
         tx: Sender<Envelope>,
     ) -> Self {
         let start = Instant::now();
-        let empty = Config { profiles: Vec::new(), selected_profile: None, ..config.clone() };
+        let empty = Config {
+            version: config.version,
+            settings: config.settings.clone(),
+            devices: Vec::new(),
+            profiles: Vec::new(),
+            selected_profile: None,
+        };
         let cfg = compile::compile(&empty);
         let out = Output::new(options.injector);
         let cx = Cx::new(start, cfg.settings.clone(), out, Launcher::new(tx.clone()));
@@ -244,7 +250,13 @@ impl Worker {
             | TimerKind::MultiTap(key)
             | TimerKind::Limiter(key, _) => {
                 if let Some(&i) = self.by_key.get(&key) {
-                    behavior::on_timer(&mut self.maps[i], &self.cfg.mappings[i], &mut self.cx, kind, id);
+                    behavior::on_timer(
+                        &mut self.maps[i],
+                        &self.cfg.mappings[i],
+                        &mut self.cx,
+                        kind,
+                        id,
+                    );
                 }
             }
             TimerKind::Hold(owner) => self.cx.on_hold_timer(owner, id),
@@ -260,7 +272,52 @@ impl Worker {
                     self.status.timer = None;
                 }
             }
+            TimerKind::Sensing(dev) => self.on_sensing_timer(dev, id),
         }
+    }
+
+    /// Active Sensing watchdog: a device that sends it and then goes silent has lost its
+    /// connection (MIDI spec: receivers turn their notes off). Release what it was holding.
+    fn on_sensing_timer(&mut self, dev: DeviceId, id: TimerId) {
+        let state = self.cx.devices.get_mut(dev);
+        if state.sensing_timer != Some(id) {
+            return;
+        }
+        state.sensing_timer = None;
+        if !state.sensing {
+            return;
+        }
+        let deadline = state.last_heard.map(|at| at + SENSING_TIMEOUT);
+        if let Some(deadline) = deadline
+            && deadline > self.cx.now
+        {
+            let timer = self.cx.timers.schedule(deadline, TimerKind::Sensing(dev));
+            self.cx.devices.get_mut(dev).sensing_timer = Some(timer);
+            return;
+        }
+        let name = state.name.clone();
+        if self.release_device(dev) {
+            self.cx.error(format!(
+                "\"{name}\" stopped sending (its Active Sensing went silent; was a cable \
+                 unplugged?). Everything it was holding has been released."
+            ));
+        }
+    }
+
+    /// Forgets a device's state and releases whatever its notes and controls were holding.
+    /// Returns whether it was holding anything.
+    fn release_device(&mut self, dev: DeviceId) -> bool {
+        let mut released = false;
+        for i in 0..self.maps.len() {
+            released |=
+                behavior::drop_device(&mut self.maps[i], &self.cfg.mappings[i], &mut self.cx, dev);
+        }
+        let state = self.cx.devices.get_mut(dev);
+        state.reset();
+        let mut timer = state.sensing_timer.take();
+        self.cx.timers.cancel_slot(&mut timer);
+        self.cx.dirty = true;
+        released
     }
 
     fn apply_requests(&mut self) {
@@ -288,7 +345,8 @@ impl Worker {
     /// everything held by changed or removed mappings is released.
     fn install(&mut self, config: &Config) {
         let cfg = compile::compile(config);
-        for error in &cfg.errors {
+        // Reported once: an unrelated edit does not repeat a problem the user already saw.
+        for error in cfg.errors.iter().filter(|e| !self.cfg.errors.contains(e)) {
             self.cx.error(error.clone());
         }
 
@@ -334,8 +392,8 @@ impl Worker {
         // manual selection. Otherwise keep the current selection (a profile switch action may
         // have changed it since, and the app echoes it back in later configs).
         let current = self.profiles.selected.map(|i| self.cfg.profiles[i].id.to_string());
-        let selected_now = cfg.selected_profile != self.cfg.selected_profile
-            && cfg.selected_profile != current;
+        let selected_now =
+            cfg.selected_profile != self.cfg.selected_profile && cfg.selected_profile != current;
         let wanted = if selected_now { cfg.selected_profile.clone() } else { current };
 
         self.cfg = cfg;
@@ -425,13 +483,18 @@ impl Worker {
                 Some(index) => index,
                 None => {
                     let error = format!("there is no profile with id \"{id}\"");
-                    self.cx.report(info, format!("switch to profile \"{id}\""), Outcome::Failed { error });
+                    self.cx.report(
+                        info,
+                        format!("switch to profile \"{id}\""),
+                        Outcome::Failed { error },
+                    );
                     return;
                 }
             },
             ProfileTarget::Next | ProfileTarget::Previous => {
-                let selectable: Vec<usize> =
-                    (0..self.cfg.profiles.len()).filter(|&i| !self.cfg.profiles[i].always_on).collect();
+                let selectable: Vec<usize> = (0..self.cfg.profiles.len())
+                    .filter(|&i| !self.cfg.profiles[i].always_on)
+                    .collect();
                 if selectable.is_empty() {
                     return;
                 }
@@ -519,14 +582,9 @@ impl Worker {
     }
 
     fn device_disconnected(&mut self, name: &str) {
-        let Some(device) = self.cx.devices.id(name) else {
-            return;
-        };
-        for i in 0..self.maps.len() {
-            behavior::drop_device(&mut self.maps[i], &self.cfg.mappings[i], &mut self.cx, device);
+        if let Some(device) = self.cx.devices.id(name) {
+            self.release_device(device);
         }
-        self.cx.devices.get_mut(device).reset();
-        self.cx.dirty = true;
     }
 
     // -----------------------------------------------------------------------------------------
@@ -555,6 +613,16 @@ impl Worker {
 
     fn on_midi(&mut self, device: String, message: MidiMessage) {
         let dev = self.cx.devices.id_or_insert(&device);
+        let now = self.cx.now;
+        let state = self.cx.devices.get_mut(dev);
+        state.last_heard = Some(now);
+        if message == MidiMessage::ActiveSensing {
+            state.sensing = true;
+        }
+        if state.sensing && state.sensing_timer.is_none() {
+            let timer = self.cx.timers.schedule(now + SENSING_TIMEOUT, TimerKind::Sensing(dev));
+            self.cx.devices.get_mut(dev).sensing_timer = Some(timer);
+        }
         let derived = self.cx.devices.get_mut(dev).midi.update(&message);
         let mark = self.cx.outbox.len();
         let mut matched = Vec::new();
@@ -648,7 +716,8 @@ impl Worker {
         let base = Ctx { device: dev, ..Ctx::default() };
         let system = InstKey::new(dev, 0, 0);
         match *message {
-            MidiMessage::NoteOn { channel, note, .. } | MidiMessage::NoteOff { channel, note, .. } => {
+            MidiMessage::NoteOn { channel, note, .. }
+            | MidiMessage::NoteOff { channel, note, .. } => {
                 let Some(event) = message.note_event() else {
                     return;
                 };
@@ -730,26 +799,57 @@ impl Worker {
             MidiMessage::PitchBend { channel, value } => {
                 let ctx = Ctx { channel, value: i32::from(value), ..base };
                 let inst = InstKey::new(dev, channel, 0);
-                self.continuous(&index.pitch_bend, name, Some(channel), inst, value, ctx, matched, |kind| match kind {
-                    CSourceKind::PitchBend { range } => Some(*range),
-                    _ => None,
-                });
+                self.continuous(
+                    &index.pitch_bend,
+                    name,
+                    Some(channel),
+                    inst,
+                    value,
+                    ctx,
+                    matched,
+                    |kind| match kind {
+                        CSourceKind::PitchBend { range } => Some(*range),
+                        _ => None,
+                    },
+                );
             }
             MidiMessage::ChannelPressure { channel, pressure } => {
                 let ctx = Ctx { channel, value: i32::from(pressure), ..base };
                 let inst = InstKey::new(dev, channel, 0);
-                self.continuous(&index.channel_pressure, name, Some(channel), inst, u16::from(pressure), ctx, matched, |kind| match kind {
-                    CSourceKind::ChannelPressure { range } => Some(*range),
-                    _ => None,
-                });
+                self.continuous(
+                    &index.channel_pressure,
+                    name,
+                    Some(channel),
+                    inst,
+                    u16::from(pressure),
+                    ctx,
+                    matched,
+                    |kind| match kind {
+                        CSourceKind::ChannelPressure { range } => Some(*range),
+                        _ => None,
+                    },
+                );
             }
             MidiMessage::PolyPressure { channel, note, pressure } => {
                 let ctx = Ctx { channel, note: Some(note), value: i32::from(pressure), ..base };
                 let inst = InstKey::new(dev, channel, u16::from(note));
-                self.continuous(&index.poly_pressure, name, Some(channel), inst, u16::from(pressure), ctx, matched, |kind| match kind {
-                    CSourceKind::PolyPressure { notes, range } if notes.contains(u16::from(note)) => Some(*range),
-                    _ => None,
-                });
+                self.continuous(
+                    &index.poly_pressure,
+                    name,
+                    Some(channel),
+                    inst,
+                    u16::from(pressure),
+                    ctx,
+                    matched,
+                    |kind| match kind {
+                        CSourceKind::PolyPressure { notes, range }
+                            if notes.contains(u16::from(note)) =>
+                        {
+                            Some(*range)
+                        }
+                        _ => None,
+                    },
+                );
             }
             MidiMessage::SysEx { ref data } => {
                 self.pulse(&index.sysex, name, None, system, base, matched, |kind| {
@@ -772,10 +872,19 @@ impl Worker {
             }
             MidiMessage::SongPosition { position } => {
                 let ctx = Ctx { value: i32::from(position), ..base };
-                self.continuous(&index.song_position, name, None, system, position, ctx, matched, |kind| match kind {
-                    CSourceKind::SongPosition { range } => Some(*range),
-                    _ => None,
-                });
+                self.continuous(
+                    &index.song_position,
+                    name,
+                    None,
+                    system,
+                    position,
+                    ctx,
+                    matched,
+                    |kind| match kind {
+                        CSourceKind::SongPosition { range } => Some(*range),
+                        _ => None,
+                    },
+                );
             }
             MidiMessage::Start => {
                 self.cx.devices.get_mut(dev).clock_ticks = 0;
@@ -784,7 +893,9 @@ impl Worker {
             MidiMessage::Continue => {
                 self.system(index, SystemMessage::Continue, name, system, base, matched)
             }
-            MidiMessage::Stop => self.system(index, SystemMessage::Stop, name, system, base, matched),
+            MidiMessage::Stop => {
+                self.system(index, SystemMessage::Stop, name, system, base, matched)
+            }
             MidiMessage::TuneRequest => {
                 self.system(index, SystemMessage::TuneRequest, name, system, base, matched)
             }
@@ -869,10 +980,19 @@ impl Worker {
                 };
                 let inst = InstKey::new(dev, cc.channel, u16::from(cc.controller));
                 let list = &index.cc14[usize::from(cc.controller & 31)];
-                self.continuous(list, name, Some(cc.channel), inst, cc.value, ctx, matched, |kind| match kind {
-                    CSourceKind::Cc14 { range, .. } => Some(*range),
-                    _ => None,
-                });
+                self.continuous(
+                    list,
+                    name,
+                    Some(cc.channel),
+                    inst,
+                    cc.value,
+                    ctx,
+                    matched,
+                    |kind| match kind {
+                        CSourceKind::Cc14 { range, .. } => Some(*range),
+                        _ => None,
+                    },
+                );
             }
         }
     }
@@ -913,9 +1033,8 @@ impl Worker {
         self.cx.devices.get_mut(dev).clear_notes(channel);
         let lists = [&index.note, &index.poly_pressure, &index.channel_pressure];
         for &i in lists.into_iter().flatten() {
-            let active = self.maps[i].active(|key| {
-                key.device() == dev && channel.is_none_or(|c| key.channel() == c)
-            });
+            let active = self.maps[i]
+                .active(|key| key.device() == dev && channel.is_none_or(|c| key.channel() == c));
             for (key, ctx) in active {
                 let ctx = Ctx { velocity: ctx.velocity.map(|_| 0), value: 0, ..ctx };
                 self.feed(i, key, Obs::Inactive, ctx, matched);
@@ -966,9 +1085,7 @@ impl Worker {
             if range.contains(value) {
                 continue;
             }
-            let active = self.maps[i].active(|key| {
-                key.device() == dev && key.channel() == channel
-            });
+            let active = self.maps[i].active(|key| key.device() == dev && key.channel() == channel);
             for (key, ctx) in active {
                 if number.is_some_and(|n| ctx.controller != Some(n)) {
                     continue;
@@ -1086,9 +1203,29 @@ impl Worker {
         self.cx.exec = Executor::default();
         self.cx.typematic = None;
         self.cx.requests.clear();
+        self.cx.devices.forget_timers();
+        // The panic may have struck in the middle of a config swap: re-derive everything that
+        // is indexed by mapping position.
+        if self.maps.len() != self.cfg.mappings.len() {
+            self.maps.clear();
+            for def in &self.cfg.mappings {
+                self.next_key += 1;
+                self.maps.push(MappingRt::new(self.next_key, def));
+            }
+        }
         for (rt, def) in self.maps.iter_mut().zip(&self.cfg.mappings) {
             rt.reset(def);
         }
+        self.by_key = self.maps.iter().enumerate().map(|(i, m)| (m.key, i)).collect();
+        let profiles = self.cfg.profiles.len();
+        if self.profiles.selected.is_some_and(|i| i >= profiles) {
+            self.profiles.selected = resolve_selected(&self.cfg, None);
+        }
+        if self.profiles.candidate.is_some_and(|i| i >= profiles) {
+            self.profiles.candidate = None;
+        }
+        self.profiles.effective = None;
+        self.refresh_liveness(true);
         self.tests.clear();
         self.status.timer = None;
         self.status.pending = true;

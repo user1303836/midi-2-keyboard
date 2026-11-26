@@ -67,6 +67,8 @@ pub enum TimerKind {
     Typematic,
     /// A delayed `run_action`.
     RunAction(u64),
+    /// Active Sensing watchdog of a device.
+    Sensing(DeviceId),
     /// Coalesced status emission.
     Status,
 }
