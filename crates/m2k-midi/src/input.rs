@@ -48,9 +48,10 @@
 //!
 //! # Platform notes
 //!
-//! - **Windows:** many WinMM drivers allow one client at a time. Opening such a port while
-//!   another program has it fails with an actionable `error`; it is retried on every poll, so it
-//!   connects as soon as the other program lets go. A device unplugged and re-plugged within a
+//! - **Windows:** many drivers (including the USB MIDI class driver on Windows 10) allow one
+//!   program at a time, whichever MIDI API it uses (WinRT is refused just like WinMM). Opening such
+//!   a port while another program has it fails with an actionable `error`; it is retried on every
+//!   poll, so it connects as soon as the other program lets go. A device unplugged and re-plugged within a
 //!   single poll interval may go unnoticed (WinMM gives no way to tell the new device instance
 //!   from the old one); use a shorter `poll_interval_ms` if that matters.
 //! - **macOS:** CoreMIDI delivers setup changes (and refreshes the process's port list) on the run
@@ -743,25 +744,29 @@ impl Clients {
 /// Turns a midir connect error into something the user can act on.
 ///
 /// On Windows a failing `midiInOpen` practically always means another program has the port
-/// open: most WinMM drivers, including the built-in USB MIDI class driver, accept one client at a
-/// time. Verified with a class-compliant controller: a second open from another process fails
-/// with `MMSYSERR_NOMEM`, one from the same process with `MMSYSERR_ALLOCATED`. midir reports the
-/// latter by name and every other code as the same generic message, hence the prefix match.
+/// open: most drivers, including the built-in USB MIDI class driver, accept one client at a time.
+/// Verified with a class-compliant controller on Windows 10: a second open from another process
+/// fails with `MMSYSERR_NOMEM`, one from the same process with `MMSYSERR_ALLOCATED`; midir names
+/// the latter and reports every other code as the same generic message, hence the prefix match.
+/// The limit is the driver's, not WinMM's: the WinRT MIDI API (midir's `winrt` backend) is refused
+/// the same way in both directions, so switching APIs cannot get around it. Only Windows MIDI
+/// Services (Windows 11) makes such devices multi-client.
 fn describe_connect_error(kind: ConnectErrorKind) -> String {
     const WINMM_OPEN_FAILED: &str = "could not create Windows MM MIDI input port";
+    const SHARING_ADVICE: &str = "Windows lets only one program at a time use this MIDI device. \
+        Close the other program (for example a DAW or another MIDI tool) and the port connects \
+        automatically. To use the device in both programs, have the other program pass it on to \
+        a virtual MIDI port (for example with loopMIDI) and use that port here; Windows 11 with \
+        Windows MIDI Services can share devices directly.";
     match kind {
         ConnectErrorKind::InvalidPort => "The port disappeared while it was being opened.".into(),
         ConnectErrorKind::Other(message) if message.contains("MMSYSERR_ALLOCATED") => {
-            "In use by another application (this Windows MIDI driver allows only one program at \
-             a time). Close the other program, for example a DAW or another MIDI tool, and the \
-             port connects automatically."
-                .into()
+            format!("In use by another program. {SHARING_ADVICE}")
         }
         ConnectErrorKind::Other(message) if message.starts_with(WINMM_OPEN_FAILED) => {
-            "Could not open the port: it is probably in use by another application (most Windows \
-             MIDI drivers allow only one program at a time). Close the other program, for example \
-             a DAW or another MIDI tool, and the port connects automatically."
-                .into()
+            format!(
+                "Could not open the port; it is probably in use by another program. {SHARING_ADVICE}"
+            )
         }
         ConnectErrorKind::Other(message) => format!("Could not open the port: {message}."),
     }
