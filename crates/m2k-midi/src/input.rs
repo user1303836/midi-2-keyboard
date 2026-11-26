@@ -38,9 +38,11 @@
 //!   controller to another port would turn it into a different device and orphan its alias and
 //!   every mapping pinned to it. WinMM cuts names to 31 characters *after* adding the prefix, so
 //!   a long name keeps fewer characters on another port (`MIDIIN2 (Launchkey Mini MK3 MID` on
-//!   the first, `MIDIIN2 (2- Launchkey Mini MK3 ` on the next). Every name is therefore cut to
-//!   the 27 characters that all of its instances keep (31 minus the longest prefix, `10- `),
-//!   whether or not it was truncated: `MIDIIN2 (Launchkey Mini MK3`. Two identical devices
+//!   the first, `MIDIIN2 (2- Launchkey Mini MK3 ` on the next). The name of a USB device (its
+//!   device interface path starts with `\\?\usb#`) is therefore cut to the 27 characters that
+//!   all of its instances keep (31 minus the longest prefix, `10- `), whether or not it was
+//!   truncated: `MIDIIN2 (Launchkey Mini MK3`. Software ports never get a prefix and keep their
+//!   whole name (`Microsoft GS Wavetable Synth`, loopMIDI ports). Two identical devices
 //!   connected at the same time are told apart by the ` #n` suffix like everywhere else. Ports
 //!   whose driver does not answer the device-interface query are not listed by midir at all.
 //! - **Linux (ALSA):** midir reports `client:port 20:0`; the trailing sequencer address changes
@@ -71,6 +73,10 @@
 //!   send to us. It is listed with `is_virtual: true` and obeys the policy like any port (disabled
 //!   = removed from the system). Enumerated ports that are our own virtual port are never opened
 //!   (that would be a feedback loop).
+//! - **Linux:** ports of an ALSA client with our `client_name` are never listed: they are the
+//!   ports midir creates for our own connections (the output side's look like inputs), and
+//!   opening them would feed what we send back into what we receive. Give the input and output
+//!   managers the same `client_name` (the default).
 //! - midir's ALSA and CoreMIDI backends assemble SysEx split over several OS packets themselves,
 //!   and do so without a size limit: a device that starts a SysEx and never ends it can make that
 //!   port swallow everything that follows. Our parser's cap applies to what midir hands over.
@@ -317,7 +323,7 @@ struct Control {
 
 /// Locks a mutex, ignoring poisoning (the protected data stays consistent: every critical
 /// section is a plain assignment or clone).
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -487,8 +493,9 @@ impl Poller {
                 .into_iter()
                 .filter_map(|port| {
                     let raw_name = input.port_name(&port).ok()?; // vanished meanwhile
-                    let base = normalize_port_name(&raw_name);
-                    Some(Found { id: port.id(), raw_name, base, port })
+                    let id = port.id();
+                    let base = normalize_port_name(&raw_name, &id);
+                    Some(Found { id, raw_name, base, port })
                 })
                 .collect::<Vec<_>>()
         }));
@@ -520,6 +527,7 @@ impl Poller {
             .filter(|f| {
                 !self.entries.iter().any(|e| e.raw_name == f.raw_name && e.id == f.id)
                     && !self.is_own_virtual_port(&f.base)
+                    && !is_own_client_port(&f.base, &self.client_name)
             })
             .collect();
         new.sort_by(|a, b| natural_cmp(&a.base, &b.base).then_with(|| natural_cmp(&a.id, &b.id)));
@@ -760,11 +768,6 @@ impl Clients {
 /// Services (Windows 11) makes such devices multi-client.
 fn describe_connect_error(kind: ConnectErrorKind) -> String {
     const WINMM_OPEN_FAILED: &str = "could not create Windows MM MIDI input port";
-    const SHARING_ADVICE: &str = "Windows lets only one program at a time use this MIDI device. \
-        Close the other program (for example a DAW or another MIDI tool) and the port connects \
-        automatically. To use the device in both programs, have the other program pass it on to \
-        a virtual MIDI port (for example with loopMIDI) and use that port here; Windows 11 with \
-        Windows MIDI Services can share devices directly.";
     match kind {
         ConnectErrorKind::InvalidPort => "The port disappeared while it was being opened.".into(),
         ConnectErrorKind::Other(message) if message.contains("MMSYSERR_ALLOCATED") => {
@@ -779,14 +782,32 @@ fn describe_connect_error(kind: ConnectErrorKind) -> String {
     }
 }
 
-/// Makes an OS port name stable across reconnects and reboots (see the module docs).
-fn normalize_port_name(raw: &str) -> String {
+/// What to do about a port another program holds (Windows; shared with the output side).
+pub(crate) const SHARING_ADVICE: &str = "Windows lets only one program at a time use this MIDI \
+    device. Close the other program (for example a DAW or another MIDI tool) and the port \
+    connects automatically. To use the device in both programs, have the other program pass it \
+    on to a virtual MIDI port (for example with loopMIDI) and use that port here; Windows 11 with \
+    Windows MIDI Services can share devices directly.";
+
+/// Whether an enumerated port belongs to an ALSA client of ours. On Linux the ports midir creates
+/// for our own connections are listed like any other (`client:port`): the output side's ports
+/// show up as inputs and the input side's as outputs. Opening them would loop what we send
+/// straight back into what we receive. (CoreMIDI and WinMM list no such ports.)
+pub(crate) fn is_own_client_port(base: &str, client_name: &str) -> bool {
+    cfg!(target_os = "linux")
+        && base.strip_prefix(client_name).is_some_and(|rest| rest.starts_with(':'))
+}
+
+/// Makes an OS port name stable across reconnects and reboots (see the module docs). The output
+/// side uses the same function, so a device's input and output get the same name when the OS
+/// names them alike.
+pub(crate) fn normalize_port_name(raw: &str, id: &str) -> String {
     let mut name = raw.trim();
     if cfg!(target_os = "linux") {
         name = strip_alsa_address(name);
     }
-    let name = if cfg!(windows) { winmm_stable_name(name) } else { name.to_owned() };
-    if name.is_empty() { "Unnamed MIDI input".to_owned() } else { name }
+    let name = if cfg!(windows) { winmm_stable_name(name, id) } else { name.to_owned() };
+    if name.is_empty() { "Unnamed MIDI port".to_owned() } else { name }
 }
 
 /// WinMM's limit for a port name (`MAXPNAMELEN` without the terminating NUL), in UTF-16 units.
@@ -795,9 +816,14 @@ const WINMM_NAME_LIMIT: usize = 31;
 const WINMM_STABLE_LEN: usize = WINMM_NAME_LIMIT - "10- ".len();
 
 /// The name a WinMM port is known by on whichever USB port its device sits: without the instance
-/// prefix, and cut to the length that survives WinMM's truncation on every port (module docs).
-fn winmm_stable_name(name: &str) -> String {
+/// prefix, and, for a USB device (`id` is its device interface path), cut to the length that
+/// survives WinMM's truncation on every port (module docs).
+fn winmm_stable_name(name: &str, id: &str) -> String {
     let name = strip_winmm_instance(name);
+    let is_usb = id.get(..8).is_some_and(|start| start.eq_ignore_ascii_case(r"\\?\usb#"));
+    if !is_usb {
+        return name;
+    }
     let mut units = 0;
     let end = name
         .char_indices()
@@ -844,7 +870,7 @@ fn strip_alsa_address(name: &str) -> &str {
 
 /// Case-insensitive ordering that compares digit runs by value (`Port 2` < `Port 10`), with a
 /// plain byte comparison as the final tie-break so the order is total.
-fn natural_cmp(a: &str, b: &str) -> Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut x, mut y) = (a.as_bytes(), b.as_bytes());
     loop {
         match (x.first(), y.first()) {
@@ -880,7 +906,7 @@ fn trim_zeros(digits: &[u8]) -> &[u8] {
 }
 
 #[cfg(target_os = "macos")]
-mod macos {
+pub(crate) mod macos {
     //! See "Platform notes" in the module docs: the first CoreMIDI client of the process binds
     //! CoreMIDI's notifications to its thread's run loop, so it lives on a dedicated thread that
     //! keeps that run loop running for the rest of the process.
