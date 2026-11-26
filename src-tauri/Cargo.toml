@@ -21,3 +21,12 @@ tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+
+# Already part of the dependency tree through Tauri / m2k-output; used directly for the tray-host
+# probe (Linux) and for waiting out the previous instance after "Restart as administrator".
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+x11rb = { version = "0.14", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
