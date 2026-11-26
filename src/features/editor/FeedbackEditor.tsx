@@ -22,11 +22,10 @@ export function hasOnState(mapping: Mapping): boolean {
  * when what it does is switch a profile or a layer, showing that profile or layer.
  */
 export function suggestFeedback(mapping: Mapping): Feedback {
-  const { ports, outputs } = useApp.getState();
-  // A mapping that listens to any device would only light up after its control was touched
-  // once; where there is exactly one controller that can be lit, name it.
-  const lit = ports.filter((port) => outputs.some((output) => output.name === port.name));
-  const device = mapping.source.device === null && lit.length === 1 ? lit[0].name : null;
+  // The output is never guessed here. "The controller it came from" (null) lets the engine
+  // decide at the moment of sending, and it only ever picks a controller whose input is open —
+  // a suggestion must not name a device the user never chose (it would be opened and sent to).
+  const device = null;
   const base: Feedback = {
     ...(feedbackForSource(mapping.source) ?? {
       when: { type: "engaged" },
@@ -158,7 +157,7 @@ export function FeedbackEditor({
           outputs.length === 0
             ? "No MIDI output is connected right now — the light shows as soon as one that fits is there."
             : target === null
-              ? "This mapping listens to any device, so the light only comes on once its control was touched. Pick the controller here to light it right away."
+              ? "This mapping listens to any device: the light goes to the only connected controller that accepts MIDI — with several, to the one its control was last touched on. Pick one here to be sure."
               : !outputs.some((port) => port.name === target)
                 ? `There is no MIDI output called “${deviceLabel(target, config)}” right now — the light shows once it is there.`
                 : undefined

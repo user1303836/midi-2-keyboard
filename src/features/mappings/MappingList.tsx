@@ -48,11 +48,14 @@ import {
 } from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
 import { findConflicts, listensTo, type Conflict } from "@/lib/conflicts";
+import type { MidiLog } from "@/bindings/MidiLog";
 import { EXAMPLES, importExample } from "@/lib/examples";
+import { sourceForMessage } from "@/lib/model";
 import { onMappingActivity, onMidi, type ActivityKind } from "@/lib/monitor";
 import { api, mappingsToText, useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
 
+import { mapMessage } from "../monitor/Monitor";
 import { bulk, pickedMappings } from "./BulkPanel";
 import { NoteRunDialog } from "./NoteRunDialog";
 import { ZonesDialog } from "./ZonesDialog";
@@ -729,6 +732,19 @@ function RowMenu({ mapping, otherProfiles }: { mapping: Mapping; otherProfiles: 
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const octave = useOctave();
+  // The app answers the very first touch: whatever control is moved is offered for mapping.
+  const [touched, setTouched] = useState<MidiLog | null>(null);
+  useEffect(
+    () =>
+      onMidi((log) => {
+        const message = log.message;
+        if (message.type === "note_off" || (message.type === "note_on" && message.velocity === 0)) return;
+        if (sourceForMessage(message, null)) setTouched(log);
+      }),
+    [],
+  );
+  const touchedSource = touched && sourceForMessage(touched.message, null);
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 p-8 text-center">
       <div className="flex items-center gap-3 text-fg-faint">
@@ -745,9 +761,15 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
           controller, then press the key or shortcut it should send. That’s it.
         </div>
       </div>
-      <Button variant="primary" size="lg" icon={<Plus size={16} />} onClick={onAdd}>
-        Add mapping
-      </Button>
+      {touched && touchedSource ? (
+        <Button variant="midi" size="lg" className="animate-pop-in" icon={<Plus size={16} />} onClick={() => mapMessage(touched)}>
+          You touched {sourceTitle(touchedSource.event, octave)} — map it
+        </Button>
+      ) : (
+        <Button variant="primary" size="lg" icon={<Plus size={16} />} onClick={onAdd}>
+          Add mapping
+        </Button>
+      )}
       <div className="flex items-center gap-2 text-sm text-fg-faint">
         or press <Kbd>N</Kbd>
         <span>·</span>

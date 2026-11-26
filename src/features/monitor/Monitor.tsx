@@ -54,7 +54,7 @@ function mappingEffect(id: string): string {
 }
 
 /** Starts the quick add for the control a message came from (the device is named when there are several). */
-function mapMessage(log: MidiLog) {
+export function mapMessage(log: MidiLog) {
   const state = useApp.getState();
   const several = state.ports.filter((port) => port.state === "connected").length > 1;
   const source = sourceForMessage(log.message, several ? log.device : null);
