@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
   AppWindow,
+  ArrowDown,
+  ArrowUp,
   Copy,
   Download,
   MoreHorizontal,
@@ -33,6 +35,9 @@ function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: 
   const cloneProfile = useApp((state) => state.cloneProfile);
   const removeProfile = useApp((state) => state.removeProfile);
   const onlyOne = useApp((state) => state.config.profiles.length <= 1);
+  const count = useApp((state) => state.config.profiles.length);
+  const index = useApp((state) => state.config.profiles.findIndex((p) => p.id === profile.id));
+  const moveProfile = useApp((state) => state.moveProfile);
   const toast = useApp((state) => state.toast);
   const [renaming, setRenaming] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -130,6 +135,13 @@ function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: 
             </MenuItem>
             <MenuItem icon={<Upload size={14} />} onSelect={exportProfile}>
               Export…
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={<ArrowUp size={14} />} disabled={index === 0} onSelect={() => moveProfile(profile.id, index - 1)}>
+              Move up
+            </MenuItem>
+            <MenuItem icon={<ArrowDown size={14} />} disabled={index === count - 1} onSelect={() => moveProfile(profile.id, index + 1)}>
+              Move down
             </MenuItem>
             <MenuSeparator />
             <MenuItem tone="danger" icon={<Trash2 size={14} />} disabled={onlyOne} onSelect={() => setConfirming(true)}>

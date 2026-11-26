@@ -83,6 +83,8 @@ export function TopBar({ profile, onEditProfile }: { profile: Profile | null; on
     (state) => state.config.profiles.find((p) => p.id === state.engine.effective_profile)?.name,
   );
 
+  const appNames = (profile?.apps ?? []).map((a) => a.process || a.title).filter(Boolean);
+
   return (
     <header className="flex h-[48px] shrink-0 items-center gap-2.5 border-b bg-surface px-4">
       {profile && (
@@ -93,15 +95,11 @@ export function TopBar({ profile, onEditProfile }: { profile: Profile | null; on
               <Pin size={11} /> always on
             </Badge>
           )}
-          {profile.apps.length > 0 && (
+          {appNames.length > 0 && (
             <Badge title="Activates automatically while one of these apps is in front">
               <AppWindow size={11} />
-              {profile.apps
-                .map((a) => a.process || a.title)
-                .filter(Boolean)
-                .slice(0, 2)
-                .join(", ")}
-              {profile.apps.length > 2 && ` +${profile.apps.length - 2}`}
+              {appNames.slice(0, 2).join(", ")}
+              {appNames.length > 2 && ` +${appNames.length - 2}`}
             </Badge>
           )}
           <IconButton label="Profile settings" size="sm" onClick={() => onEditProfile(profile)}>
