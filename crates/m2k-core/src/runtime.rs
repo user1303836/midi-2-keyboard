@@ -4,12 +4,17 @@
 //! Threads: MIDI callbacks call straight into [`Engine::midi`] (which only posts a message).
 //! Engine events are collected and handed to the front end in batches by a small flusher thread,
 //! so a busy MIDI stream costs one IPC message per frame, not one per MIDI message.
+//!
+//! The config file may also be edited by hand: a watcher thread notices changes made by
+//! anything else, applies a valid edit like [`Runtime::set_config`] (without rewriting the
+//! file) and reports an invalid one while the previous configuration stays active.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use m2k_midi::input::{InputEvent, InputManager, InputOptions, PortPolicy, PortState, PortStatus};
 use m2k_output::platform::{self, Permissions};
@@ -27,11 +32,39 @@ const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_PENDING: usize = 4096;
 /// How often permissions / the output backend are re-checked while something is wrong.
 const PERMISSION_POLL: Duration = Duration::from_secs(2);
+/// How often the config file is checked for changes made by someone else. A change must hold
+/// still for one more check before it is read (editors write via temp file + rename, or
+/// truncate and write).
+const CONFIG_POLL: Duration = Duration::from_secs(1);
 
 type Sink = dyn Fn(RuntimeEvent) + Send + Sync;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// What the config file looked like when we last read or wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl FileStamp {
+    /// `None` when the file does not exist (or cannot be inspected).
+    fn of(path: &Path) -> Option<FileStamp> {
+        let meta = fs::metadata(path).ok()?;
+        Some(FileStamp { modified: meta.modified().ok(), len: meta.len() })
+    }
+}
+
+#[derive(Default)]
+struct ConfigFile {
+    stamp: Option<FileStamp>,
+    /// The file's content as we last read or wrote it.
+    bytes: Vec<u8>,
+    /// A changed stamp seen by the previous check; read once it holds still.
+    settling: Option<Option<FileStamp>>,
 }
 
 #[derive(Default)]
@@ -56,6 +89,9 @@ struct Inner {
     unsupported_keys: Mutex<Vec<Key>>,
     warnings: Mutex<Vec<String>>,
     pending: Mutex<Pending>,
+    /// The config file as we know it. Held while saving and while checking for outside
+    /// changes, so the two never interleave.
+    file: Mutex<ConfigFile>,
     wake: Condvar,
     /// Forward monitor events (MIDI / fired). Off while no window is showing them.
     monitoring: AtomicBool,
@@ -132,12 +168,6 @@ impl Runtime {
     ) -> Runtime {
         let loaded = store::load(path);
         let config = loaded.config;
-        if loaded.created {
-            // Materialize the default config so the user has a file to look at / back up.
-            if let Err(error) = store::save(path, &config) {
-                log::warn!("could not write the initial config: {error}");
-            }
-        }
         let (injector, backend_error) = make_injector(&config, options.dry_run);
         let unsupported = unsupported_keys(injector.as_ref());
 
@@ -165,11 +195,21 @@ impl Runtime {
                 unsupported_keys: Mutex::new(unsupported),
                 warnings: Mutex::new(loaded.warnings),
                 pending: Mutex::new(Pending::default()),
+                file: Mutex::new(ConfigFile::default()),
                 wake: Condvar::new(),
                 monitoring: AtomicBool::new(true),
                 stopping: AtomicBool::new(false),
             }
         });
+
+        if loaded.created {
+            // Materialize the default config so the user has a file to look at / back up.
+            if let Err(error) = inner.save(&config) {
+                log::warn!("could not write the initial config: {error}");
+            }
+        } else {
+            inner.remember_file();
+        }
 
         // MIDI input.
         let for_input = Arc::downgrade(&inner);
@@ -195,6 +235,19 @@ impl Runtime {
                 if !inner.flush_once() {
                     break;
                 }
+            }
+        });
+
+        // Config file watcher (hand edits).
+        let for_files = Arc::downgrade(&inner);
+        let _ = thread::Builder::new().name("m2k-config-watch".into()).spawn(move || {
+            loop {
+                thread::sleep(CONFIG_POLL);
+                let Some(inner) = for_files.upgrade() else { break };
+                if inner.stopping.load(Ordering::Relaxed) {
+                    break;
+                }
+                inner.check_config_file();
             }
         });
 
@@ -246,21 +299,10 @@ impl Runtime {
     pub fn set_config(&self, mut config: Config) -> Result<Config, store::StoreError> {
         let inner = &self.inner;
         store::sanitize(&mut config);
-        let previous = std::mem::replace(&mut *lock(&inner.config), config.clone());
-        if previous == config {
+        if !inner.apply(&config) {
             return Ok(config);
         }
-        if previous.settings.injector != config.settings.injector {
-            inner.rebuild_injector(&config);
-        }
-        inner.engine.set_config(config.clone());
-        if let Some(input) = lock(&inner.input).as_ref() {
-            let policy = policy_for(&config);
-            if policy != policy_for(&previous) {
-                input.set_policy(policy);
-            }
-        }
-        store::save(&inner.path, &config)?;
+        inner.save(&config)?;
         Ok(config)
     }
 
@@ -337,6 +379,111 @@ impl Inner {
         (self.sink)(event);
     }
 
+    fn emit_error(&self, message: String) {
+        self.emit(RuntimeEvent::Engine { events: vec![EngineEvent::Error { message }] });
+    }
+
+    /// Makes `config` (already sanitized) the running configuration: engine, output backend
+    /// options, MIDI input policy. Does not save. `false` when nothing changed.
+    fn apply(&self, config: &Config) -> bool {
+        let previous = std::mem::replace(&mut *lock(&self.config), config.clone());
+        if previous == *config {
+            return false;
+        }
+        if previous.settings.injector != config.settings.injector {
+            self.rebuild_injector(config);
+        }
+        self.engine.set_config(config.clone());
+        if let Some(input) = lock(&self.input).as_ref() {
+            let policy = policy_for(config);
+            if policy != policy_for(&previous) {
+                input.set_policy(policy);
+            }
+        }
+        true
+    }
+
+    /// Saves the config and remembers what the file looks like now, so the watcher does not
+    /// take our own write for a hand edit.
+    fn save(&self, config: &Config) -> Result<(), store::StoreError> {
+        let mut file = lock(&self.file);
+        let result = store::save(&self.path, config);
+        file.stamp = FileStamp::of(&self.path);
+        file.bytes = fs::read(&self.path).unwrap_or_default();
+        file.settling = None;
+        result
+    }
+
+    /// Records the file as it is now (after loading it).
+    fn remember_file(&self) {
+        let mut file = lock(&self.file);
+        file.stamp = FileStamp::of(&self.path);
+        file.bytes = fs::read(&self.path).unwrap_or_default();
+        file.settling = None;
+    }
+
+    /// One check of the config file for changes made by someone else (a text editor, a sync
+    /// tool, a script). A valid change is applied without rewriting the file and announced to
+    /// the front end; an invalid one is reported once and the running config stays.
+    fn check_config_file(&self) {
+        let mut file = lock(&self.file);
+        let current = FileStamp::of(&self.path);
+        if current == file.stamp {
+            file.settling = None;
+            return;
+        }
+        if file.settling != Some(current) {
+            // Changed: give the writer time to finish (and see it hold still once more).
+            file.settling = Some(current);
+            return;
+        }
+        file.settling = None;
+        file.stamp = current;
+        if current.is_none() {
+            // Deleted or moved away (some editors do that mid-save): keep running; the next
+            // save from the app writes it again.
+            file.bytes.clear();
+            return;
+        }
+        let Ok(bytes) = fs::read(&self.path) else {
+            file.stamp = None;
+            return;
+        };
+        if bytes == file.bytes {
+            return;
+        }
+        file.bytes = bytes;
+        let text = String::from_utf8_lossy(&file.bytes).into_owned();
+        drop(file);
+
+        let shown = self.path.display();
+        match store::parse(&text) {
+            Ok((config, repairs)) => {
+                if !self.apply(&config) {
+                    return;
+                }
+                log::info!("applied the configuration edited outside the app ({shown})");
+                self.emit(RuntimeEvent::Config { config });
+                if !repairs.is_empty() {
+                    self.emit_error(format!(
+                        "The edited configuration in {shown} was loaded with repairs: {}",
+                        repairs.join(" ")
+                    ));
+                }
+            }
+            Err(error) => {
+                // The typed parse reports line and column for type errors too.
+                let error = serde_json::from_str::<Config>(&text)
+                    .err()
+                    .map_or(error, |positioned| positioned.to_string());
+                self.emit_error(format!(
+                    "{shown} has a problem and was not loaded: {error}. The previous \
+                     configuration stays active until the file is fixed."
+                ));
+            }
+        }
+    }
+
     fn on_engine_event(&self, event: EngineEvent) {
         match event {
             EngineEvent::Status(status) => {
@@ -369,7 +516,7 @@ impl Inner {
         config.selected_profile = Some(selected.clone());
         let snapshot = config.clone();
         drop(config);
-        if let Err(error) = store::save(&self.path, &snapshot) {
+        if let Err(error) = self.save(&snapshot) {
             log::warn!("could not persist the selected profile: {error}");
         }
     }
