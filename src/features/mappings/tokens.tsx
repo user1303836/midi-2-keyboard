@@ -247,6 +247,7 @@ export function BehaviorSummary({ behavior }: { behavior: Behavior }) {
             </span>
           )}
           {!b.up && !b.down && <Verb>does nothing yet</Verb>}
+          {(b.fast?.up || b.fast?.down) && <Verb>+ fast</Verb>}
         </>
       );
   }
