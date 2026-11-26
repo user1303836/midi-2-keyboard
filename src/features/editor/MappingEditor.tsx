@@ -119,9 +119,6 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
     <aside
       aria-label="Mapping editor"
       className="flex h-full w-[452px] shrink-0 animate-slide-in flex-col border-l bg-surface"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.defaultPrevented) close();
-      }}
     >
       <header className="flex h-[46px] shrink-0 items-center gap-2 border-b px-3">
         <input

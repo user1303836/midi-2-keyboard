@@ -49,6 +49,18 @@ function useShortcuts() {
         }
       }
 
+      // Escape closes the editor from anywhere, unless something on top of it wants the key.
+      if (key === "escape" && !event.defaultPrevented && state.selectedMappingId && state.panel === "none") {
+        const overlay = document.querySelector(
+          '[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
+        );
+        if (!overlay) {
+          if (typing) (event.target as HTMLElement).blur();
+          else state.selectMapping(null);
+        }
+        return;
+      }
+
       if (mod && key === "z" && !typing) {
         event.preventDefault();
         if (event.shiftKey) state.redo();
