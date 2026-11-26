@@ -307,7 +307,7 @@ impl Monitor {
     }
 }
 
-fn describe_state(port: &PortStatus) -> String {
+pub(crate) fn describe_state(port: &PortStatus) -> String {
     let state = match port.state {
         PortState::Connected => "connected".to_owned(),
         PortState::Disabled => "disabled".to_owned(),
@@ -317,7 +317,7 @@ fn describe_state(port: &PortStatus) -> String {
 }
 
 /// Space separated hex, shortened for long SysEx.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     const SHOWN: usize = 24;
     let mut text: Vec<String> = bytes.iter().take(SHOWN).map(|b| format!("{b:02X}")).collect();
     if bytes.len() > SHOWN {
@@ -330,7 +330,7 @@ fn note(note: u8) -> String {
     format!("{} ({note})", names::note_name(note, 4))
 }
 
-fn describe_message(message: &MidiMessage) -> String {
+pub(crate) fn describe_message(message: &MidiMessage) -> String {
     match *message {
         MidiMessage::NoteOn { channel, note: n, velocity: 0 } => {
             format!("ch{channel:<2} Note On    {} vel 0 (= off)", note(n))
@@ -378,7 +378,7 @@ fn byte_count(n: usize) -> String {
     if n == 1 { "1 byte".to_owned() } else { format!("{n} bytes") }
 }
 
-fn describe_derived(event: &Derived) -> String {
+pub(crate) fn describe_derived(event: &Derived) -> String {
     match *event {
         Derived::Parameter(p) => {
             let kind = match p.kind {

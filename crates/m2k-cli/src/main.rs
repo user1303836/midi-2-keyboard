@@ -4,6 +4,7 @@
 
 mod bindings;
 mod devices;
+mod run;
 mod simulate;
 
 const USAGE: &str = "usage: m2k <command> [args]
@@ -11,6 +12,8 @@ const USAGE: &str = "usage: m2k <command> [args]
 commands:
   devices                  list MIDI input ports
   monitor [port-filter]    print incoming MIDI messages
+  run [--config <path>] [--dry-run]
+                           run a config headless against the real MIDI inputs (Ctrl+C stops)
   simulate <args>          run a config against scripted MIDI input and print what would be sent
   export-bindings [dir]    write the TypeScript bindings (default: src/bindings)";
 
@@ -20,6 +23,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("devices") => devices::devices(rest),
         Some("monitor") => devices::monitor(rest),
+        Some("run") => run::run(rest),
         Some("simulate") => simulate::run(rest),
         Some("export-bindings") => bindings::run(rest),
         _ => {
