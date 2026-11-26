@@ -208,7 +208,11 @@ impl Worker {
             test_info: OwnerInfo::test(),
             cx,
         };
-        worker.install(&config);
+        // The first install runs outside the loop's protection: a panic here must not take the
+        // engine down for good (it would then silently never react).
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| worker.install(&config))) {
+            worker.recover(panic);
+        }
         worker.flush(true);
         worker
     }
@@ -733,6 +737,8 @@ impl Worker {
             .or_else(|| panic.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "unknown panic".into());
         log::error!("engine panic: {message}");
+        // The command being handled is gone: its latency must not be pinned on what comes next.
+        self.cx.out.latency_origin = None;
         // Release in an orderly way if the state still allows it, then unconditionally.
         let _ = catch_unwind(AssertUnwindSafe(|| self.release_outputs(true)));
         let _ = catch_unwind(AssertUnwindSafe(|| {
