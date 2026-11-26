@@ -61,6 +61,9 @@ export function KeyComboInput({
     if (autoCapture) {
       autoArmed.current = true;
       setCapturing(true);
+      // The focus belongs here, so that Tab continues from this field and not from the top of
+      // the window.
+      fieldRef.current?.focus({ preventScroll: true });
     }
   }, [autoCapture]);
 
@@ -94,6 +97,13 @@ export function KeyComboInput({
         event.preventDefault();
         event.stopPropagation();
         setEscNote(true);
+        return;
+      }
+      // A keyboard user who Tabs on from a field the quick add armed wants to move on, not to
+      // bind Tab (click the field first for that; Alt+Tab and friends are captured as usual).
+      if (autoArmed.current && event.key === "Tab" && combo.length === 0) {
+        autoArmed.current = false;
+        setCapturing(false);
         return;
       }
       event.preventDefault();

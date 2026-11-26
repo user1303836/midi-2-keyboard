@@ -14,7 +14,7 @@ import type { ValueRange } from "@/bindings/ValueRange";
 
 import { comboText, keyLabel, mouseButtonLabel } from "./keys";
 import { ccName, noteName, rpnName } from "./midi";
-import { isFullRange, rangeLimit } from "./model";
+import { isEmptyAction, isFullRange, rangeLimit } from "./model";
 import { formatMs, plural } from "./utils";
 
 export function rangeText(range: ValueRange, limit: number): string {
@@ -356,8 +356,8 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
       what = [
         b.up && `up: ${actionText(b.up, config)}`,
         b.down && `down: ${actionText(b.down, config)}`,
-        b.fast?.up && `fast up: ${actionText(b.fast.up, config)}`,
-        b.fast?.down && `fast down: ${actionText(b.fast.down, config)}`,
+        b.fast?.up && !isEmptyAction(b.fast.up) && `fast up: ${actionText(b.fast.up, config)}`,
+        b.fast?.down && !isEmptyAction(b.fast.down) && `fast down: ${actionText(b.fast.down, config)}`,
       ]
         .filter(Boolean)
         .join("; ");

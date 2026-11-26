@@ -61,7 +61,8 @@ every mapping, and an on-screen virtual controller for trying things without har
 
 **Safety** — everything the app holds down is tracked and released on pause, profile switch,
 device disconnect, config change and exit; a key release the system refuses is retried until it
-goes through. By default nothing is sent while the app's own window has focus, so a mapping
+goes through. (A macro that is already playing finishes across a profile switch, and releases
+what it pressed at its end.) By default nothing is sent while the app's own window has focus, so a mapping
 cannot type into (or close) the editor.
 
 **Light on the machine** — the engine is native code on its own thread (tens of microseconds

@@ -197,7 +197,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             [
               ["N", "Add a mapping"],
               ["Esc", "Close the editor"],
+              ["Enter", "Open the focused mapping"],
               ["↑ / ↓", "Previous / next mapping"],
+              ["Alt+↑ / ↓", "Move the mapping up / down"],
               ["Del", "Delete the selected mapping"],
               [`${mod}+D`, "Duplicate the selected mapping"],
               [`${mod}+Z`, "Undo"],
@@ -207,6 +209,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               [`${mod}+,`, "Settings"],
               ["F2", "Rename the selected profile"],
               ["Backspace", "Clear a focused shortcut field"],
+              ["Right-click", "More for a mapping (or Shift+F10)"],
             ] as const
           ).map(([keys, what]) => (
             <div key={what} className="flex items-center justify-between gap-3">
@@ -344,7 +347,7 @@ export function ProfileDialog({ profile, onClose }: { profile: Profile | null; o
     <Dialog open onOpenChange={(open) => !open && onClose()} title="Profile settings" width={540}>
       <Group title="Profile">
         <Option title="Name">
-          <TextInput aria-label="Profile name" className="w-[260px]" value={live.name} onChange={(name) => update((p) => ({ ...p, name }), "name")} />
+          <TextInput autoFocus aria-label="Profile name" className="w-[260px]" value={live.name} onChange={(name) => update((p) => ({ ...p, name }), "name")} />
         </Option>
         <Option
           title="Always on"

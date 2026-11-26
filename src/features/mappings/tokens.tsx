@@ -36,7 +36,7 @@ import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { SourceEvent } from "@/bindings/SourceEvent";
 import { KeyCombo } from "@/components/ui/misc";
 import { actionText, targetText } from "@/lib/describe";
-import { sourceShape } from "@/lib/model";
+import { isEmptyAction, sourceShape } from "@/lib/model";
 import { useApp } from "@/lib/store";
 import { cn, formatMs } from "@/lib/utils";
 
@@ -247,7 +247,7 @@ export function BehaviorSummary({ behavior }: { behavior: Behavior }) {
             </span>
           )}
           {!b.up && !b.down && <Verb>does nothing yet</Verb>}
-          {(b.fast?.up || b.fast?.down) && <Verb>+ fast</Verb>}
+          {((b.fast?.up && !isEmptyAction(b.fast.up)) || (b.fast?.down && !isEmptyAction(b.fast.down))) && <Verb>+ fast</Verb>}
         </>
       );
   }
