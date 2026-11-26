@@ -1,73 +1,282 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
-      "id": "ex-live-control",
-      "name": "Live show: control (always on)",
       "always_on": true,
+      "apps": [],
+      "id": "ex-live-control",
       "mappings": [
         {
+          "behavior": {
+            "on_press": {
+              "target": {
+                "id": "ex-live-song-a",
+                "type": "profile"
+              },
+              "type": "switch_profile"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-pc1",
           "name": "Program 0 (\"patch 1\" on most devices) selects song A",
-          "source": { "device": null, "channel": null, "event": { "type": "program_change", "programs": { "min": 0, "max": 0 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "switch_profile", "target": { "type": "profile", "id": "ex-live-song-a" } } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "programs": {
+                "max": 0,
+                "min": 0
+              },
+              "type": "program_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "target": {
+                "id": "ex-live-song-b",
+                "type": "profile"
+              },
+              "type": "switch_profile"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-pc2",
           "name": "Program 1 (\"patch 2\" on most devices) selects song B",
-          "source": { "device": null, "channel": null, "event": { "type": "program_change", "programs": { "min": 1, "max": 1 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "switch_profile", "target": { "type": "profile", "id": "ex-live-song-b" } } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "programs": {
+                "max": 1,
+                "min": 1
+              },
+              "type": "program_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F13"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-bar",
           "name": "MIDI clock: press F13 on every bar (4 beats)",
-          "source": { "device": null, "channel": null, "event": { "type": "clock", "divisor": 96 } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F13"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "divisor": 96,
+              "type": "clock"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "MediaPlayPause"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-mmc-play",
           "name": "MMC Play from the DAW: media play / pause",
-          "source": { "device": null, "channel": null, "event": { "type": "sys_ex", "pattern": "F0 7F ?? 06 02 F7" } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["MediaPlayPause"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "pattern": "F0 7F ?? 06 02 F7",
+              "type": "sys_ex"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "MediaStop"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-mmc-stop",
           "name": "MMC Stop from the DAW: media stop",
-          "source": { "device": null, "channel": null, "event": { "type": "sys_ex", "pattern": "F0 7F ?? 06 01 F7" } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["MediaStop"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "pattern": "F0 7F ?? 06 01 F7",
+              "type": "sys_ex"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "Space"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-transport-stop",
           "name": "MIDI Stop message: pause the backing video (Space)",
-          "source": { "device": null, "channel": null, "event": { "type": "system", "message": "stop" } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Space"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "message": "stop",
+              "type": "system"
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Live show: control (always on)"
     },
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-live-song-a",
-      "name": "Live show: song A",
       "mappings": [
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "PageDown"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-a-lyrics",
           "name": "Pad 1: next lyrics page (Page Down)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["PageDown"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Live show: song A"
     },
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-live-song-b",
-      "name": "Live show: song B",
       "mappings": [
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F14"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-live-b-scene",
           "name": "Pad 1: next lighting scene (F14)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F14"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Live show: song B"
     }
-  ]
+  ],
+  "version": 1
 }

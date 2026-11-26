@@ -1,35 +1,105 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-present",
-      "name": "Presenting: foot switch",
       "mappings": [
         {
+          "behavior": {
+            "double": {
+              "keys": [
+                "ArrowLeft"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "hold": null,
+            "hold_ms": 500,
+            "single": {
+              "keys": [
+                "ArrowRight"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "triple": {
+              "keys": [
+                "KeyB"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "type": "multi_tap",
+            "window_ms": 350
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-present-switch",
           "name": "Foot switch: once = next slide, twice = previous, three times = black screen",
-          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 64, "range": { "min": 64, "max": 127 } } },
-          "behavior": {
-            "type": "multi_tap",
-            "single": { "type": "keys", "keys": ["ArrowRight"] },
-            "double": { "type": "keys", "keys": ["ArrowLeft"] },
-            "triple": { "type": "keys", "keys": ["KeyB"] },
-            "window_ms": 350
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 64,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 64
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
           }
         },
         {
+          "behavior": {
+            "hold": {
+              "keys": [
+                "Escape"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "hold_ms": 1000,
+            "hold_target": null,
+            "tap": {
+              "keys": [
+                "ControlLeft",
+                "KeyL"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "type": "tap_hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-present-second-pedal",
           "name": "Second pedal (CC 67): tap = laser pointer on / off (Ctrl+L), hold = end the show (Esc)",
-          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 67, "range": { "min": 64, "max": 127 } } },
-          "behavior": {
-            "type": "tap_hold",
-            "tap": { "type": "keys", "keys": ["ControlLeft", "KeyL"] },
-            "hold": { "type": "keys", "keys": ["Escape"] },
-            "hold_ms": 1000
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 67,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 64
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
           }
         }
-      ]
+      ],
+      "name": "Presenting: foot switch"
     }
-  ]
+  ],
+  "version": 1
 }

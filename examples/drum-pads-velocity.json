@@ -1,57 +1,225 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-drums",
-      "name": "Drum pads: velocity zones & auto-fire",
       "mappings": [
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "Digit1"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-drums-soft",
           "name": "Kick pad hit softly: light attack (1)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 80 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit1"] } }
-        },
-        {
-          "id": "ex-drums-hard",
-          "name": "Kick pad hit hard: heavy attack (2)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 81, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit2"] } }
-        },
-        {
-          "id": "ex-drums-turbo",
-          "name": "Snare pad held: auto-fire X every 100 ms",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 38, "max": 38 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": {
-            "type": "trigger",
-            "on_press": { "type": "keys", "keys": ["KeyX"] },
-            "repeat": { "delay_ms": 150, "interval_ms": 100 }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 80,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
           }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "Digit2"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-drums-hard",
+          "name": "Kick pad hit hard: heavy attack (2)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 81
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyX"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": {
+              "delay_ms": 150,
+              "interval_ms": 100
+            },
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-drums-turbo",
+          "name": "Snare pad held: auto-fire X every 100 ms",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 38,
+                "min": 38
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "button": "left",
+              "clicks": 1,
+              "type": "mouse_click"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-drums-hihat-click",
           "name": "Hi-hat pad clicks the mouse",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 42, "max": 42 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "mouse_click", "button": "left", "clicks": 1 } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 42,
+                "min": 42
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": true,
+            "target": {
+              "button": "left",
+              "type": "mouse_button"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-drums-crash-drag",
           "name": "Crash pad held: hold the left mouse button (drag)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 49, "max": 49 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "hold", "target": { "type": "mouse_button", "button": "left" } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 49,
+                "min": 49
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "ShiftLeft"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-drums-squeeze",
           "name": "Press a pad hard after hitting it (aftertouch): hold Shift",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "poly_pressure", "notes": { "min": 36, "max": 51 }, "range": { "min": 90, "max": 127 } },
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 51,
+                "min": 36
+              },
+              "range": {
+                "max": 127,
+                "min": 90
+              },
+              "type": "poly_pressure"
+            },
             "hysteresis": 25
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ShiftLeft"] }, "auto_repeat": false }
+          }
         }
-      ]
+      ],
+      "name": "Drum pads: velocity zones & auto-fire"
     }
-  ]
+  ],
+  "version": 1
 }

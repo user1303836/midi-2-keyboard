@@ -1,90 +1,262 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-video-jog",
-      "name": "Video editing: jog & shuttle",
       "mappings": [
         {
+          "behavior": {
+            "down": {
+              "keys": [
+                "ArrowLeft"
+              ],
+              "tap_ms": 5,
+              "type": "keys"
+            },
+            "invert": false,
+            "max_burst": 4,
+            "step": 1,
+            "type": "step",
+            "up": {
+              "keys": [
+                "ArrowRight"
+              ],
+              "tap_ms": 5,
+              "type": "keys"
+            }
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-jog-frames",
           "name": "Jog encoder steps one frame back / forward",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 16, "range": { "min": 0, "max": 127 }, "encoding": "relative_twos_complement" }
-          },
-          "behavior": {
-            "type": "step",
-            "up": { "type": "keys", "keys": ["ArrowRight"], "tap_ms": 5 },
-            "down": { "type": "keys", "keys": ["ArrowLeft"], "tap_ms": 5 },
-            "step": 1,
-            "max_burst": 4
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 16,
+              "encoding": "relative_twos_complement",
+              "range": {
+                "max": 127,
+                "min": 0
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
           }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "KeyJ"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-shuttle-back",
           "name": "Shuttle knob left of center plays backwards (hold J)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 20, "range": { "min": 0, "max": 44 } },
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 20,
+              "encoding": "absolute",
+              "range": {
+                "max": 44,
+                "min": 0
+              },
+              "type": "control_change"
+            },
             "hysteresis": 4
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyJ"] }, "auto_repeat": false }
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "KeyL"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-shuttle-forward",
           "name": "Shuttle knob right of center plays forwards (hold L)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 20, "range": { "min": 84, "max": 127 } },
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 20,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 84
+              },
+              "type": "control_change"
+            },
             "hysteresis": 4
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyL"] }, "auto_repeat": false }
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyK"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-shuttle-stop",
           "name": "Shuttle knob back at center stops (K)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 20, "range": { "min": 54, "max": 74 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["KeyK"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 20,
+              "encoding": "absolute",
+              "range": {
+                "max": 74,
+                "min": 54
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyI"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-mark-in",
           "name": "Pad 1 marks in (I)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["KeyI"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyO"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-mark-out",
           "name": "Pad 2 marks out (O)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 37, "max": 37 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["KeyO"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 37,
+                "min": 37
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "Space"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-video-play",
           "name": "Pad 3 plays / pauses (Space)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 38, "max": 38 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Space"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 38,
+                "min": 38
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Video editing: jog & shuttle"
     }
-  ]
+  ],
+  "version": 1
 }

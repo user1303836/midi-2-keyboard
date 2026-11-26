@@ -1,122 +1,377 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
-      "id": "ex-stream-voice",
-      "name": "Streaming: voice (always on)",
       "always_on": true,
+      "apps": [],
+      "id": "ex-stream-voice",
       "mappings": [
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "F15"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-stream-ptt",
           "name": "Hold pad 1 to talk (holds F15)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["F15"] }, "auto_repeat": false }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "KeyM"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-stream-mute",
           "name": "Pad 2 toggles mute (Ctrl+Shift+M)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 37, "max": 37 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyM"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 37,
+                "min": 37
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "F15"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-stream-latched-talk",
           "name": "Latching button (CC 85) keeps the mic open (holds F15)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 85, "range": { "min": 64, "max": 127 } }
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["F15"] }, "auto_repeat": false }
-        }
-      ]
-    },
-    {
-      "id": "ex-stream-obs",
-      "name": "Streaming: OBS scenes",
-      "apps": [{ "process": "obs*", "title": "" }],
-      "mappings": [
-        {
-          "id": "ex-stream-scene1",
-          "name": "Pad 5 switches to scene 1 (Ctrl+Shift+F1)",
-          "source": {
+            "debounce_ms": 0,
             "device": null,
-            "channel": null,
-            "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "F1"] } }
-        },
-        {
-          "id": "ex-stream-scene2",
-          "name": "Pad 6 switches to scene 2 (Ctrl+Shift+F2)",
-          "source": {
-            "device": null,
-            "channel": null,
-            "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "F2"] } }
-        },
-        {
-          "id": "ex-stream-scene3",
-          "name": "Pad 7 switches to scene 3 (Ctrl+Shift+F3)",
-          "source": {
-            "device": null,
-            "channel": null,
-            "event": { "type": "note", "notes": { "min": 42, "max": 42 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "F3"] } }
-        },
-        {
-          "id": "ex-stream-record",
-          "name": "Pad 8: tap = start / stop recording, hold = start / stop streaming",
-          "source": {
-            "device": null,
-            "channel": null,
-            "event": { "type": "note", "notes": { "min": 43, "max": 43 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": {
-            "type": "tap_hold",
-            "tap": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "F9"] },
-            "hold": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "F10"] },
-            "hold_ms": 800
+            "event": {
+              "controller": 85,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 64
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
           }
         }
-      ]
+      ],
+      "name": "Streaming: voice (always on)"
     },
     {
-      "id": "ex-stream-game",
-      "name": "Streaming: in game",
-      "apps": [{ "process": "", "title": "*Game*" }],
+      "always_on": false,
+      "apps": [
+        {
+          "process": "obs*",
+          "title": ""
+        }
+      ],
+      "id": "ex-stream-obs",
       "mappings": [
         {
-          "id": "ex-stream-game-pad5",
-          "name": "Pad 5 throws a grenade (G)",
-          "source": {
-            "device": null,
-            "channel": null,
-            "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } }
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "F1"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
           },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["KeyG"] } }
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-stream-scene1",
+          "name": "Pad 5 switches to scene 1 (Ctrl+Shift+F1)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 40,
+                "min": 40
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "F2"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-stream-scene2",
+          "name": "Pad 6 switches to scene 2 (Ctrl+Shift+F2)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "F3"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-stream-scene3",
+          "name": "Pad 7 switches to scene 3 (Ctrl+Shift+F3)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 42,
+                "min": 42
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "hold": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "F10"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "hold_ms": 800,
+            "hold_target": null,
+            "tap": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "F9"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "type": "tap_hold"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-stream-record",
+          "name": "Pad 8: tap = start / stop recording, hold = start / stop streaming",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 43,
+                "min": 43
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        }
+      ],
+      "name": "Streaming: OBS scenes"
+    },
+    {
+      "always_on": false,
+      "apps": [
+        {
+          "process": "",
+          "title": "*Game*"
+        }
+      ],
+      "id": "ex-stream-game",
+      "mappings": [
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyG"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "id": "ex-stream-game-pad5",
+          "name": "Pad 5 throws a grenade (G)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 40,
+                "min": 40
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "KeyR"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-stream-game-pad6",
           "name": "Pad 6 reloads (R)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } }
-          },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["KeyR"] } }
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Streaming: in game"
     }
-  ]
+  ],
+  "version": 1
 }

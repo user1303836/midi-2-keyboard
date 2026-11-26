@@ -1,58 +1,204 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-access",
-      "name": "Accessibility: pedals as modifiers",
       "mappings": [
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "ShiftLeft"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-shift",
           "name": "Sustain pedal held = Shift held",
-          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 64, "range": { "min": 64, "max": 127 } } },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ShiftLeft"] }, "auto_repeat": false }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 64,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 64
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "target": {
+              "keys": [
+                "ControlLeft"
+              ],
+              "type": "keys"
+            },
+            "type": "toggle"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-ctrl-latch",
           "name": "Soft pedal (CC 67) latches Ctrl on / off",
-          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 67, "range": { "min": 64, "max": 127 } } },
-          "behavior": { "type": "toggle", "target": { "type": "keys", "keys": ["ControlLeft"] } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 67,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 64
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "AltLeft"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-inverted",
           "name": "Pedal with reversed polarity (CC 66, sends 0 when pressed) = Alt held",
-          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 66, "range": { "min": 0, "max": 63 } } },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["AltLeft"] }, "auto_repeat": false }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 66,
+              "encoding": "absolute",
+              "range": {
+                "max": 63,
+                "min": 0
+              },
+              "type": "control_change"
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "F13"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-dictation",
           "name": "Expression pedal pressed past halfway = push-to-talk for dictation (holds F13)",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "control_change", "controller": 11, "range": { "min": 70, "max": 127 } },
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "controller": 11,
+              "encoding": "absolute",
+              "range": {
+                "max": 127,
+                "min": 70
+              },
+              "type": "control_change"
+            },
             "hysteresis": 12
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["F13"] }, "auto_repeat": false }
+          }
         },
         {
+          "behavior": {
+            "auto_repeat": false,
+            "target": {
+              "keys": [
+                "Space"
+              ],
+              "type": "keys"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-squeeze-space",
           "name": "Squeeze the keys (channel pressure) = hold Space",
+          "rate_limit": null,
           "source": {
-            "device": null,
             "channel": null,
-            "event": { "type": "channel_pressure", "range": { "min": 80, "max": 127 } },
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "range": {
+                "max": 127,
+                "min": 80
+              },
+              "type": "channel_pressure"
+            },
             "hysteresis": 30
-          },
-          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["Space"] }, "auto_repeat": false }
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "op": "release_all",
+              "type": "engine"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-access-panic",
           "name": "Lowest piano key (A0) releases everything that is held",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 21, "max": 21 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "engine", "op": "release_all" } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 21,
+                "min": 21
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Accessibility: pedals as modifiers"
     }
-  ]
+  ],
+  "version": 1
 }

@@ -1,81 +1,355 @@
 {
   "format": "midi-2-keyboard-profiles",
-  "version": 1,
   "profiles": [
     {
+      "always_on": false,
+      "apps": [],
       "id": "ex-coder",
-      "name": "Coding: macro pad with an Fn layer",
       "mappings": [
         {
+          "behavior": {
+            "on_press": {
+              "char_delay_ms": 0,
+              "text": "console.log(\"pad {note_name}, velocity {velocity}\");",
+              "type": "text"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-coder-snippet",
           "name": "Pad 1 types a log line (with the note that was hit)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "text", "text": "console.log(\"pad {note_name}, velocity {velocity}\");" } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "steps": [
+                {
+                  "keys": [
+                    "ControlLeft",
+                    "ShiftLeft",
+                    "KeyP"
+                  ],
+                  "tap_ms": null,
+                  "type": "keys"
+                },
+                {
+                  "ms": 150,
+                  "type": "delay"
+                },
+                {
+                  "text": "Format Document",
+                  "type": "text"
+                },
+                {
+                  "ms": 50,
+                  "type": "delay"
+                },
+                {
+                  "keys": [
+                    "Enter"
+                  ],
+                  "tap_ms": null,
+                  "type": "keys"
+                }
+              ],
+              "type": "sequence"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-coder-format",
           "name": "Pad 2 runs \"Format Document\" from the command palette",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 37, "max": 37 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": {
-            "type": "trigger",
-            "on_press": {
-              "type": "sequence",
-              "steps": [
-                { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyP"] },
-                { "type": "delay", "ms": 150 },
-                { "type": "text", "text": "Format Document" },
-                { "type": "delay", "ms": 50 },
-                { "type": "keys", "keys": ["Enter"] }
-              ]
-            }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 37,
+                "min": 37
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
           }
         },
         {
+          "behavior": {
+            "hold": null,
+            "hold_ms": 200,
+            "hold_target": {
+              "keys": [
+                "ControlLeft"
+              ],
+              "type": "keys"
+            },
+            "tap": {
+              "keys": [
+                "Escape"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "type": "tap_hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-coder-esc-ctrl",
           "name": "Pad 3: tap = Esc, hold = Ctrl",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 38, "max": 38 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": {
-            "type": "tap_hold",
-            "tap": { "type": "keys", "keys": ["Escape"] },
-            "hold_target": { "type": "keys", "keys": ["ControlLeft"] },
-            "hold_ms": 200
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 38,
+                "min": 38
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
           }
         },
         {
+          "behavior": {
+            "auto_repeat": true,
+            "target": {
+              "layer": "fn",
+              "type": "layer"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
           "id": "ex-coder-fn",
           "name": "Pad 4 held = Fn layer",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 39, "max": 39 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "hold", "target": { "type": "layer", "layer": "fn" } }
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 39,
+                "min": 39
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "ShiftLeft",
+                "KeyB"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": false,
+              "layer": "fn",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
           "id": "ex-coder-pad5",
           "name": "Pad 5: build (Ctrl+Shift+B)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyB"] } },
-          "conditions": [{ "type": "layer", "layer": "fn", "active": false }]
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 40,
+                "min": 40
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F5"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": true,
+              "layer": "fn",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
           "id": "ex-coder-pad5-fn",
           "name": "Pad 5 with Fn: run tests (F5)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F5"] } },
-          "conditions": [{ "type": "layer", "layer": "fn", "active": true }]
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 40,
+                "min": 40
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "ControlLeft",
+                "Slash"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": false,
+              "layer": "fn",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
           "id": "ex-coder-pad6",
           "name": "Pad 6: comment line (Ctrl+/)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "Slash"] } },
-          "conditions": [{ "type": "layer", "layer": "fn", "active": false }]
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         },
         {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F12"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": true,
+              "layer": "fn",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
           "id": "ex-coder-pad6-fn",
           "name": "Pad 6 with Fn: go to definition (F12)",
-          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } } },
-          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F12"] } },
-          "conditions": [{ "type": "layer", "layer": "fn", "active": true }]
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
         }
-      ]
+      ],
+      "name": "Coding: macro pad with an Fn layer"
     }
-  ]
+  ],
+  "version": 1
 }
