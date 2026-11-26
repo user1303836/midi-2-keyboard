@@ -14,13 +14,18 @@ pub mod key;
 mod keymap;
 pub mod platform;
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
 pub use key::{Key, MouseButton};
 
 /// Marker carried by every injected event where the platform has room for one (`dwExtraInfo`
-/// on Windows). Lets low-level hooks recognize this application's own events. ASCII `"M2K!"`.
+/// on Windows, `kCGEventSourceUserData` on macOS). Lets low-level hooks and event taps
+/// recognize this application's own events. ASCII `"M2K!"`.
 pub const INJECTION_TAG: u32 = 0x4D32_4B21;
 
 use serde::{Deserialize, Serialize};
@@ -162,10 +167,14 @@ pub fn create_injector(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
         })
 }
 
+#[cfg(target_os = "linux")]
+use linux as backend;
+#[cfg(target_os = "macos")]
+use macos as backend;
 #[cfg(windows)]
 use windows as backend;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod backend {
     use super::*;
 

@@ -38,7 +38,9 @@ pub struct Permissions {
 ///
 /// Windows: the process owning the foreground window (for UWP apps hosted by
 /// `ApplicationFrameHost.exe`, the app's own process); `app_id` is the AppUserModelID of
-/// packaged apps.
+/// packaged apps. macOS: `NSWorkspace`'s frontmost application (`app_id` = bundle id), the
+/// window title only with the Accessibility permission. Linux X11: the EWMH active window
+/// (`app_id` = WM_CLASS class); Wayland: always `None`.
 pub fn foreground_app() -> Option<ForegroundApp> {
     catch_unwind(imp::foreground_app).unwrap_or(None)
 }
@@ -58,10 +60,14 @@ pub fn request_permissions() {
     let _ = catch_unwind(AssertUnwindSafe(imp::request_permissions));
 }
 
+#[cfg(target_os = "linux")]
+use crate::linux::platform as imp;
+#[cfg(target_os = "macos")]
+use crate::macos::platform as imp;
 #[cfg(windows)]
 use crate::windows::platform as imp;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod imp {
     use super::{ForegroundApp, Permissions};
 

@@ -25,6 +25,7 @@
 
 pub(crate) mod platform;
 
+use std::collections::HashSet;
 use std::mem::size_of;
 
 use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
@@ -56,13 +57,21 @@ const CHUNK: usize = 256;
 const MAX_NOTCHES: u32 = 1000;
 
 pub(crate) fn create(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
-    Ok(Box::new(SendInputInjector { mode: options.windows_key_mode, inputs: Vec::new() }))
+    Ok(Box::new(SendInputInjector {
+        mode: options.windows_key_mode,
+        inputs: Vec::new(),
+        down: HashSet::new(),
+        buttons: HashSet::new(),
+    }))
 }
 
 pub(crate) struct SendInputInjector {
     mode: WindowsKeyMode,
     /// Reused event buffer.
     inputs: Vec<INPUT>,
+    /// Keys and buttons held through this injector, released on drop as a safety net.
+    down: HashSet<Key>,
+    buttons: HashSet<MouseButton>,
 }
 
 impl SendInputInjector {
@@ -114,6 +123,11 @@ impl SendInputInjector {
     }
 
     fn key(&mut self, key: Key, up: bool) -> Result<()> {
+        if up {
+            self.down.remove(&key);
+        } else if keymap::windows(key).is_some() {
+            self.down.insert(key);
+        }
         self.inputs.clear();
         self.push_key(key, up, &mut Layout::default())?;
         self.send()
@@ -185,6 +199,11 @@ impl Injector for SendInputInjector {
             MouseButton::Back => (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, u32::from(XBUTTON1)),
             MouseButton::Forward => (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, u32::from(XBUTTON2)),
         };
+        if down {
+            self.buttons.insert(button);
+        } else {
+            self.buttons.remove(&button);
+        }
         self.mouse(0, 0, data, if down { down_flag } else { up_flag })
     }
 
@@ -218,6 +237,21 @@ impl Injector for SendInputInjector {
         self.push_notches(dy, MOUSEEVENTF_WHEEL);
         self.push_notches(dx, MOUSEEVENTF_HWHEEL);
         self.send()
+    }
+}
+
+impl Drop for SendInputInjector {
+    fn drop(&mut self) {
+        // Injected presses outlive the injector: release what is still held, ordinary keys
+        // before modifiers.
+        let mut held: Vec<Key> = self.down.iter().copied().collect();
+        held.sort_by_key(|key| key.is_modifier());
+        for key in held {
+            let _ = self.key(key, true);
+        }
+        for button in std::mem::take(&mut self.buttons) {
+            let _ = self.mouse_button(button, false);
+        }
     }
 }
 
