@@ -70,6 +70,7 @@ export function SourceEditor({
   });
 
   const event = source.event;
+  const shape = sourceShape(event);
   const info = sourceTypeInfo(event.type);
   const setEvent = (next: SourceEvent, key?: string) => onChange({ ...source, event: next }, key);
   const limit = rangeLimit(event);
@@ -447,6 +448,7 @@ export function SourceEditor({
           event.type === "note" && (event.velocity.min > 1 || event.velocity.max < 127) && "velocity range",
           event.type === "chord" && event.window_ms > 0 && `within ${event.window_ms} ms`,
           source.hysteresis > 0 && `slack ${source.hysteresis}`,
+          source.debounce_ms > 0 && `debounce ${source.debounce_ms} ms`,
           source.device && "one device",
         ]
           .filter(Boolean)
@@ -512,6 +514,22 @@ export function SourceEditor({
                 max={Math.floor(limit / 2)}
                 value={source.hysteresis}
                 onChange={(hysteresis) => onChange({ ...source, hysteresis }, "hysteresis")}
+              />
+            </Field>
+          )}
+          {shape === "button" && (
+            <Field
+              label="Debounce"
+              hint="For switches and pedals that chatter: after a press or release, further flips are ignored for this long. The first one still acts instantly. 0 = off; 10–30 ms cures most foot switches."
+            >
+              <NumberInput
+                aria-label="Debounce"
+                suffix="ms"
+                className="w-[92px]"
+                min={0}
+                max={2000}
+                value={source.debounce_ms}
+                onChange={(debounce_ms) => onChange({ ...source, debounce_ms }, "debounce")}
               />
             </Field>
           )}

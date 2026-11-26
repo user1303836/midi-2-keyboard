@@ -35,6 +35,8 @@ export interface Backend {
   exportProfiles(profiles: Profile[], suggestedName: string): Promise<boolean>;
   /** Lets the user pick a file and returns the profiles inside it (`null` if cancelled). */
   importProfiles(): Promise<Profile[] | null>;
+  /** Parses the text of a profile file into complete, repaired profiles. */
+  parseProfiles(text: string): Promise<Profile[]>;
   quit(): Promise<void>;
   subscribe(listener: (event: RuntimeEvent) => void): Promise<() => void>;
 }
@@ -57,6 +59,7 @@ async function createTauriBackend(): Promise<Backend> {
     exportProfiles: (profiles, suggestedName) =>
       invoke<boolean>("export_profiles", { profiles, suggestedName }),
     importProfiles: () => invoke<Profile[] | null>("import_profiles"),
+    parseProfiles: (text) => invoke<Profile[]>("parse_profile_text", { text }),
     quit: () => invoke("quit"),
     subscribe: async (listener) => {
       const unlisten = await listen<RuntimeEvent>("m2k:event", (event) => listener(event.payload));

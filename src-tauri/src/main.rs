@@ -138,6 +138,13 @@ fn import_profiles(app: AppHandle) -> Result<Option<Vec<Profile>>, String> {
     parse_profiles(&text).map(Some)
 }
 
+/// Turns the text of a profile file into complete, repaired profiles (used for the bundled
+/// examples, which the UI holds as text).
+#[tauri::command]
+fn parse_profile_text(text: String) -> Result<Vec<Profile>, String> {
+    parse_profiles(&text)
+}
+
 /// Accepts an exported profile file, a whole config file, or a bare profile object.
 fn parse_profiles(text: &str) -> Result<Vec<Profile>, String> {
     let value: serde_json::Value =
@@ -411,6 +418,7 @@ fn main() {
             reveal_config,
             export_profiles,
             import_profiles,
+            parse_profile_text,
             quit,
         ])
         .setup(move |app| {

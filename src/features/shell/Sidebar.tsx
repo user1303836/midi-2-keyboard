@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Copy,
   Download,
+  FolderOpen,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -18,11 +19,51 @@ import { useEffect, useRef, useState } from "react";
 import type { PortStatus } from "@/bindings/PortStatus";
 import type { Profile } from "@/bindings/Profile";
 import { IconButton } from "@/components/ui/button";
-import { ConfirmDialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tooltip } from "@/components/ui/overlays";
+import {
+  ConfirmDialog,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+  Tooltip,
+} from "@/components/ui/overlays";
 import { deviceLabel } from "@/lib/describe";
 import { onDeviceActivity } from "@/lib/monitor";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+
+interface Example {
+  file: string;
+  title: string;
+  detail: string;
+  text: string;
+}
+
+/** The profiles under /examples, bundled as text so they can be imported with one click. */
+const EXAMPLES: Example[] = Object.entries(
+  import.meta.glob("/examples/*.json", { eager: true, query: "?raw", import: "default" }) as Record<string, string>,
+)
+  .map(([path, text]) => {
+    const file = path.split("/").pop()!.replace(/\.json$/, "");
+    let names: string[] = [];
+    let count = 0;
+    try {
+      const data = JSON.parse(text) as { profiles?: { name?: string; mappings?: unknown[] }[] };
+      names = (data.profiles ?? []).map((p) => p.name ?? file);
+      count = (data.profiles ?? []).reduce((sum, p) => sum + (p.mappings?.length ?? 0), 0);
+    } catch {
+      // A broken example simply shows its file name; importing it reports the problem.
+    }
+    return {
+      file,
+      title: names[0] ?? file,
+      detail: `${names.length > 1 ? `${names.length} profiles · ` : ""}${count} mappings`,
+      text,
+    };
+  })
+  .sort((a, b) => a.title.localeCompare(b.title));
 
 function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: Profile) => void }) {
   const viewed = useApp((state) => state.viewProfileId === profile.id);
@@ -246,13 +287,46 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
     }
   };
 
+  const importExample = async (example: Example) => {
+    try {
+      const backend = await api();
+      const parsed = await backend.parseProfiles(example.text);
+      importProfiles(parsed);
+      toast(
+        `Added ${parsed.length === 1 ? `“${parsed[0].name}”` : `${parsed.length} example profiles`}. Open a mapping to see how it is built.`,
+        { kind: "success" },
+      );
+    } catch (error) {
+      toast(`Could not load the example: ${String(error)}`, { kind: "error" });
+    }
+  };
+
   return (
     <nav aria-label="Profiles and devices" className="flex w-[214px] shrink-0 flex-col border-r bg-surface">
       <div className="flex h-[34px] shrink-0 items-center pr-1.5 pl-3">
         <span className="flex-1 text-xs font-semibold tracking-wider text-fg-faint uppercase">Profiles</span>
-        <IconButton label="Import profiles…" size="sm" onClick={doImport}>
-          <Download size={13} />
-        </IconButton>
+        <Menu>
+          <MenuTrigger asChild>
+            <IconButton label="Import profiles or examples" size="sm">
+              <Download size={13} />
+            </IconButton>
+          </MenuTrigger>
+          <MenuContent align="start" className="max-h-[420px] w-[300px] overflow-y-auto">
+            <MenuItem icon={<FolderOpen size={14} />} onSelect={doImport}>
+              Import from a file…
+            </MenuItem>
+            <MenuSeparator />
+            <MenuLabel>Examples to pick apart</MenuLabel>
+            {EXAMPLES.map((example) => (
+              <MenuItem key={example.file} className="h-auto py-1" onSelect={() => importExample(example)}>
+                <div className="min-w-0">
+                  <div className="truncate">{example.title}</div>
+                  <div className="truncate text-sm text-fg-faint">{example.detail}</div>
+                </div>
+              </MenuItem>
+            ))}
+          </MenuContent>
+        </Menu>
         <IconButton
           label="New profile"
           size="sm"

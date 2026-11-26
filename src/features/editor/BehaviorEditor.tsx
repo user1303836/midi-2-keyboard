@@ -364,12 +364,30 @@ export function BehaviorEditor({
               <AddSlot key={field} label={`${label} press`} onAdd={() => onChange({ ...b, [field]: emptyKeys() })} />
             );
           })}
+          {b.hold ? (
+            <Slot label="Long" onRemove={() => onChange({ ...b, hold: null })}>
+              <ActionEditor
+                action={b.hold}
+                {...arm(3, b.hold)}
+                onChange={(hold, key) => onChange({ ...b, hold }, key && `hold:${key}`)}
+              />
+            </Slot>
+          ) : (
+            <AddSlot label="Long press" onAdd={() => onChange({ ...b, hold: emptyKeys() })} />
+          )}
           <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
             Presses count together when they are within
             <Ms label="Multi-tap window" min={50} max={5000} value={b.window_ms} onChange={(window_ms) => onChange({ ...b, window_ms }, "window")} />
           </div>
+          {b.hold && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+              Holding for
+              <Ms label="Long press time" min={100} max={10000} value={b.hold_ms} onChange={(hold_ms) => onChange({ ...b, hold_ms }, "holdms")} />
+              is a long press (and never also a single press)
+            </div>
+          )}
           <div className="text-sm text-fg-faint">
-            A single press has to wait that long to be sure a second one is not coming.
+            A single press has to wait for that window to be sure a second one is not coming.
           </div>
         </div>
       )}

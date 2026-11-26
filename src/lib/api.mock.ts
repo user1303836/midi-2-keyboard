@@ -370,6 +370,29 @@ export function createMockBackend(): Backend {
         input.click();
       });
     },
+    async parseProfiles(text: string) {
+      // The real backend runs the config loader over it; this fills in just enough for the UI.
+      const data = JSON.parse(text) as { profiles?: Profile[] };
+      return (data.profiles ?? []).map((profile) => ({
+        ...profile,
+        always_on: profile.always_on ?? false,
+        apps: profile.apps ?? [],
+        mappings: (profile.mappings ?? []).map((m) => ({
+          ...m,
+          name: m.name ?? "",
+          enabled: m.enabled ?? true,
+          conditions: m.conditions ?? [],
+          rate_limit: m.rate_limit ?? null,
+          source: {
+            ...m.source,
+            device: m.source.device ?? null,
+            channel: m.source.channel ?? null,
+            hysteresis: m.source.hysteresis ?? 0,
+            debounce_ms: m.source.debounce_ms ?? 0,
+          },
+        })),
+      }));
+    },
     async quit() {},
     async subscribe(listener) {
       listeners.add(listener);
