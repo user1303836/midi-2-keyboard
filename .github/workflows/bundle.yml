@@ -1,0 +1,74 @@
+name: Bundle
+
+# Builds installable packages for all three platforms. Run it by hand from the Actions tab
+# (the packages are attached to the run as artifacts) or push a `v*` tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            args: ""
+            artifact: linux-x64
+          - name: macOS universal
+            os: macos-latest
+            args: "--target universal-apple-darwin"
+            artifact: macos-universal
+          - name: Windows x64
+            os: windows-latest
+            args: ""
+            artifact: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev file \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bundle
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the app bundle
+        run: npm run tauri -- build ${{ matrix.args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: midi-2-keyboard-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.rpm
+            target/release/bundle/**/*.AppImage
+            target/universal-apple-darwin/release/bundle/**/*.dmg
