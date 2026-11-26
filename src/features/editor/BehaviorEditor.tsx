@@ -70,7 +70,19 @@ export function BehaviorPicker({
         const selected = info.type === value;
         const fits = info.fits.includes(shape);
         return (
-          <Tooltip key={info.type} content={info.hint} side="top">
+          <Tooltip
+            key={info.type}
+            side="top"
+            content={
+              fits || selected
+                ? info.hint
+                : shape === "continuous"
+                  ? `${info.hint}. For a knob or fader this treats it as a switch that is “pressed” in the upper half of its travel (you can move that point).`
+                  : shape === "pulse"
+                    ? `${info.hint}. This message has no release, so it will not do much here.`
+                    : `${info.hint}. Not the usual choice for this kind of control, but it works.`
+            }
+          >
             <button
               type="button"
               aria-pressed={selected}
@@ -80,7 +92,7 @@ export function BehaviorPicker({
                 selected
                   ? "border-accent bg-accent-soft font-medium text-fg"
                   : "border-line-strong bg-app text-fg-muted hover:border-fg-faint hover:text-fg",
-                !fits && !selected && "opacity-55",
+                !fits && !selected && "opacity-60 hover:opacity-100",
               )}
             >
               <span className={selected ? "text-accent" : undefined}>{ICONS[info.type]}</span>

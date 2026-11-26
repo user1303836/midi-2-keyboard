@@ -264,11 +264,11 @@ export function conditionText(condition: Condition, config: Config | null, octav
       return `${condition.negate ? "not in" : "in"} ${what || "any app"}`;
     }
     case "layer":
-      return `layer “${condition.layer}” ${condition.active ? "on" : "off"}`;
+      return `while layer “${condition.layer}” is ${condition.active ? "on" : "off"}`;
     case "note_held":
-      return `${noteName(condition.note, octave)} ${condition.held ? "held" : "not held"}`;
+      return `while ${noteName(condition.note, octave)} is ${condition.held ? "held" : "not held"}`;
     case "control_value":
-      return `CC ${condition.controller} ${rangeText(condition.range, 127)}`;
+      return `while CC ${condition.controller} ${rangeText(condition.range, 127).replace("= ", "is ")}`;
   }
   void config;
 }

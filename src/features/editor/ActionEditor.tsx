@@ -241,16 +241,16 @@ function TapTime({ value, onChange }: { value: number | null; onChange: (value: 
   if (value === null) {
     return (
       <div className="text-sm text-fg-faint">
-        Held for {fallback} ms.{" "}
-        <button type="button" className="underline-offset-2 hover:text-fg hover:underline" onClick={() => onChange(fallback)}>
-          Change
+        Key held for {fallback} ms ·{" "}
+        <button type="button" className="underline underline-offset-2 hover:text-fg" onClick={() => onChange(fallback)}>
+          change
         </button>
       </div>
     );
   }
   return (
     <div className="flex items-center gap-2 text-sm text-fg-muted">
-      Held for
+      Key held for
       <NumberInput aria-label="Hold time" suffix="ms" className="w-[84px]" min={1} max={5000} value={value} onChange={onChange} />
       <button type="button" className="text-fg-faint underline-offset-2 hover:text-fg hover:underline" onClick={() => onChange(null)}>
         use default

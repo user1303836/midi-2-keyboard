@@ -196,7 +196,7 @@ function DeviceLed({ name, connected }: { name: string; connected: boolean }) {
   }, [name]);
   return (
     <span className="relative flex size-[14px] shrink-0 items-center justify-center">
-      <span className={cn("size-[7px] rounded-full", connected ? "bg-midi/45" : "bg-line-strong")} />
+      <span className={cn("size-[7px] rounded-full", connected ? "bg-midi/75" : "bg-line-strong")} />
       <span ref={ref} className="absolute size-[9px] rounded-full bg-midi opacity-0 shadow-[0_0_8px_var(--midi)]" />
     </span>
   );

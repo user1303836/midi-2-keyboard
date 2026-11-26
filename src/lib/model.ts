@@ -133,6 +133,23 @@ export function isFullRange(event: SourceEvent): boolean {
   return !range || limit === null || (range.min === 0 && range.max === limit);
 }
 
+/** A control change source reshaped as a knob, a button or an endless encoder. */
+export function ccWithShape(
+  event: Extract<SourceEvent, { type: "control_change" }>,
+  shape: "continuous" | "button" | "relative",
+): SourceEvent {
+  return {
+    ...event,
+    encoding:
+      shape === "relative"
+        ? event.encoding === "absolute"
+          ? "relative_twos_complement"
+          : event.encoding
+        : "absolute",
+    range: shape === "button" ? { ...UPPER7 } : { ...FULL7 },
+  };
+}
+
 export function sourceShape(event: SourceEvent): SourceShape {
   switch (event.type) {
     case "note":

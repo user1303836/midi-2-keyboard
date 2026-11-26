@@ -117,6 +117,19 @@ const LogRow = memo(function LogRow({ entry, octave }: { entry: LogEntry; octave
       <span className="shrink-0 font-medium">{view.subject}</span>
       <span className="shrink-0 font-mono text-sm text-fg-muted tabular-nums">{view.detail}</span>
       {derived && <span className="truncate text-sm text-accent">{derived}</span>}
+      {/* Who is listening? Answers "why does this control do nothing" at a glance. */}
+      {entry.mappings.length > 0 ? (
+        <button
+          type="button"
+          className="min-w-0 truncate text-sm text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+          onClick={() => selectMapping(entry.mappings[0])}
+        >
+          → {mappingLabel(entry.mappings[0])}
+          {entry.mappings.length > 1 ? ` +${entry.mappings.length - 1}` : ""}
+        </button>
+      ) : (
+        <span className="min-w-0 truncate text-sm text-fg-faint italic">no mapping listens to this</span>
+      )}
       <span className="selectable ml-auto shrink-0 pl-3 font-mono text-sm text-fg-faint">
         {bytesToHex(encodeMessage(entry.message).slice(0, 8))}
       </span>

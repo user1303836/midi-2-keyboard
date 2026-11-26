@@ -1,12 +1,13 @@
-import { ArrowRight, Check, Copy, FolderInput, Layers, MoreHorizontal, Play, Radio, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowRight, Check, Copy, FolderInput, Layers, MoreHorizontal, Play, Radio, Timer, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
 import type { Mapping } from "@/bindings/Mapping";
+import type { RateLimit } from "@/bindings/RateLimit";
 import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
-import { Switch, TextInput } from "@/components/ui/inputs";
+import { Segmented, Switch, TextInput } from "@/components/ui/inputs";
 import { Badge, Collapsible } from "@/components/ui/misc";
 import {
   Dialog,
@@ -23,6 +24,7 @@ import { conditionText, mappingSentence, rateLimitText, sourceQualifiers, source
 import { useLearn, type LearnResult } from "@/lib/learn";
 import {
   behaviorTypeInfo,
+  ccWithShape,
   defaultBehavior,
   isEmptyAction,
   isFullRange,
@@ -33,7 +35,8 @@ import {
   supportsRateLimit,
   type BehaviorType,
 } from "@/lib/model";
-import { api, useApp, useKnownLayers, useOctave } from "@/lib/store";
+import { findConflicts } from "@/lib/conflicts";
+import { api, profileOfMapping, useApp, useKnownLayers, useOctave } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 import { BehaviorEditor } from "./BehaviorEditor";
@@ -116,12 +119,13 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
   const applyLearned = (result: LearnResult) => update((m) => ({ ...m, source: result.source }));
 
   const shape = sourceShape(mapping.source.event);
-  const placeholder = `${sourceTitle(mapping.source.event, octave)} mapping`;
+  const isDraft = useApp((state) => state.draft?.id === mapping.id);
+  const placeholder = isDraft ? "New mapping" : `${sourceTitle(mapping.source.event, octave)} mapping`;
 
   return (
     <aside
       aria-label="Mapping editor"
-      className="flex h-full w-[452px] shrink-0 animate-slide-in flex-col border-l bg-surface"
+      className="z-20 flex h-full w-[452px] max-w-full shrink-0 animate-slide-in flex-col border-l bg-surface max-[1180px]:absolute max-[1180px]:top-0 max-[1180px]:right-0 max-[1180px]:bottom-0 max-[1180px]:shadow-pop"
     >
       <header className="flex h-[46px] shrink-0 items-center gap-2 border-b px-3">
         <input
@@ -201,6 +205,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
             commitDraft();
           }}
           onBehavior={(behavior, key) => update((m) => ({ ...m, behavior }), key)}
+          onUpdate={(change) => update(change)}
           onDone={finishWizard}
         />
       ) : (
@@ -219,6 +224,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
               shape={shape}
               onChange={(behavior, key) => update((m) => ({ ...m, behavior }), key && `beh:${key}`)}
             />
+            <RateTip mapping={mapping} onApply={(rate_limit) => update((m) => ({ ...m, rate_limit }))} />
           </Section>
 
           <div className="flex flex-col gap-1 px-4 py-3">
@@ -393,15 +399,39 @@ function TestPanel({ action }: { action: Action | null }) {
 // Quick add: two gestures and you are done.
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The owner's own example in one click: a knob bound to a shortcut with "on change" fires for
+ * every one of the dozens of messages a turn produces. Say so, and offer the cure.
+ */
+function RateTip({ mapping, onApply }: { mapping: Mapping; onApply: (limit: RateLimit) => void }) {
+  const shape = sourceShape(mapping.source.event);
+  if (mapping.behavior.type !== "change" || mapping.rate_limit || shape === "button" || shape === "pulse") return null;
+  if (isEmptyAction(mapping.behavior.action)) return null;
+  return (
+    <div className="mt-3 flex items-center gap-2 rounded-lg border border-accent-line bg-accent-soft px-2.5 py-2">
+      <Timer size={15} className="shrink-0 text-accent" />
+      <span className="min-w-0 flex-1 text-sm leading-snug text-fg-muted">
+        A {shape === "relative" ? "turn of an encoder" : "turn of a knob"} sends dozens of messages, and this fires
+        for every one of them.
+      </span>
+      <Button size="sm" onClick={() => onApply({ mode: "throttle", interval_ms: 500, trailing: false })}>
+        Limit to once per 500 ms
+      </Button>
+    </div>
+  );
+}
+
 function Wizard({
   mapping,
   onSource,
   onBehavior,
+  onUpdate,
   onDone,
 }: {
   mapping: Mapping;
   onSource: (result: LearnResult) => void;
   onBehavior: (behavior: Behavior, coalesceKey?: string) => void;
+  onUpdate: (change: (mapping: Mapping) => Mapping) => void;
   onDone: () => void;
 }) {
   const [stage, setStage] = useState<"learn" | "action">("learn");
@@ -420,8 +450,15 @@ function Wizard({
     setStage("action");
   });
 
-  const shape = sourceShape(mapping.source.event);
+  const event = mapping.source.event;
+  const shape = sourceShape(event);
   const done = !isEmptyAction(primaryAction(mapping.behavior));
+  // Does another mapping of this profile already react to the control that was just learned?
+  const clash = useMemo(() => {
+    const owner = profileOfMapping(config, mapping.id);
+    const found = owner ? findConflicts(config, owner).get(mapping.id) : undefined;
+    return found?.find((c) => c.profile === null) ?? null;
+  }, [config, mapping.id]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -471,6 +508,46 @@ function Wizard({
               </Button>
             )}
           </div>
+          {stage === "action" && event.type === "control_change" && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-fg-muted">
+              <span className="shrink-0">It is a</span>
+              <Segmented
+                size="sm"
+                className="flex-1"
+                value={shape as "continuous" | "button" | "relative"}
+                options={[
+                  { value: "continuous", label: "Knob / fader" },
+                  { value: "button", label: "Button / pedal" },
+                  { value: "relative", label: "Endless encoder" },
+                ]}
+                onChange={(next) =>
+                  onUpdate((m) => ({
+                    ...m,
+                    source: { ...m.source, event: ccWithShape(event, next) },
+                    behavior: defaultBehavior(suggestedBehavior(next), m.behavior),
+                  }))
+                }
+              />
+            </div>
+          )}
+          {stage === "action" && clash && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-warn-soft px-2.5 py-2 text-sm text-warn">
+              <span className="min-w-0 flex-1 leading-snug">
+                This control already has a mapping here
+                {clash.mapping.name ? ` (“${clash.mapping.name}”)` : ""}. Both would fire.
+              </span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  const { removeMapping, selectMapping } = useApp.getState();
+                  removeMapping(mapping.id);
+                  selectMapping(clash.mapping.id);
+                }}
+              >
+                Edit that one instead
+              </Button>
+            </div>
+          )}
         </div>
 
         <ArrowRight size={16} className="mx-auto rotate-90 text-fg-faint" />
@@ -513,6 +590,7 @@ function Wizard({
               }}
             />
           )}
+          {stage === "action" && <RateTip mapping={mapping} onApply={(rate_limit) => onUpdate((m) => ({ ...m, rate_limit }))} />}
         </div>
       </div>
 

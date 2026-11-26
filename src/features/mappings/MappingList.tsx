@@ -155,7 +155,7 @@ const MappingRow = memo(function MappingRow({
       <ActivityLed mappingId={mapping.id} />
 
       {/* When */}
-      <div className={cn("flex w-[150px] shrink-0 items-center gap-2 @min-[700px]:w-[236px]", !mapping.enabled && "opacity-45")}>
+      <div className={cn("flex w-[150px] shrink-0 items-center gap-2 @min-[700px]:w-[236px] @min-[900px]:w-[300px] @min-[1100px]:w-[380px]", !mapping.enabled && "opacity-45")}>
         <span className="flex h-[26px] max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-midi-line bg-midi-soft px-2 font-semibold text-midi">
           <SourceIcon event={event} size={14} className="shrink-0" />
           <span className="truncate">{sourceTitle(event, octave)}</span>
@@ -194,7 +194,7 @@ const MappingRow = memo(function MappingRow({
             <span>
               <Badge tone="warn">
                 <CopyPlus size={11} />
-                <span className="hidden @min-[700px]:inline">shared</span>
+                shared
               </Badge>
             </span>
           </Tooltip>
@@ -316,7 +316,7 @@ export function MappingList({ profile }: { profile: Profile }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-[46px] shrink-0 items-center gap-2 border-b px-4">
-        <div className="relative w-[240px]">
+        <div className="relative w-[240px] min-w-[120px] shrink">
           <Search size={14} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-fg-faint" />
           <input
             aria-label="Search mappings"
@@ -337,11 +337,11 @@ export function MappingList({ profile }: { profile: Profile }) {
             </button>
           )}
         </div>
-        <span className="text-sm text-fg-faint">
+        <span className="shrink-0 text-sm whitespace-nowrap text-fg-faint max-[1000px]:hidden">
           {search ? `${visible.length} of ${profile.mappings.length}` : plural(profile.mappings.length, "mapping")}
         </span>
         <div className="flex-1" />
-        <div className="flex">
+        <div className="flex shrink-0">
           <Button variant="primary" className="rounded-r-none" icon={<Plus size={15} />} onClick={quickAdd}>
             Add mapping
           </Button>

@@ -27,6 +27,8 @@ export type LearnState =
 
 /** How long to keep watching a control change before deciding what kind of control sends it. */
 const SETTLE_MS = 380;
+/** Notes that start within this window of the first one are learned as one chord. */
+const CHORD_GATHER_MS = 70;
 const MAX_DETECT_MS = 1600;
 const ENOUGH_SAMPLES = 8;
 
@@ -120,7 +122,7 @@ export class Learner {
       return {
         source: { ...base, event: { type: "note", notes: { min: notes[0], max: notes[0] }, velocity: { min: 1, max: 127 } } },
         shape: "button",
-        what: "a single key",
+        what: chord.channel === 10 ? "a pad" : "a key",
       };
     }
     return {
@@ -169,16 +171,18 @@ export class Learner {
     if (this.param) return; // Stay with the parameter we are measuring.
 
     switch (message.type) {
-      case "note_on":
+      case "note_on": {
         if (message.velocity === 0 || this.cc) return;
-        return pulse(
-          {
-            device: this.device(log.device),
-            channel: message.channel, hysteresis: 0, debounce_ms: 0,
-            event: { type: "note", notes: { min: message.note, max: message.note }, velocity: { min: 1, max: 127 } },
-          },
-          message.channel === 10 ? "a pad" : "a key",
-        );
+        // Notes struck together (within a few dozen milliseconds) are a chord; a single note
+        // is decided after that short wait, which nobody notices.
+        if (!this.chord) {
+          this.chord = { device: log.device, channel: message.channel, notes: new Set([message.note]) };
+          this.settle(() => this.done(this.chordResult()), CHORD_GATHER_MS);
+        } else if (this.chord.device === log.device && this.chord.channel === message.channel) {
+          this.chord.notes.add(message.note);
+        }
+        return;
+      }
       case "control_change":
         return this.feedControlChange(log.device, message.channel, message.controller, message.value);
       case "program_change":
@@ -345,28 +349,44 @@ export class Learner {
 }
 
 /**
- * Recognizes the three common relative encodings. Endless encoders repeat a tiny set of values
- * (an absolute control never sends the same value twice in a row), clustered around 0/127 or 64.
+ * Recognizes the three common relative encodings.
+ *
+ * An endless encoder sends small "how far" values that cluster around 0/127 (two's complement),
+ * around 64 (binary offset) or around 0 and 64 (sign-magnitude) — repeating the same value while
+ * it turns steadily, and varying a little when it accelerates. An absolute knob or fader can do
+ * none of that: it never repeats a value, and it cannot hop between the two ends of its range
+ * or across the middle without passing the values in between.
  */
 function detectRelative(values: number[]): ValueEncoding | null {
-  if (values.length < 3) return null;
-  let repeats = 0;
-  for (let i = 1; i < values.length; i++) if (values[i] === values[i - 1]) repeats++;
-  if (repeats < Math.floor((values.length - 1) / 2)) return null;
-
-  const low = values.some((v) => v >= 1 && v <= 15);
-  const high = values.some((v) => v >= 113 && v <= 127);
-  const aboveCenter = values.some((v) => v >= 65 && v <= 79);
-  const belowCenter = values.some((v) => v >= 49 && v <= 63);
+  if (values.length < 2) return null;
+  const low = (v: number) => v >= 1 && v <= 15;
+  const high = (v: number) => v >= 113 && v <= 127;
+  const above = (v: number) => v >= 65 && v <= 79;
+  const below = (v: number) => v >= 49 && v <= 63;
   const all = (test: (v: number) => boolean) => values.every(test);
+  const some = (test: (v: number) => boolean) => values.some(test);
 
-  if (all((v) => (v >= 1 && v <= 15) || (v >= 113 && v <= 127)) && high) return "relative_twos_complement";
-  if (all((v) => v >= 49 && v <= 79) && belowCenter) return "relative_binary_offset";
-  if (all((v) => (v >= 1 && v <= 15) || (v >= 65 && v <= 79)) && low && aboveCenter) return "relative_sign_magnitude";
-  // One direction only: 1s are the same in two's complement and sign-magnitude; 65s are far more
-  // often "binary offset +1" than "sign-magnitude -1".
-  if (all((v) => v >= 1 && v <= 15)) return "relative_twos_complement";
-  if (all((v) => v >= 65 && v <= 79)) return "relative_binary_offset";
+  let repeats = 0;
+  let rises = 0;
+  let falls = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] === values[i - 1]) repeats++;
+    else if (values[i] > values[i - 1]) rises++;
+    else falls++;
+  }
+  // A steadily moved absolute control only ever goes one way without repeating itself.
+  const looksAbsolute = repeats === 0 && (rises === 0 || falls === 0);
+
+  // Both clusters seen: unmistakable.
+  if (all((v) => low(v) || high(v)) && some(low) && some(high)) return "relative_twos_complement";
+  if (all((v) => low(v) || above(v)) && some(low) && some(above)) return "relative_sign_magnitude";
+  if (all((v) => above(v) || below(v)) && some(above) && some(below)) return "relative_binary_offset";
+
+  // One direction only: needs the tell-tale repeats or wobble, and at least three messages.
+  if (values.length < 3 || looksAbsolute) return null;
+  if (all(low) || all(high)) return "relative_twos_complement";
+  // 65.. alone is far more often "binary offset, up" than "sign-magnitude, down".
+  if (all(above) || all(below)) return "relative_binary_offset";
   return null;
 }
 

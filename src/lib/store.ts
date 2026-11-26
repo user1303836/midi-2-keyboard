@@ -18,7 +18,15 @@ import type { Settings } from "@/bindings/Settings";
 
 import { getBackend, type Backend } from "./api";
 import { loadKeyboardLayout } from "./keys";
-import { duplicateMapping, duplicateProfile, knownLayers, newMapping, newProfile } from "./model";
+import {
+  duplicateMapping,
+  duplicateProfile,
+  isEmptyAction,
+  knownLayers,
+  newMapping,
+  newProfile,
+  primaryAction,
+} from "./model";
 import { pushEngineEvents } from "./monitor";
 import { setPlatform } from "./platform";
 import { deepEqual, move } from "./utils";
@@ -290,6 +298,25 @@ export const useApp = create<State>((set, get) => {
     });
   }
 
+  /**
+   * A quick-add that learned a control but was abandoned before it got an action would leave a
+   * "does nothing" mapping in the list. Walking away from the wizard removes it again.
+   */
+  const discardUnfinishedWizard = () => {
+    const { wizardMappingId, config } = get();
+    if (!wizardMappingId) return;
+    const owner = profileOfMapping(config, wizardMappingId);
+    const mapping = owner?.mappings.find((m) => m.id === wizardMappingId);
+    if (!owner || !mapping || !isEmptyAction(primaryAction(mapping.behavior))) return;
+    set({ wizardMappingId: null });
+    get().edit((c) =>
+      mapProfile(c, owner.id, (profile) => ({
+        ...profile,
+        mappings: profile.mappings.filter((m) => m.id !== wizardMappingId),
+      })),
+    );
+  };
+
   return {
     ready: false,
     fatal: null,
@@ -379,6 +406,7 @@ export const useApp = create<State>((set, get) => {
     viewProfile(id) {
       const profile = get().config.profiles.find((p) => p.id === id);
       if (!profile) return;
+      discardUnfinishedWizard();
       set({ viewProfileId: id, selectedMappingId: null, wizardMappingId: null, draft: null, search: "" });
       if (!profile.always_on && get().config.selected_profile !== id) {
         // Selecting is not an undoable edit.
@@ -554,6 +582,7 @@ export const useApp = create<State>((set, get) => {
     selectMapping(id) {
       const draft = get().draft;
       if (draft && draft.id === id) return;
+      if (get().wizardMappingId !== id) discardUnfinishedWizard();
       const exists = id !== null && profileOfMapping(get().config, id) !== null;
       set((state) => ({
         selectedMappingId: exists ? id : null,
@@ -565,6 +594,7 @@ export const useApp = create<State>((set, get) => {
 
     startWizard() {
       if (!get().viewProfileId) return;
+      discardUnfinishedWizard();
       const draft = newMapping();
       set({ draft, selectedMappingId: draft.id, wizardMappingId: draft.id, search: "" });
     },

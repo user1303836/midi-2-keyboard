@@ -113,8 +113,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <NumberInput aria-label="Delay between keys" suffix="ms" className="w-[88px]" min={0} max={1000} value={settings.key_stagger_ms} onChange={(v) => set("key_stagger_ms", v, "stagger")} />
         </Option>
         <Option title="Held-key repeat" description="For Hold mappings with auto-repeat: delay before repeating, then the interval between repeats.">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 text-sm text-fg-muted">
+            after
             <NumberInput aria-label="Repeat delay" suffix="ms" className="w-[88px]" min={50} max={10000} value={settings.repeat_delay_ms} onChange={(v) => set("repeat_delay_ms", v, "rdelay")} />
+            every
             <NumberInput aria-label="Repeat interval" suffix="ms" className="w-[88px]" min={5} max={10000} value={settings.repeat_interval_ms} onChange={(v) => set("repeat_interval_ms", v, "rint")} />
           </div>
         </Option>
@@ -243,7 +245,6 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const connectNew = useApp((state) => state.config.settings.connect_new_devices);
   const updateDevice = useApp((state) => state.updateDevice);
   const forgetDevice = useApp((state) => state.forgetDevice);
-  const platformName = useApp((state) => state.info.platform);
 
   const names = Array.from(new Set([...ports.map((p) => p.name), ...devices.map((d) => d.name)]));
 
@@ -313,11 +314,7 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               {port?.state === "error" && (
                 <div className="mt-2 flex gap-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
                   <AlertTriangle size={14} className="mt-[1px] shrink-0" />
-                  <span className="selectable">
-                    {port.error || "The device could not be opened."}
-                    {platformName === "windows" &&
-                      " On Windows most MIDI drivers allow only one program at a time: close the other program using it (a DAW, the vendor's editor) or route through a virtual port such as loopMIDI."}
-                  </span>
+                  <span className="selectable">{port.error || "The device could not be opened."} It is retried automatically.</span>
                 </div>
               )}
             </div>

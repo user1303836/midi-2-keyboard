@@ -12,9 +12,17 @@ import {
 import { clamp, cn } from "@/lib/utils";
 
 const FIELD =
-  "h-[28px] w-full rounded-md border border-line-strong bg-app px-2 text-base text-fg outline-hidden transition-colors " +
+  "h-[28px] rounded-md border border-line-strong bg-app px-2 text-base text-fg outline-hidden transition-colors " +
   "placeholder:text-fg-faint hover:border-fg-faint focus:border-accent focus:ring-2 focus:ring-accent-soft " +
   "disabled:opacity-50 disabled:hover:border-line-strong";
+
+/**
+ * Fields fill their container unless the caller sets a width. (Two width utilities on one
+ * element do not override each other by order, so the default must simply not be there.)
+ */
+function fullWidth(className: string | undefined): string | false {
+  return !/(^|\s)(w-|flex-1|grow)/.test(className ?? "") && "w-full";
+}
 
 // ---------------------------------------------------------------------------------------------
 // Text
@@ -35,7 +43,7 @@ export function TextInput({ value, onChange, className, mono, invalid, ...props 
       autoComplete="off"
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className={cn(FIELD, mono && "font-mono text-sm", invalid && "border-danger focus:border-danger", className)}
+      className={cn(FIELD, fullWidth(className), mono && "font-mono text-sm", invalid && "border-danger focus:border-danger", className)}
       {...props}
     />
   );
@@ -54,7 +62,7 @@ export function TextArea({ value, onChange, className, mono, rows = 3, ...props 
       rows={rows}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className={cn(FIELD, "h-auto resize-y py-1.5 leading-snug", mono && "font-mono text-sm", className)}
+      className={cn(FIELD, fullWidth(className), "h-auto resize-y py-1.5 leading-snug", mono && "font-mono text-sm", className)}
       {...props}
     />
   );
@@ -153,7 +161,7 @@ export function NumberInput({
             nudge(-step * (event.shiftKey ? 10 : 1));
           }
         }}
-        className={cn(FIELD, "tabular-nums", suffix && "pr-8")}
+        className={cn(FIELD, "w-full tabular-nums", suffix && "pr-8")}
         {...aria}
       />
       {suffix && (
