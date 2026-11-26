@@ -44,7 +44,16 @@ pub enum OutputError {
     Unavailable(String),
     #[error("{0}")]
     Other(String),
+    /// The target program runs with higher privileges than midi-2-keyboard (Windows: as
+    /// administrator), so the OS keeps our input out of it. The message always contains
+    /// [`ELEVATION_REQUIRED`]; [`platform::relaunch_elevated`] is the way out.
+    #[error("{0}")]
+    Elevated(String),
 }
+
+/// Part of every [`OutputError::Elevated`] message, for code that only sees the error text
+/// (the engine reports failures as strings).
+pub const ELEVATION_REQUIRED: &str = "start MIDI 2 Keyboard as administrator";
 
 pub type Result<T> = std::result::Result<T, OutputError>;
 
@@ -121,9 +130,10 @@ pub trait Injector: Send {
 
     /// The most characters one [`Injector::text`] call should carry, when the backend has a
     /// limit (`None`: any length). Longer texts must be split by the caller, with a few
-    /// milliseconds between the pieces (one frame, ~16 ms, is always enough); sending more at
-    /// once can lose characters. Only `linux-uinput` has a limit: the kernel queues about 128
-    /// events for the compositor, and each character costs 4 to 8.
+    /// milliseconds between the pieces (one frame, ~16 ms, is always enough). `linux-uinput`
+    /// would lose characters otherwise (the kernel queues about 128 events for the compositor,
+    /// a character costs 4 to 8); `windows-sendinput` keeps each call to about a millisecond
+    /// (SendInput blocks the caller per event), so the engine stays responsive.
     fn max_text_chunk(&self) -> Option<usize> {
         None
     }

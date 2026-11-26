@@ -48,7 +48,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::keymap::{self, WinKey};
 use crate::{
-    INJECTION_TAG, Injector, InjectorOptions, Key, MouseButton, OutputError, Result, WindowsKeyMode,
+    ELEVATION_REQUIRED, INJECTION_TAG, Injector, InjectorOptions, Key, MouseButton, OutputError,
+    Result, WindowsKeyMode,
 };
 
 const NAME: &str = "windows-sendinput";
@@ -60,11 +61,17 @@ const CHUNK: usize = 256;
 /// Upper bound for the wheel notches of one `scroll` call (one event per notch).
 const MAX_NOTCHES: u32 = 1000;
 
+/// `max_text_chunk`: `SendInput` blocks its caller for every event (measured ~27 µs per
+/// character, more while other programs hook the keyboard), so long texts arrive in pieces of
+/// about a millisecond each. Nothing is lost either way: a slow application simply works
+/// through its queue (verified with one taking 1 ms per character).
+const TEXT_PIECE: usize = 64;
+
 pub(crate) fn create(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
     Ok(Box::new(SendInputInjector {
         mode: options.windows_key_mode,
         inputs: Vec::new(),
-        down: HashSet::new(),
+        down: Vec::new(),
         buttons: HashSet::new(),
         focus: Target::default(),
         pointer: Target::default(),
@@ -75,13 +82,30 @@ pub(crate) struct SendInputInjector {
     mode: WindowsKeyMode,
     /// Reused event buffer.
     inputs: Vec<INPUT>,
-    /// Keys and buttons held through this injector, released on drop as a safety net.
-    down: HashSet<Key>,
+    /// Keys held through this injector, in press order, with the event that pressed them.
+    down: Vec<Held>,
+    /// Buttons held through this injector (released on drop as a safety net).
     buttons: HashSet<MouseButton>,
     /// Where keyboard input went last (the focused window) and pointer input (the window under
     /// the pointer).
     focus: Target,
     pointer: Target,
+}
+
+/// A held key and the exact event that pressed it. Repeats and the release reuse it, so the
+/// release matches the press even when the focused window or its keyboard layout changed in
+/// between (a release with another virtual key would leave the pressed one down).
+struct Held {
+    key: Key,
+    vk: u16,
+    scan: u16,
+    flags: u32,
+}
+
+impl Held {
+    fn input(&self, up: bool) -> INPUT {
+        key_input(self.vk, self.scan, if up { self.flags | KEYEVENTF_KEYUP } else { self.flags })
+    }
 }
 
 /// A window input went to, and whether its program runs above us; looked up once per window.
@@ -154,13 +178,24 @@ impl SendInputInjector {
     }
 
     fn key(&mut self, key: Key, up: bool) -> Result<()> {
-        if up {
-            self.down.remove(&key);
-        } else if keymap::windows(key).is_some() {
-            self.down.insert(key);
-        }
         self.inputs.clear();
-        self.push_key(key, up, &mut Layout::default())?;
+        let held = self.down.iter().position(|held| held.key == key);
+        match (held, up) {
+            (Some(index), true) => {
+                let held = self.down.remove(index);
+                self.inputs.push(held.input(true));
+            }
+            // An auto-repeat: the very same press again.
+            (Some(index), false) => self.inputs.push(self.down[index].input(false)),
+            (None, _) => {
+                self.push_key(key, up, &mut Layout::default())?;
+                if !up && let Some(input) = self.inputs.last() {
+                    // SAFETY: push_key pushes keyboard inputs only.
+                    let ki = unsafe { input.Anonymous.ki };
+                    self.down.push(Held { key, vk: ki.wVk, scan: ki.wScan, flags: ki.dwFlags });
+                }
+            }
+        }
         self.send()?;
         self.focus.check(unsafe { GetForegroundWindow() })
     }
@@ -179,6 +214,10 @@ impl Injector for SendInputInjector {
 
     fn supports(&self, key: Key) -> bool {
         keymap::windows(key).is_some()
+    }
+
+    fn max_text_chunk(&self) -> Option<usize> {
+        Some(TEXT_PIECE)
     }
 
     fn key_down(&mut self, key: Key) -> Result<()> {
@@ -277,12 +316,10 @@ impl Injector for SendInputInjector {
 
 impl Drop for SendInputInjector {
     fn drop(&mut self) {
-        // Injected presses outlive the injector: release what is still held, ordinary keys
-        // before modifiers.
-        let mut held: Vec<Key> = self.down.iter().copied().collect();
-        held.sort_by_key(|key| key.is_modifier());
-        for key in held {
-            let _ = self.key(key, true);
+        // Injected presses outlive the injector: release what is still held, in exactly the
+        // reverse order of pressing.
+        while let Some(held) = self.down.pop() {
+            let _ = send_inputs(&[held.input(true)]);
         }
         for button in std::mem::take(&mut self.buttons) {
             let _ = self.mouse_button(button, false);
@@ -345,9 +382,8 @@ fn send_inputs(inputs: &[INPUT]) -> Result<()> {
             return Err(blocked_by_elevation(&name));
         }
         return Err(OutputError::Permission(
-            "Windows blocked the input: a secure screen (lock screen, UAC prompt or \
-             Ctrl+Alt+Del) is active, or the target belongs to a program running as \
-             administrator; start MIDI 2 Keyboard as administrator to control such programs."
+            "Windows blocked the input: the lock screen, a UAC prompt or another secure screen \
+             is active."
                 .into(),
         ));
     }
@@ -361,9 +397,9 @@ fn send_inputs(inputs: &[INPUT]) -> Result<()> {
 /// Input into a program that runs as administrator while we do not.
 fn blocked_by_elevation(program: &str) -> OutputError {
     let program = if program.is_empty() { "The target program" } else { program };
-    OutputError::Permission(format!(
-        "Windows blocked the input: {program} runs as administrator; start MIDI 2 Keyboard as \
-         administrator to control it."
+    OutputError::Elevated(format!(
+        "Windows blocked the input: {program} runs as administrator; {ELEVATION_REQUIRED} to \
+         control it."
     ))
 }
 

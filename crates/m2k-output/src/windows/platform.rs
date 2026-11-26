@@ -5,8 +5,8 @@ use std::ptr::null_mut;
 use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, GetLastError,
-    HANDLE, HWND, LPARAM,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_CANCELLED, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS,
+    GetLastError, HANDLE, HWND, LPARAM,
 };
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows_sys::Win32::Security::{
@@ -14,14 +14,18 @@ use windows_sys::Win32::Security::{
     TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenElevation, TokenIntegrityLevel,
 };
 use windows_sys::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
+use windows_sys::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+};
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
+use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GW_OWNER, GWL_EXSTYLE, GetForegroundWindow, GetWindow,
     GetWindowLongW, GetWindowThreadProcessId, InternalGetWindowText, IsWindowVisible,
-    WS_EX_TOOLWINDOW,
+    SW_SHOWNORMAL, WS_EX_TOOLWINDOW,
 };
 use windows_sys::core::BOOL;
 
@@ -121,8 +125,91 @@ pub(crate) fn permissions() -> Permissions {
 
 pub(crate) fn request_permissions() {}
 
-/// Whether this process runs elevated (as administrator).
+/// Whether this process runs elevated (as administrator); read once.
 pub(crate) fn is_elevated() -> bool {
+    static ELEVATED: OnceLock<bool> = OnceLock::new();
+    *ELEVATED.get_or_init(read_elevation)
+}
+
+/// Starts the current executable again through the "runas" verb (the UAC prompt).
+pub(crate) fn relaunch_elevated(args: &[String]) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("Cannot find the program file to restart: {e}"))?;
+    let file = wide(exe.as_os_str());
+    let parameters = wide(command_line(args).as_ref());
+    let directory = std::env::current_dir().ok().map(|dir| wide(dir.as_os_str()));
+    let verb = wide("runas".as_ref());
+    // ShellExecuteEx wants COM; keep whatever apartment the thread already has.
+    let com = unsafe {
+        CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32)
+    };
+    // SAFETY: plain C struct, all-zero is its documented "unused" state.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
+    // Return only once the new process is underway: the caller exits right after.
+    info.fMask = SEE_MASK_NOASYNC;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.lpParameters = parameters.as_ptr();
+    info.lpDirectory = directory.as_ref().map_or(std::ptr::null(), |dir| dir.as_ptr());
+    info.nShow = SW_SHOWNORMAL;
+    let started = unsafe { ShellExecuteExW(&mut info) } != 0;
+    let error = unsafe { GetLastError() };
+    if com >= 0 {
+        unsafe { CoUninitialize() }; // S_OK / S_FALSE: we initialized, so we balance it
+    }
+    if started {
+        Ok(())
+    } else if error == ERROR_CANCELLED {
+        Err("Restarting as administrator was cancelled.".into())
+    } else {
+        Err(format!(
+            "Windows could not restart MIDI 2 Keyboard as administrator: {}",
+            std::io::Error::from_raw_os_error(error as i32)
+        ))
+    }
+}
+
+/// Joins arguments into one command line that `CommandLineToArgvW` (and Rust's
+/// `std::env::args`) splits back into exactly `args`.
+fn command_line(args: &[String]) -> String {
+    args.iter().map(|arg| quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '\u{b}', '"']) {
+        return arg.to_string();
+    }
+    let mut quoted = String::from('"');
+    let mut backslashes = 0usize;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                // Backslashes before a quote are doubled, and the quote itself escaped.
+                quoted.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.extend(std::iter::repeat_n('\\', backslashes));
+                quoted.push(c);
+                backslashes = 0;
+            }
+        }
+    }
+    // Backslashes before the closing quote are doubled too.
+    quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+fn wide(text: &std::ffi::OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    text.encode_wide().chain(Some(0)).collect()
+}
+
+fn read_elevation() -> bool {
     let mut token: HANDLE = null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return own_integrity() >= HIGH_INTEGRITY;

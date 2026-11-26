@@ -98,6 +98,10 @@ pub(crate) fn is_elevated() -> bool {
     false
 }
 
+pub(crate) fn relaunch_elevated(_args: &[String]) -> Result<(), String> {
+    Err(crate::platform::NO_ELEVATION.into())
+}
+
 fn focused_window_title(pid: i32) -> Option<String> {
     // SAFETY: AXUIElementCreateApplication accepts any pid.
     let app = unsafe { AXUIElement::new_application(pid) };

@@ -87,6 +87,10 @@ pub(crate) fn is_elevated() -> bool {
     false
 }
 
+pub(crate) fn relaunch_elevated(_args: &[String]) -> Result<(), String> {
+    Err(crate::platform::NO_ELEVATION.into())
+}
+
 /// The connection broke: drop it and reconnect later.
 struct Broken;
 

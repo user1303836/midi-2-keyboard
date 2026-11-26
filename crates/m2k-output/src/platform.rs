@@ -78,9 +78,20 @@ pub fn request_permissions() {
 }
 
 /// Whether midi-2-keyboard itself runs with elevated privileges (Windows: as administrator,
-/// which it needs to send input into other elevated programs). Always `false` elsewhere.
+/// which it needs to send input into other elevated programs). Read once, so it is free to
+/// call often. Always `false` elsewhere.
 pub fn is_elevated() -> bool {
     catch_unwind(imp::is_elevated).unwrap_or(false)
+}
+
+/// Starts this program again with administrator rights, passing `args` (Windows: the UAC
+/// prompt, which only the user can answer; this call waits for that answer). On `Ok` the
+/// elevated copy is starting: the caller should exit promptly, and the new instance must not be
+/// turned away by single-instance handling. `Err` says why nothing started (the user declined
+/// the prompt, ...). Not available on macOS and Linux.
+pub fn relaunch_elevated(args: &[String]) -> Result<(), String> {
+    catch_unwind(AssertUnwindSafe(|| imp::relaunch_elevated(args)))
+        .unwrap_or_else(|_| Err("Restarting as administrator failed unexpectedly.".into()))
 }
 
 #[cfg(target_os = "linux")]
@@ -111,4 +122,13 @@ mod imp {
     pub fn is_elevated() -> bool {
         false
     }
+
+    pub fn relaunch_elevated(_args: &[String]) -> Result<(), String> {
+        Err(super::NO_ELEVATION.into())
+    }
 }
+
+/// `relaunch_elevated` where there is no such thing.
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) const NO_ELEVATION: &str =
+    "Restarting with administrator rights is not available on this platform.";
