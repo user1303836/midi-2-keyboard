@@ -1,0 +1,255 @@
+//! Reference-counted output on top of the [`Injector`]: the engine's single record of which keys
+//! and mouse buttons it holds down, and on whose behalf.
+//!
+//! Every holder (a hold engagement, a toggle latch, a running action) is identified by an owner
+//! key. A press always reaches the OS (a tap of a key that something else holds must still
+//! register as a key down); a release only reaches the OS when the last holder lets go. Whatever
+//! is still counted when the output is dropped is released, so the engine thread cannot exit (or
+//! swap backends) with a key stuck down.
+
+use std::collections::BTreeMap;
+
+use m2k_output::{Injector, Key, MouseButton, OutputError};
+
+#[derive(Debug, Default)]
+struct Holders {
+    total: u32,
+    by: Vec<(u64, u32)>,
+}
+
+impl Holders {
+    fn add(&mut self, owner: u64) {
+        self.total += 1;
+        match self.by.iter_mut().find(|(o, _)| *o == owner) {
+            Some((_, n)) => *n += 1,
+            None => self.by.push((owner, 1)),
+        }
+    }
+
+    /// Drops one reference of `owner`. `false` if it held none.
+    fn remove(&mut self, owner: u64) -> bool {
+        let Some(pos) = self.by.iter().position(|(o, _)| *o == owner) else {
+            return false;
+        };
+        self.by[pos].1 -= 1;
+        if self.by[pos].1 == 0 {
+            self.by.swap_remove(pos);
+        }
+        self.total -= 1;
+        true
+    }
+
+    /// Drops every reference of `owner`; returns how many there were.
+    fn remove_all(&mut self, owner: u64) -> u32 {
+        let Some(pos) = self.by.iter().position(|(o, _)| *o == owner) else {
+            return 0;
+        };
+        let (_, n) = self.by.swap_remove(pos);
+        self.total -= n;
+        n
+    }
+}
+
+pub struct Output {
+    injector: Box<dyn Injector>,
+    keys: BTreeMap<Key, Holders>,
+    buttons: BTreeMap<MouseButton, Holders>,
+    /// Set whenever the set of held keys changes (for the status snapshot).
+    pub changed: bool,
+}
+
+type Result = std::result::Result<(), OutputError>;
+
+impl Output {
+    pub fn new(injector: Box<dyn Injector>) -> Self {
+        Output { injector, keys: BTreeMap::new(), buttons: BTreeMap::new(), changed: true }
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.injector.name()
+    }
+
+    pub fn repeats_held_keys(&self) -> bool {
+        self.injector.repeats_held_keys()
+    }
+
+    pub fn key_count(&self, key: Key) -> u32 {
+        self.keys.get(&key).map_or(0, |h| h.total)
+    }
+
+    pub fn button_count(&self, button: MouseButton) -> u32 {
+        self.buttons.get(&button).map_or(0, |h| h.total)
+    }
+
+    /// Presses `key` for `owner`. Always sends a key down. The reference is counted even when
+    /// the backend fails, so the matching release stays balanced.
+    pub fn press_key(&mut self, key: Key, owner: u64) -> Result {
+        let holders = self.keys.entry(key).or_default();
+        if holders.total == 0 {
+            self.changed = true;
+        }
+        holders.add(owner);
+        self.injector.key_down(key)
+    }
+
+    /// Releases one reference of `owner`; sends the key up when nobody holds the key any more.
+    pub fn release_key(&mut self, key: Key, owner: u64) -> Result {
+        let Some(holders) = self.keys.get_mut(&key) else {
+            return Ok(());
+        };
+        if !holders.remove(owner) {
+            log::debug!("release of {key:?} by an owner that does not hold it");
+            return Ok(());
+        }
+        if holders.total == 0 {
+            self.keys.remove(&key);
+            self.changed = true;
+            return self.injector.key_up(key);
+        }
+        Ok(())
+    }
+
+    /// Keyboard auto-repeat emulation: another key down for a key that is held.
+    pub fn repeat_key(&mut self, key: Key) -> Result {
+        self.injector.key_down(key)
+    }
+
+    /// A key up for a key nobody holds (a macro's `KeyUp` of a key it never pressed).
+    pub fn key_up_unheld(&mut self, key: Key) -> Result {
+        if self.key_count(key) > 0 {
+            return Ok(());
+        }
+        self.injector.key_up(key)
+    }
+
+    pub fn press_button(&mut self, button: MouseButton, owner: u64) -> Result {
+        self.buttons.entry(button).or_default().add(owner);
+        self.injector.mouse_button(button, true)
+    }
+
+    pub fn release_button(&mut self, button: MouseButton, owner: u64) -> Result {
+        let Some(holders) = self.buttons.get_mut(&button) else {
+            return Ok(());
+        };
+        if !holders.remove(owner) {
+            return Ok(());
+        }
+        if holders.total == 0 {
+            self.buttons.remove(&button);
+            return self.injector.mouse_button(button, false);
+        }
+        Ok(())
+    }
+
+    pub fn button_up_unheld(&mut self, button: MouseButton) -> Result {
+        if self.button_count(button) > 0 {
+            return Ok(());
+        }
+        self.injector.mouse_button(button, false)
+    }
+
+    pub fn text(&mut self, text: &str) -> Result {
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.injector.text(text)
+    }
+
+    pub fn scroll(&mut self, dx: i32, dy: i32) -> Result {
+        self.injector.scroll(dx, dy)
+    }
+
+    pub fn move_pointer(&mut self, x: i32, y: i32, absolute: bool) -> Result {
+        if absolute {
+            self.injector.mouse_move_absolute(x, y)
+        } else {
+            self.injector.mouse_move_relative(x, y)
+        }
+    }
+
+    /// Safety net: releases every reference `owner` still has (its own bookkeeping should
+    /// already have done so).
+    pub fn release_owner(&mut self, owner: u64) -> Vec<OutputError> {
+        let mut errors = Vec::new();
+        let keys: Vec<Key> = self
+            .keys
+            .iter()
+            .filter(|(_, h)| h.by.iter().any(|(o, _)| *o == owner))
+            .map(|(k, _)| *k)
+            .collect();
+        for key in release_order(keys) {
+            if let Some(holders) = self.keys.get_mut(&key) {
+                holders.remove_all(owner);
+                if holders.total == 0 {
+                    self.keys.remove(&key);
+                    self.changed = true;
+                    if let Err(error) = self.injector.key_up(key) {
+                        errors.push(error);
+                    }
+                }
+            }
+        }
+        let buttons: Vec<MouseButton> = self
+            .buttons
+            .iter()
+            .filter(|(_, h)| h.by.iter().any(|(o, _)| *o == owner))
+            .map(|(b, _)| *b)
+            .collect();
+        for button in buttons {
+            if let Some(holders) = self.buttons.get_mut(&button) {
+                holders.remove_all(owner);
+                if holders.total == 0 {
+                    self.buttons.remove(&button);
+                    if let Err(error) = self.injector.mouse_button(button, false) {
+                        errors.push(error);
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    /// Releases everything that is held, whoever holds it (non-modifier keys first, then
+    /// modifiers, then mouse buttons).
+    pub fn release_everything(&mut self) -> Vec<OutputError> {
+        let mut errors = Vec::new();
+        let keys: Vec<Key> = std::mem::take(&mut self.keys).into_keys().collect();
+        if !keys.is_empty() {
+            self.changed = true;
+        }
+        for key in release_order(keys) {
+            if let Err(error) = self.injector.key_up(key) {
+                errors.push(error);
+            }
+        }
+        for button in std::mem::take(&mut self.buttons).into_keys() {
+            if let Err(error) = self.injector.mouse_button(button, false) {
+                errors.push(error);
+            }
+        }
+        errors
+    }
+
+    pub fn held_keys(&self) -> Vec<Key> {
+        self.keys.keys().copied().collect()
+    }
+
+    /// Swaps the backend. Call [`Output::release_everything`] first.
+    pub fn replace_injector(&mut self, injector: Box<dyn Injector>) -> Box<dyn Injector> {
+        self.changed = true;
+        std::mem::replace(&mut self.injector, injector)
+    }
+}
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        let _ = self.release_everything();
+    }
+}
+
+/// Non-modifier keys first (in reverse order), modifiers last, as when releasing a combination.
+fn release_order(mut keys: Vec<Key>) -> Vec<Key> {
+    keys.reverse();
+    keys.sort_by_key(|k| k.is_modifier());
+    keys
+}

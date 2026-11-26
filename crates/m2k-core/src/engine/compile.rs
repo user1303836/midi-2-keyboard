@@ -1,0 +1,745 @@
+//! Compiles a [`Config`] into the form the engine runs: actions become primitive timed steps
+//! (tap duration and key stagger already applied), SysEx and app patterns are parsed once,
+//! labels for the monitor are prepared, and [`SourceIndex`] maps each message kind to the live
+//! mappings that can match it, so the hot path never scans the whole config.
+
+use std::sync::Arc;
+
+use m2k_midi::ParameterKind;
+use m2k_output::{Key, MouseButton};
+
+use super::cx::Ctx;
+use super::pattern::{AppRule, SysExPattern};
+use super::text::{TextTemplate, shorten, type_label};
+use crate::model::*;
+
+/// Minimum pause between the key-up of one queued action and the key-down of the next, so that
+/// every tap of a burst registers as a distinct press.
+pub const MIN_GAP_MS: u32 = 2;
+
+/// Pause between the clicks of a double/triple click.
+const CLICK_GAP_MS: u32 = 15;
+
+/// How an action or hold target is gated (see `Gate::check`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// Keys, text, mouse, launching programs. Suppressed while learning, paused or while the
+    /// app's own window has focus.
+    Os,
+    /// Profile switches and layers. Suppressed while learning or paused.
+    Internal,
+    /// Pause / resume / release all. Suppressed only while learning.
+    Engine,
+}
+
+pub struct CompiledConfig {
+    pub settings: Settings,
+    pub profiles: Vec<CProfile>,
+    /// Every enabled mapping of every profile, in config order.
+    pub mappings: Vec<CMapping>,
+    /// Some profile rule or condition depends on the foreground application.
+    pub needs_foreground: bool,
+    /// Problems the user should hear about once (invalid SysEx patterns, ...).
+    pub errors: Vec<String>,
+    /// `config.selected_profile` exactly as given.
+    pub selected_profile: Option<String>,
+}
+
+impl CompiledConfig {
+    pub fn profile_index(&self, id: &str) -> Option<usize> {
+        self.profiles.iter().position(|p| &*p.id == id)
+    }
+}
+
+pub struct CProfile {
+    pub id: Arc<str>,
+    pub name: String,
+    pub always_on: bool,
+    pub apps: Vec<AppRule>,
+}
+
+pub struct CMapping {
+    pub id: Arc<str>,
+    /// Index into [`CompiledConfig::profiles`].
+    pub profile: usize,
+    pub profile_id: Arc<str>,
+    /// The definition as configured. A mapping whose definition is unchanged keeps its runtime
+    /// state across a config reload.
+    pub def: Mapping,
+    pub source: CSource,
+    pub behavior: CBehavior,
+    pub conditions: Vec<CCondition>,
+    pub rate_limit: Option<RateLimit>,
+}
+
+pub struct CSource {
+    pub device: Option<Box<str>>,
+    pub channel: Option<u8>,
+    pub kind: CSourceKind,
+}
+
+impl CSource {
+    /// Device and channel filter. `channel` is `None` for system messages (always accepted).
+    pub fn accepts(&self, device: &str, channel: Option<u8>) -> bool {
+        self.device.as_deref().is_none_or(|d| d == device)
+            && match (self.channel, channel) {
+                (Some(want), Some(got)) => want == got,
+                _ => true,
+            }
+    }
+
+    /// Whether a second "active" message for an already active instance is a fresh press (a
+    /// note retriggered without note off) rather than a value update.
+    pub fn retriggers(&self) -> bool {
+        matches!(self.kind, CSourceKind::Note { .. })
+    }
+}
+
+pub enum CSourceKind {
+    Note { notes: ValueRange, velocity: ValueRange },
+    Cc { controller: u8, range: ValueRange, encoding: ValueEncoding },
+    Cc14 { controller: u8, range: ValueRange },
+    Param { kind: ParameterKind, number: u16, range: ValueRange, hires: bool },
+    Program { programs: ValueRange },
+    PitchBend { range: ValueRange },
+    ChannelPressure { range: ValueRange },
+    PolyPressure { notes: ValueRange, range: ValueRange },
+    /// `None` when the configured pattern is invalid: never matches (reported once).
+    SysEx { pattern: Option<SysExPattern> },
+    Clock { divisor: u16 },
+    SongSelect { songs: ValueRange },
+    SongPosition { range: ValueRange },
+    System { message: SystemMessage },
+}
+
+pub enum CBehavior {
+    Trigger { on_press: Option<CAction>, on_release: Option<CAction>, repeat: Option<Repeat> },
+    /// `pulse` is what a pulse source (press and release in the same instant) does: a tap of the
+    /// target, so the press is long enough to register.
+    Hold { target: CHoldTarget, auto_repeat: bool, pulse: Option<CAction> },
+    Toggle { target: CHoldTarget },
+    Cycle { actions: Vec<CAction>, reset_after_ms: Option<u32> },
+    TapHold {
+        tap: Option<CAction>,
+        hold: Option<CAction>,
+        hold_target: Option<CHoldTarget>,
+        hold_ms: u32,
+    },
+    /// `highest` = the largest press count with an action (0 = nothing configured).
+    MultiTap { actions: [Option<CAction>; 3], highest: u8, window_ms: u32 },
+    Change { action: CAction },
+    Step { up: Option<CAction>, down: Option<CAction>, step: u16, max_burst: u16, invert: bool },
+}
+
+pub enum CCondition {
+    App { rule: AppRule, negate: bool },
+    Layer { layer: String, active: bool },
+    NoteHeld { channel: Option<u8>, note: u8, held: bool },
+    ControlValue { channel: Option<u8>, controller: u8, range: ValueRange },
+}
+
+// ---------------------------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------------------------
+
+pub type CAction = Arc<CompiledAction>;
+
+pub struct CompiledAction {
+    pub kind: ActionKind,
+    pub class: Class,
+    label: String,
+    /// Set when the label depends on the triggering message (text with placeholders).
+    dynamic: Option<TextTemplate>,
+}
+
+impl CompiledAction {
+    /// Short human description for the monitor.
+    pub fn describe(&self, ctx: &Ctx, middle_c_octave: i8) -> String {
+        match &self.dynamic {
+            Some(template) => type_label(&template.render(ctx, middle_c_octave)),
+            None => self.label.clone(),
+        }
+    }
+
+    /// The description without trigger data (for errors reported later).
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+pub enum ActionKind {
+    /// OS input, played step by step through the owner's action queue.
+    Output(Vec<Prim>),
+    SwitchProfile(ProfileTarget),
+    Layer { layer: Arc<str>, op: LayerOp },
+    Engine(EngineOp),
+    Launch(Launch),
+}
+
+#[derive(Debug, Clone)]
+pub enum Launch {
+    Run { command: String, args: Vec<String>, working_dir: String },
+    Open { target: String },
+}
+
+/// One primitive step of an output action.
+pub enum Prim {
+    /// Press a key (reference counted: always sends a key down).
+    Down(Key),
+    /// Release a key this action pressed.
+    Up(Key),
+    Text { text: TextTemplate, char_delay_ms: u32 },
+    ButtonDown(MouseButton),
+    ButtonUp(MouseButton),
+    Scroll { dx: i32, dy: i32 },
+    Move { x: i32, y: i32, absolute: bool },
+    Wait(u32),
+}
+
+/// A compiled [`HoldTarget`] with its monitor labels.
+pub struct CHoldTarget {
+    pub what: HoldWhat,
+    pub hold_label: String,
+    pub release_label: String,
+}
+
+pub enum HoldWhat {
+    Keys(Arc<[Key]>),
+    Button(MouseButton),
+    Layer(Arc<str>),
+}
+
+impl CHoldTarget {
+    pub fn class(&self) -> Class {
+        match self.what {
+            HoldWhat::Layer(_) => Class::Internal,
+            HoldWhat::Keys(_) | HoldWhat::Button(_) => Class::Os,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Compilation
+// ---------------------------------------------------------------------------------------------
+
+pub fn compile(config: &Config) -> CompiledConfig {
+    let settings = config.settings.clone();
+    let profiles: Vec<CProfile> = config
+        .profiles
+        .iter()
+        .map(|p| CProfile {
+            id: Arc::from(p.id.as_str()),
+            name: p.name.clone(),
+            always_on: p.always_on,
+            apps: p.apps.iter().map(AppRule::new).collect(),
+        })
+        .collect();
+
+    let mut errors = Vec::new();
+    let mut mappings = Vec::new();
+    for (pi, profile) in config.profiles.iter().enumerate() {
+        for mapping in profile.mappings.iter().filter(|m| m.enabled) {
+            mappings.push(compile_mapping(pi, &profiles, mapping, &settings, &mut errors));
+        }
+    }
+
+    let needs_foreground = (settings.auto_switch_profiles
+        && profiles.iter().any(|p| !p.always_on && !p.apps.is_empty()))
+        || mappings
+            .iter()
+            .any(|m| m.conditions.iter().any(|c| matches!(c, CCondition::App { .. })));
+
+    CompiledConfig {
+        settings,
+        profiles,
+        mappings,
+        needs_foreground,
+        errors,
+        selected_profile: config.selected_profile.clone(),
+    }
+}
+
+fn compile_mapping(
+    pi: usize,
+    profiles: &[CProfile],
+    mapping: &Mapping,
+    settings: &Settings,
+    errors: &mut Vec<String>,
+) -> CMapping {
+    let label = if mapping.name.trim().is_empty() { &mapping.id } else { &mapping.name };
+    let act = |a: &Action| action(a, settings, profiles);
+    let kind = match &mapping.source.event {
+        SourceEvent::Note { notes, velocity } => {
+            CSourceKind::Note { notes: *notes, velocity: *velocity }
+        }
+        SourceEvent::ControlChange { controller, range, encoding } => CSourceKind::Cc {
+            controller: (*controller).min(127),
+            range: *range,
+            encoding: *encoding,
+        },
+        SourceEvent::ControlChange14 { controller, range } => {
+            CSourceKind::Cc14 { controller: (*controller).min(31), range: *range }
+        }
+        SourceEvent::Nrpn { number, range, hires } => CSourceKind::Param {
+            kind: ParameterKind::Nrpn,
+            number: *number,
+            range: *range,
+            hires: *hires,
+        },
+        SourceEvent::Rpn { number, range, hires } => CSourceKind::Param {
+            kind: ParameterKind::Rpn,
+            number: *number,
+            range: *range,
+            hires: *hires,
+        },
+        SourceEvent::ProgramChange { programs } => CSourceKind::Program { programs: *programs },
+        SourceEvent::PitchBend { range } => CSourceKind::PitchBend { range: *range },
+        SourceEvent::ChannelPressure { range } => CSourceKind::ChannelPressure { range: *range },
+        SourceEvent::PolyPressure { notes, range } => {
+            CSourceKind::PolyPressure { notes: *notes, range: *range }
+        }
+        SourceEvent::SysEx { pattern } => match SysExPattern::parse(pattern) {
+            Ok(parsed) => CSourceKind::SysEx { pattern: Some(parsed) },
+            Err(error) => {
+                errors.push(format!(
+                    "Mapping \"{label}\" in profile \"{}\": invalid SysEx pattern \"{pattern}\" \
+                     ({error}). It will not react until the pattern is fixed.",
+                    profiles[pi].name
+                ));
+                CSourceKind::SysEx { pattern: None }
+            }
+        },
+        SourceEvent::Clock { divisor } => CSourceKind::Clock { divisor: (*divisor).max(1) },
+        SourceEvent::SongSelect { songs } => CSourceKind::SongSelect { songs: *songs },
+        SourceEvent::SongPosition { range } => CSourceKind::SongPosition { range: *range },
+        SourceEvent::System { message } => CSourceKind::System { message: *message },
+    };
+    let source = CSource {
+        device: mapping.source.device.as_deref().filter(|d| !d.is_empty()).map(Box::from),
+        channel: mapping.source.channel,
+        kind,
+    };
+
+    let behavior = match &mapping.behavior {
+        Behavior::Trigger { on_press, on_release, repeat } => CBehavior::Trigger {
+            on_press: on_press.as_ref().map(act),
+            on_release: on_release.as_ref().map(act),
+            repeat: *repeat,
+        },
+        Behavior::Hold { target, auto_repeat } => {
+            let pulse = match target {
+                HoldTarget::Keys { keys } => {
+                    Some(act(&Action::Keys { keys: keys.clone(), tap_ms: None }))
+                }
+                HoldTarget::MouseButton { button } => {
+                    Some(act(&Action::MouseClick { button: *button, clicks: 1 }))
+                }
+                HoldTarget::Layer { .. } => None,
+            };
+            CBehavior::Hold { target: hold_target(target), auto_repeat: *auto_repeat, pulse }
+        }
+        Behavior::Toggle { target } => CBehavior::Toggle { target: hold_target(target) },
+        Behavior::Cycle { actions, reset_after_ms } => CBehavior::Cycle {
+            actions: actions.iter().map(act).collect(),
+            reset_after_ms: *reset_after_ms,
+        },
+        Behavior::TapHold { tap, hold, hold_target: target, hold_ms } => CBehavior::TapHold {
+            tap: tap.as_ref().map(act),
+            hold: hold.as_ref().map(act),
+            hold_target: target.as_ref().map(hold_target),
+            hold_ms: *hold_ms,
+        },
+        Behavior::MultiTap { single, double, triple, window_ms } => {
+            let actions = [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
+            let highest = actions.iter().rposition(Option::is_some).map_or(0, |i| i as u8 + 1);
+            CBehavior::MultiTap { actions, highest, window_ms: *window_ms }
+        }
+        Behavior::Change { action } => CBehavior::Change { action: act(action) },
+        Behavior::Step { up, down, step, max_burst, invert } => CBehavior::Step {
+            up: up.as_ref().map(act),
+            down: down.as_ref().map(act),
+            step: (*step).max(1),
+            max_burst: *max_burst,
+            invert: *invert,
+        },
+    };
+
+    let conditions = mapping
+        .conditions
+        .iter()
+        .map(|c| match c {
+            Condition::App { app, negate } => {
+                CCondition::App { rule: AppRule::new(app), negate: *negate }
+            }
+            Condition::Layer { layer, active } => {
+                CCondition::Layer { layer: layer.clone(), active: *active }
+            }
+            Condition::NoteHeld { channel, note, held } => {
+                CCondition::NoteHeld { channel: *channel, note: *note, held: *held }
+            }
+            Condition::ControlValue { channel, controller, range } => CCondition::ControlValue {
+                channel: *channel,
+                controller: *controller,
+                range: *range,
+            },
+        })
+        .collect();
+
+    CMapping {
+        id: Arc::from(mapping.id.as_str()),
+        profile: pi,
+        profile_id: profiles[pi].id.clone(),
+        def: mapping.clone(),
+        source,
+        behavior,
+        conditions,
+        rate_limit: mapping.rate_limit,
+    }
+}
+
+fn hold_target(target: &HoldTarget) -> CHoldTarget {
+    let (what, label) = match target {
+        HoldTarget::Keys { keys } => (HoldWhat::Keys(Arc::from(keys.as_slice())), keys_label(keys)),
+        HoldTarget::MouseButton { button } => {
+            (HoldWhat::Button(*button), format!("{} button", button_name(*button)))
+        }
+        HoldTarget::Layer { layer } => {
+            (HoldWhat::Layer(Arc::from(layer.as_str())), format!("layer \"{layer}\""))
+        }
+    };
+    CHoldTarget { what, hold_label: format!("hold {label}"), release_label: format!("release {label}") }
+}
+
+/// Compiles one action with the given settings (tap duration, stagger).
+pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CAction {
+    let stagger = settings.key_stagger_ms;
+    let gap = stagger.max(MIN_GAP_MS);
+    let mut dynamic = None;
+    let (kind, class, label) = match action {
+        Action::Keys { keys, tap_ms } => {
+            let mut steps = Vec::new();
+            push_tap(&mut steps, keys, tap_ms.unwrap_or(settings.tap_ms).max(1), stagger);
+            (ActionKind::Output(steps), Class::Os, keys_label(keys))
+        }
+        Action::Text { text, char_delay_ms } => {
+            let template = TextTemplate::parse(text);
+            if !template.is_literal() {
+                dynamic = Some(template.clone());
+            }
+            let steps = vec![Prim::Text { text: template, char_delay_ms: *char_delay_ms }];
+            (ActionKind::Output(steps), Class::Os, type_label(text))
+        }
+        Action::MouseClick { button, clicks } => {
+            let mut steps = Vec::new();
+            push_click(&mut steps, *button, *clicks, settings.tap_ms, gap.max(CLICK_GAP_MS));
+            (ActionKind::Output(steps), Class::Os, click_label(*button, *clicks))
+        }
+        Action::MouseScroll { dx, dy } => (
+            ActionKind::Output(vec![Prim::Scroll { dx: *dx, dy: *dy }]),
+            Class::Os,
+            scroll_label(*dx, *dy),
+        ),
+        Action::MouseMove { x, y, absolute } => (
+            ActionKind::Output(vec![Prim::Move { x: *x, y: *y, absolute: *absolute }]),
+            Class::Os,
+            move_label(*x, *y, *absolute),
+        ),
+        Action::Sequence { steps } => (
+            ActionKind::Output(sequence(steps, settings, gap)),
+            Class::Os,
+            sequence_label(steps),
+        ),
+        Action::SwitchProfile { target } => (
+            ActionKind::SwitchProfile(target.clone()),
+            Class::Internal,
+            match target {
+                ProfileTarget::Next => "next profile".to_string(),
+                ProfileTarget::Previous => "previous profile".to_string(),
+                ProfileTarget::Profile { id } => {
+                    let name = profiles.iter().find(|p| &*p.id == id).map_or(id, |p| &p.name);
+                    format!("switch to profile \"{name}\"")
+                }
+            },
+        ),
+        Action::Layer { layer, op } => (
+            ActionKind::Layer { layer: Arc::from(layer.as_str()), op: *op },
+            Class::Internal,
+            match op {
+                LayerOp::On => format!("layer \"{layer}\" on"),
+                LayerOp::Off => format!("layer \"{layer}\" off"),
+                LayerOp::Toggle => format!("toggle layer \"{layer}\""),
+            },
+        ),
+        Action::Engine { op } => (
+            ActionKind::Engine(*op),
+            Class::Engine,
+            match op {
+                EngineOp::Pause => "pause output",
+                EngineOp::Resume => "resume output",
+                EngineOp::TogglePause => "toggle pause",
+                EngineOp::ReleaseAll => "release all",
+            }
+            .to_string(),
+        ),
+        Action::Run { command, args, working_dir } => {
+            let mut label = format!("run {command}");
+            for arg in args {
+                label.push(' ');
+                label.push_str(arg);
+            }
+            (
+                ActionKind::Launch(Launch::Run {
+                    command: command.clone(),
+                    args: args.clone(),
+                    working_dir: working_dir.clone(),
+                }),
+                Class::Os,
+                shorten(&label, 60).into_owned(),
+            )
+        }
+        Action::Open { target } => (
+            ActionKind::Launch(Launch::Open { target: target.clone() }),
+            Class::Os,
+            format!("open {}", shorten(target, 60)),
+        ),
+    };
+    Arc::new(CompiledAction { kind, class, label, dynamic })
+}
+
+/// Downs in order (with stagger), hold for `tap_ms`, ups in reverse order (with stagger).
+fn push_tap(steps: &mut Vec<Prim>, keys: &[Key], tap_ms: u32, stagger: u32) {
+    if keys.is_empty() {
+        return;
+    }
+    for (i, key) in keys.iter().enumerate() {
+        if i > 0 && stagger > 0 {
+            steps.push(Prim::Wait(stagger));
+        }
+        steps.push(Prim::Down(*key));
+    }
+    steps.push(Prim::Wait(tap_ms));
+    for (i, key) in keys.iter().rev().enumerate() {
+        if i > 0 && stagger > 0 {
+            steps.push(Prim::Wait(stagger));
+        }
+        steps.push(Prim::Up(*key));
+    }
+}
+
+fn push_click(steps: &mut Vec<Prim>, button: MouseButton, clicks: u8, hold_ms: u32, gap: u32) {
+    for i in 0..clicks.max(1) {
+        if i > 0 {
+            steps.push(Prim::Wait(gap));
+        }
+        steps.push(Prim::ButtonDown(button));
+        steps.push(Prim::Wait(hold_ms.max(1)));
+        steps.push(Prim::ButtonUp(button));
+    }
+}
+
+fn sequence(steps: &[SequenceStep], settings: &Settings, gap: u32) -> Vec<Prim> {
+    let mut out = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        // Separate consecutive taps so each one registers, unless a delay follows anyway.
+        let separate = !matches!(steps.get(i + 1), None | Some(SequenceStep::Delay { .. }));
+        match step {
+            SequenceStep::Keys { keys, tap_ms } => {
+                let tap_ms = tap_ms.unwrap_or(settings.tap_ms).max(1);
+                push_tap(&mut out, keys, tap_ms, settings.key_stagger_ms);
+                if separate && !keys.is_empty() {
+                    out.push(Prim::Wait(gap));
+                }
+            }
+            SequenceStep::KeyDown { key } => out.push(Prim::Down(*key)),
+            SequenceStep::KeyUp { key } => out.push(Prim::Up(*key)),
+            SequenceStep::Text { text } => {
+                out.push(Prim::Text { text: TextTemplate::parse(text), char_delay_ms: 0 })
+            }
+            SequenceStep::Delay { ms } => {
+                if *ms > 0 {
+                    out.push(Prim::Wait(*ms));
+                }
+            }
+            SequenceStep::MouseClick { button, clicks } => {
+                push_click(&mut out, *button, *clicks, settings.tap_ms, gap.max(CLICK_GAP_MS));
+                if separate {
+                    out.push(Prim::Wait(gap));
+                }
+            }
+            SequenceStep::MouseDown { button } => out.push(Prim::ButtonDown(*button)),
+            SequenceStep::MouseUp { button } => out.push(Prim::ButtonUp(*button)),
+            SequenceStep::MouseScroll { dx, dy } => out.push(Prim::Scroll { dx: *dx, dy: *dy }),
+            SequenceStep::MouseMove { x, y, absolute } => {
+                out.push(Prim::Move { x: *x, y: *y, absolute: *absolute })
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------------------------
+
+pub fn keys_label(keys: &[Key]) -> String {
+    if keys.is_empty() {
+        return "(no keys)".into();
+    }
+    keys.iter().map(|k| k.label()).collect::<Vec<_>>().join("+")
+}
+
+pub fn button_name(button: MouseButton) -> &'static str {
+    match button {
+        MouseButton::Left => "Left",
+        MouseButton::Right => "Right",
+        MouseButton::Middle => "Middle",
+        MouseButton::Back => "Back",
+        MouseButton::Forward => "Forward",
+    }
+}
+
+fn click_label(button: MouseButton, clicks: u8) -> String {
+    let name = button_name(button);
+    match clicks {
+        0 | 1 => format!("click {name}"),
+        2 => format!("double-click {name}"),
+        3 => format!("triple-click {name}"),
+        n => format!("click {name} x{n}"),
+    }
+}
+
+fn scroll_label(dx: i32, dy: i32) -> String {
+    let mut parts = Vec::new();
+    if dy > 0 {
+        parts.push(format!("up {dy}"));
+    } else if dy < 0 {
+        parts.push(format!("down {}", -(dy as i64)));
+    }
+    if dx > 0 {
+        parts.push(format!("right {dx}"));
+    } else if dx < 0 {
+        parts.push(format!("left {}", -(dx as i64)));
+    }
+    if parts.is_empty() { "scroll 0".into() } else { format!("scroll {}", parts.join(", ")) }
+}
+
+fn move_label(x: i32, y: i32, absolute: bool) -> String {
+    if absolute {
+        format!("move pointer to ({x}, {y})")
+    } else {
+        format!("move pointer by ({x}, {y})")
+    }
+}
+
+fn sequence_label(steps: &[SequenceStep]) -> String {
+    let parts: Vec<String> = steps
+        .iter()
+        .take(4)
+        .map(|step| match step {
+            SequenceStep::Keys { keys, .. } => keys_label(keys),
+            SequenceStep::KeyDown { key } => format!("press {}", key.label()),
+            SequenceStep::KeyUp { key } => format!("release {}", key.label()),
+            SequenceStep::Text { text } => type_label(text),
+            SequenceStep::Delay { ms } => format!("wait {ms} ms"),
+            SequenceStep::MouseClick { button, clicks } => click_label(*button, *clicks),
+            SequenceStep::MouseDown { button } => format!("press {} button", button_name(*button)),
+            SequenceStep::MouseUp { button } => {
+                format!("release {} button", button_name(*button))
+            }
+            SequenceStep::MouseScroll { dx, dy } => scroll_label(*dx, *dy),
+            SequenceStep::MouseMove { x, y, absolute } => move_label(*x, *y, *absolute),
+        })
+        .collect();
+    let mut label = format!("macro: {}", parts.join(", "));
+    if steps.len() > 4 {
+        label.push_str(", …");
+    }
+    if steps.is_empty() {
+        label = "macro (empty)".into();
+    }
+    shorten(&label, 80).into_owned()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Index
+// ---------------------------------------------------------------------------------------------
+
+/// Live mappings by the message kind that can feed them (indices into
+/// [`CompiledConfig::mappings`]). Rebuilt whenever the set of live mappings changes.
+pub struct SourceIndex {
+    pub note: Vec<usize>,
+    pub poly_pressure: Vec<usize>,
+    pub channel_pressure: Vec<usize>,
+    pub pitch_bend: Vec<usize>,
+    pub program: Vec<usize>,
+    /// Per controller number.
+    pub cc: Vec<Vec<usize>>,
+    /// Per MSB controller number (0..=31).
+    pub cc14: Vec<Vec<usize>>,
+    pub nrpn: Vec<usize>,
+    pub rpn: Vec<usize>,
+    pub sysex: Vec<usize>,
+    pub clock: Vec<usize>,
+    pub song_select: Vec<usize>,
+    pub song_position: Vec<usize>,
+    /// Per [`system_index`].
+    pub system: [Vec<usize>; 6],
+}
+
+pub fn system_index(message: SystemMessage) -> usize {
+    match message {
+        SystemMessage::Start => 0,
+        SystemMessage::Continue => 1,
+        SystemMessage::Stop => 2,
+        SystemMessage::TuneRequest => 3,
+        SystemMessage::Reset => 4,
+        SystemMessage::ActiveSensing => 5,
+    }
+}
+
+impl SourceIndex {
+    pub fn build(mappings: &[CMapping], live: impl Fn(usize) -> bool) -> Self {
+        let mut index = SourceIndex {
+            note: Vec::new(),
+            poly_pressure: Vec::new(),
+            channel_pressure: Vec::new(),
+            pitch_bend: Vec::new(),
+            program: Vec::new(),
+            cc: vec![Vec::new(); 128],
+            cc14: vec![Vec::new(); 32],
+            nrpn: Vec::new(),
+            rpn: Vec::new(),
+            sysex: Vec::new(),
+            clock: Vec::new(),
+            song_select: Vec::new(),
+            song_position: Vec::new(),
+            system: Default::default(),
+        };
+        for (i, mapping) in mappings.iter().enumerate() {
+            if !live(i) {
+                continue;
+            }
+            match &mapping.source.kind {
+                CSourceKind::Note { .. } => index.note.push(i),
+                CSourceKind::Cc { controller, .. } => {
+                    index.cc[usize::from(*controller & 127)].push(i)
+                }
+                CSourceKind::Cc14 { controller, .. } => {
+                    index.cc14[usize::from(*controller & 31)].push(i)
+                }
+                CSourceKind::Param { kind: ParameterKind::Nrpn, .. } => index.nrpn.push(i),
+                CSourceKind::Param { kind: ParameterKind::Rpn, .. } => index.rpn.push(i),
+                CSourceKind::Program { .. } => index.program.push(i),
+                CSourceKind::PitchBend { .. } => index.pitch_bend.push(i),
+                CSourceKind::ChannelPressure { .. } => index.channel_pressure.push(i),
+                CSourceKind::PolyPressure { .. } => index.poly_pressure.push(i),
+                CSourceKind::SysEx { .. } => index.sysex.push(i),
+                CSourceKind::Clock { .. } => index.clock.push(i),
+                CSourceKind::SongSelect { .. } => index.song_select.push(i),
+                CSourceKind::SongPosition { .. } => index.song_position.push(i),
+                CSourceKind::System { message } => index.system[system_index(*message)].push(i),
+            }
+        }
+        index
+    }
+}
