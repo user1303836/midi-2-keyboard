@@ -72,6 +72,24 @@ pub struct CMapping {
     pub behavior: CBehavior,
     pub conditions: Vec<CCondition>,
     pub rate_limit: Option<RateLimit>,
+    /// `None` also when both halves are empty.
+    pub feedback: Option<CFeedback>,
+}
+
+/// A compiled [`Feedback`]: an empty (or invalid) half is `None` and sends nothing.
+pub struct CFeedback {
+    pub device: Option<Arc<str>>,
+    pub when: CWhen,
+    pub on: Option<CSend>,
+    pub off: Option<CSend>,
+}
+
+/// [`FeedbackWhen`].
+pub enum CWhen {
+    Engaged,
+    Layer(Arc<str>),
+    /// A profile id.
+    Profile(Arc<str>),
 }
 
 pub struct CSource {
@@ -632,6 +650,28 @@ fn compile_mapping(
         })
         .collect();
 
+    let feedback = mapping.feedback.as_ref().and_then(|fb| {
+        let mut half = |which: &str, send: &MidiSend| match CSend::new(send) {
+            Ok(send) => (!send.is_empty()).then_some(send),
+            Err(error) => {
+                errors.push(format!(
+                    "Mapping \"{label}\" in profile \"{}\": its feedback's \"{which}\" message is \
+                     not valid ({error}); it will not be sent.",
+                    profiles[pi].name
+                ));
+                None
+            }
+        };
+        let (on, off) = (half("on", &fb.on), half("off", &fb.off));
+        let when = match &fb.when {
+            FeedbackWhen::Engaged => CWhen::Engaged,
+            FeedbackWhen::Layer { layer } => CWhen::Layer(Arc::from(layer.as_str())),
+            FeedbackWhen::Profile { id } => CWhen::Profile(Arc::from(id.as_str())),
+        };
+        let device = fb.device.as_deref().map(Arc::from);
+        (on.is_some() || off.is_some()).then_some(CFeedback { device, when, on, off })
+    });
+
     CMapping {
         id: Arc::from(mapping.id.as_str()),
         profile: pi,
@@ -641,6 +681,7 @@ fn compile_mapping(
         behavior,
         conditions,
         rate_limit: mapping.rate_limit,
+        feedback,
     }
 }
 

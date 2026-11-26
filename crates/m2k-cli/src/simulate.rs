@@ -36,6 +36,10 @@ script lines (a time prefix is optional: +MS = after the previous line, @MS = si
   config <file.json>              hot-swap the config
   run [delay-ms] <action json>    the UI's Test button
   status                          print the engine status snapshot
+  output-gone \"Port\"              that MIDI output disappears
+  output-back \"Port\"              it is there again (and the engine is told: lights refresh)
+  outputs-changed \"Port\" ...      tell the engine these outputs changed
+  inputs \"Device\" ...               the MIDI inputs connected now (where unaimed lights go)
   swap-backend                    replace the output backend (set_injector)
   echo <text>                     print a marker line
   # comment
@@ -242,6 +246,10 @@ enum Step {
     Select(String),
     Disconnect(String),
     ReleaseAll,
+    OutputGone(String),
+    OutputBack(String),
+    OutputsChanged(Vec<String>),
+    Inputs(Vec<String>),
     Config(PathBuf),
     Run { delay_ms: u32, action: Box<Action> },
     Status,
@@ -367,6 +375,10 @@ fn parse_line(rest: &str, now: &mut u64) -> Result<Step, String> {
         "select" => Step::Select(arg(1)?),
         "disconnect" => Step::Disconnect(arg(1)?),
         "release-all" => Step::ReleaseAll,
+        "output-gone" => Step::OutputGone(arg(1)?),
+        "output-back" => Step::OutputBack(arg(1)?),
+        "outputs-changed" => Step::OutputsChanged(tokens[1..].to_vec()),
+        "inputs" => Step::Inputs(tokens[1..].to_vec()),
         "config" => Step::Config(PathBuf::from(arg(1)?)),
         "status" => Step::Status,
         "swap-backend" => Step::SwapBackend,
@@ -755,11 +767,9 @@ pub fn run(args: &[String]) -> i32 {
     };
     let injector = backend(backend_name);
     let midi_sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let midi_out = LogMidiSink {
-        clock: clock.clone(),
-        absent: Arc::new(Mutex::new(absent)),
-        sent: midi_sent.clone(),
-    };
+    let absent = Arc::new(Mutex::new(absent));
+    let midi_out =
+        LogMidiSink { clock: clock.clone(), absent: absent.clone(), sent: midi_sent.clone() };
     let options = EngineOptions {
         injector: Box::new(injector),
         track_foreground,
@@ -806,6 +816,15 @@ pub fn run(args: &[String]) -> i32 {
                 engine.device_disconnected(device);
             }
             Step::ReleaseAll => engine.release_all(),
+            Step::OutputGone(port) => {
+                absent.lock().unwrap_or_else(|e| e.into_inner()).insert(port.clone());
+            }
+            Step::OutputBack(port) => {
+                absent.lock().unwrap_or_else(|e| e.into_inner()).remove(port);
+                engine.midi_outputs_changed(vec![port.clone()]);
+            }
+            Step::OutputsChanged(ports) => engine.midi_outputs_changed(ports.clone()),
+            Step::Inputs(connected) => engine.midi_inputs_changed(connected.clone()),
             Step::Config(path) => match load_config(path) {
                 Ok(config) => engine.set_config(config),
                 Err(error) => clock.print("ERROR", error),

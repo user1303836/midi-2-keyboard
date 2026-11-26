@@ -61,7 +61,16 @@ impl Worker {
         if !matched.iter().any(|id| id.as_str() == &*def.id) {
             matched.push(def.id.to_string());
         }
+        // Feedback without a device of its own answers the device that last reached it.
+        let touched = rt.fb.last_device != Some(inst.device());
+        if touched {
+            rt.fb.last_device = Some(inst.device());
+        }
+        let feedback_moved = touched && def.feedback.is_some();
         behavior::on_edge(rt, def, &mut self.cx, inst, edge, ctx, was_active);
+        if feedback_moved {
+            self.fb_due = true;
+        }
     }
 
     /// Ranged absolute sources: active once the value enters the range, inactive once it

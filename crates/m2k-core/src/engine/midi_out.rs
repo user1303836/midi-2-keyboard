@@ -80,6 +80,11 @@ impl CSend {
         })
     }
 
+    /// Nothing to send (raw bytes left blank).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, CSend::Raw(messages) if messages.is_empty())
+    }
+
     /// Sends every message to `port`; `incoming` (0..=127) stands for [`SendValue::Incoming`].
     /// Stops at the first failure.
     pub fn send(&self, sink: &dyn MidiSink, port: &str, incoming: u8) -> Result<(), String> {

@@ -7,16 +7,20 @@ import type { MidiSend } from "./MidiSend";
  * or displays) show what the computer side is doing.
  *
  * `on` is sent when the state described by `when` becomes true, `off` when it becomes false.
- * Both are also sent to bring a controller up to date: when the output port (re)appears, when
- * the configuration changes, and when the set of live profiles changes (a mapping that stops
- * being live gets its `off`). On exit and on pause nothing is sent: lights keep showing the
- * state. Sending never blocks and never delays key output; a missing port is reported once, not
- * per message.
+ * Both are also sent to bring a controller up to date: when the output port (re)appears or the
+ * connected inputs change, on resume, and when the set of live profiles changes (a mapping that
+ * stops being live gets its `off`). A config change sends the state of new mappings and of
+ * those whose feedback changed, and the `off` of lit mappings it removes. On exit and on pause
+ * nothing is sent: lights keep showing the state. Sending never blocks and never delays key
+ * output; a missing port is reported once, not per message.
  */
 export type Feedback = { 
 /**
- * Output port to send to. `None` = the output named like the mapping's source device; if
- * the source accepts any device, the one named like the device that last reached this
- * mapping (so nothing is sent before the control was touched once).
+ * Output port to send to. `None` = the output paired with the mapping's source device; if
+ * the source accepts any device, the output paired with the device that last reached this
+ * mapping; before anything reached it, the output paired with the connected input when
+ * exactly one connected input has one (the usual one-controller set-up), otherwise nothing
+ * is sent until the control is touched. Resolved again whenever ports or the connected
+ * inputs change, so plugging the controller in lights it up.
  */
 device: string | null, when: FeedbackWhen, on: MidiSend, off: MidiSend, };

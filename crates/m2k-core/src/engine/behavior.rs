@@ -147,6 +147,36 @@ impl State {
     }
 }
 
+/// Where a mapping's feedback goes.
+#[derive(Debug, Clone)]
+pub enum FbTarget {
+    Port(Arc<str>),
+    /// There is no such output (reported once).
+    Missing(Arc<str>),
+}
+
+impl FbTarget {
+    pub fn name(&self) -> &Arc<str> {
+        match self {
+            FbTarget::Port(name) | FbTarget::Missing(name) => name,
+        }
+    }
+}
+
+/// Feedback bookkeeping of a mapping (see `worker::feedback`). Survives a panic reset: it records
+/// what the controller shows.
+#[derive(Debug, Default)]
+pub struct FbState {
+    /// The device that last reached the mapping (where feedback goes when nothing else says).
+    pub last_device: Option<DeviceId>,
+    /// Where feedback goes, as resolved for (outputs generation, last device).
+    pub target: Option<(u64, Option<DeviceId>, Option<FbTarget>)>,
+    /// The port and the state last sent.
+    pub sent: Option<(Arc<str>, bool)>,
+    /// Send the current state at the next pass even if it was sent already (a refresh).
+    pub force: bool,
+}
+
 /// Runtime state of one mapping. Survives a config reload when the mapping is unchanged.
 pub struct MappingRt {
     /// Unique for the life of the engine; owner key for output and timers.
@@ -163,6 +193,7 @@ pub struct MappingRt {
     /// fast step) rather than the slot's usual one.
     deferred: [Option<CAction>; SLOTS],
     limit_reported: Option<Instant>,
+    pub fb: FbState,
 }
 
 impl MappingRt {
@@ -182,6 +213,7 @@ impl MappingRt {
             limiters: Default::default(),
             deferred: Default::default(),
             limit_reported: None,
+            fb: FbState::default(),
         }
     }
 

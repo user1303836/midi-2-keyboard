@@ -129,6 +129,19 @@ impl Engine {
         self.post(Command::SetMidiSink(sink));
     }
 
+    /// MIDI output ports appeared, came back or changed state (names as the MIDI sink knows
+    /// them): feedback going to them is sent again, so the controller shows the current state.
+    pub fn midi_outputs_changed(&self, ports: Vec<String>) {
+        self.post(Command::MidiOutputsChanged(ports));
+    }
+
+    /// The MIDI inputs that are connected now (names as `midi` gets them). Feedback that names
+    /// no output and has not been reached by any device goes to the output paired with the
+    /// connected input when exactly one has one.
+    pub fn midi_inputs_changed(&self, connected: Vec<String>) {
+        self.post(Command::MidiInputsChanged(connected));
+    }
+
     /// Feeds one MIDI message received on `device` (normalized port name).
     /// `time_us` is the input layer's monotonic timestamp. The engine measures all timing
     /// (tap-hold, multi-tap windows, debounces) from the moment this is called, on its own

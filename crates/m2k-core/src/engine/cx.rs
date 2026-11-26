@@ -565,7 +565,7 @@ impl Cx {
 
     /// A failed firing, reported once per burst (the same failure of the same owner within a
     /// couple of seconds is not reported again).
-    fn report_failed_once(&mut self, info: &OwnerInfo, description: String, error: String) {
+    pub fn report_failed_once(&mut self, info: &OwnerInfo, description: String, error: String) {
         if !self.failures.seen(info.owner, &error, self.now) {
             self.report(info, description, Outcome::Failed { error });
         }

@@ -379,6 +379,19 @@ fn sanitize_mapping(mapping: &mut Mapping) {
     if let Some(limit) = &mut mapping.rate_limit {
         limit.interval_ms = limit.interval_ms.clamp(1, 3_600_000);
     }
+    if let Some(feedback) = &mut mapping.feedback {
+        sanitize_port(&mut feedback.device);
+        sanitize_message(&mut feedback.on);
+        sanitize_message(&mut feedback.off);
+        match &mut feedback.when {
+            FeedbackWhen::Layer { layer: name } | FeedbackWhen::Profile { id: name } => {
+                if name.trim().len() != name.len() {
+                    *name = name.trim().to_string();
+                }
+            }
+            FeedbackWhen::Engaged => {}
+        }
+    }
     for action in behavior_actions_mut(&mut mapping.behavior) {
         match action {
             Action::Midi { device, message } => sanitize_send(device, message),
@@ -420,9 +433,13 @@ fn behavior_actions_mut(behavior: &mut Behavior) -> Vec<&mut Action> {
     }
 }
 
-/// An output port name without surrounding blanks (blank = none), channels 1..=16 and data bytes
-/// 0..=127.
 fn sanitize_send(device: &mut Option<String>, message: &mut MidiSend) {
+    sanitize_port(device);
+    sanitize_message(message);
+}
+
+/// An output port name without surrounding blanks (blank = none).
+fn sanitize_port(device: &mut Option<String>) {
     if let Some(name) = device {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -431,6 +448,10 @@ fn sanitize_send(device: &mut Option<String>, message: &mut MidiSend) {
             *name = trimmed.to_string();
         }
     }
+}
+
+/// Channels 1..=16 and data bytes 0..=127.
+fn sanitize_message(message: &mut MidiSend) {
     let fixed = |value: &mut SendValue| {
         if let SendValue::Fixed { value } = value {
             *value = (*value).min(127);

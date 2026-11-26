@@ -10,7 +10,7 @@
 //! The MIDI side (message -> observations -> behaviors, device bookkeeping) is in `dispatch`.
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,6 +36,7 @@ use crate::events::{EngineEvent, EngineStatus, LatencyStats, Outcome};
 use crate::model::{Action, Config, EngineOp, ProfileTarget};
 
 mod dispatch;
+mod feedback;
 
 /// A command with the time it was posted (MIDI timing is measured from arrival, not from when
 /// the engine got to it).
@@ -58,6 +59,8 @@ pub enum Command {
     SetConfig(Box<Config>),
     SetInjector(Box<dyn Injector>),
     SetMidiSink(Box<dyn MidiSink>),
+    MidiOutputsChanged(Vec<String>),
+    MidiInputsChanged(Vec<String>),
     DeviceDisconnected(String),
     SetPaused(bool),
     SetWindowFocused(bool),
@@ -139,6 +142,20 @@ pub struct Worker {
     latency_timer: Option<TimerId>,
     next_test: u64,
     test_info: OwnerInfo,
+    /// Mappings with feedback (indices).
+    feedback: Vec<usize>,
+    /// A feedback pass is needed even if nothing else changed.
+    fb_due: bool,
+    /// Off on the way out: nothing is sent on exit.
+    fb_enabled: bool,
+    /// Outputs reported missing (once each, until they appear or the config changes).
+    fb_missing: HashSet<Arc<str>>,
+    /// Last `off`s owed by mappings that went away.
+    fb_final: Vec<feedback::FinalOff>,
+    /// Bumped whenever outputs or feedback targets may have changed.
+    outputs_generation: u64,
+    /// Connected MIDI inputs, as the runtime reports them (feedback's last resort).
+    inputs: Vec<Arc<str>>,
     cx: Cx,
 }
 
@@ -209,6 +226,13 @@ impl Worker {
             latency_timer: None,
             next_test: 0,
             test_info: OwnerInfo::test(),
+            feedback: Vec::new(),
+            fb_due: false,
+            fb_enabled: true,
+            fb_missing: HashSet::new(),
+            fb_final: Vec::new(),
+            outputs_generation: 0,
+            inputs: Vec::new(),
             cx,
         };
         // The first install runs outside the loop's protection: a panic here must not take the
@@ -259,7 +283,18 @@ impl Worker {
             Command::Midi { device, message } => self.on_midi(device, message),
             Command::SetConfig(config) => self.install(&config),
             Command::SetInjector(injector) => self.set_injector(injector),
-            Command::SetMidiSink(sink) => self.cx.midi = sink,
+            Command::SetMidiSink(sink) => {
+                self.cx.midi = sink;
+                self.outputs_generation += 1;
+                self.fb_missing.clear();
+                self.refresh_feedback();
+            }
+            Command::MidiOutputsChanged(ports) => self.midi_outputs_changed(ports),
+            Command::MidiInputsChanged(connected) => {
+                self.inputs = connected.into_iter().map(Arc::from).collect();
+                self.outputs_generation += 1;
+                self.refresh_feedback();
+            }
             Command::DeviceDisconnected(device) => self.device_disconnected(&device),
             Command::SetPaused(paused) => self.set_gate(|g| g.paused = paused),
             Command::SetWindowFocused(focused) => self.set_gate(|g| g.window_focused = focused),
@@ -383,8 +418,18 @@ impl Worker {
         for j in carry.iter().flatten() {
             kept[*j] = true;
         }
+        // A light whose mapping goes away, or whose feedback changes, is switched off first.
+        for (i, carried) in carry.iter().enumerate() {
+            if let Some(j) = *carried
+                && self.cfg.mappings[j].def.feedback != cfg.mappings[i].def.feedback
+            {
+                self.owe_final_off(j);
+                self.maps[j].fb = Default::default();
+            }
+        }
         for (j, kept) in kept.iter().enumerate() {
             if !kept {
+                self.owe_final_off(j);
                 // Removed or changed: what it already fired stops as well.
                 self.deactivate(j);
                 let info = self.maps[j].info.clone();
@@ -432,6 +477,15 @@ impl Worker {
         self.update_tracker();
         self.refresh_liveness(true);
         self.cx.dirty = true;
+
+        self.feedback = (0..self.cfg.mappings.len())
+            .filter(|&i| self.cfg.mappings[i].feedback.is_some())
+            .collect();
+        // New mappings (and ones whose feedback changed) have sent nothing yet, so the next pass
+        // sends their state; unchanged ones are not resent (the editor saves on every change).
+        self.outputs_generation += 1;
+        self.fb_missing.clear();
+        self.fb_due = true;
     }
 
     fn deactivate(&mut self, i: usize) {
@@ -462,6 +516,9 @@ impl Worker {
             let live = self.cfg.profiles[profile].always_on || Some(profile) == effective;
             if self.maps[i].live != live {
                 changed = true;
+                // Feedback: off for the mapping that leaves, the current state for one that comes.
+                self.maps[i].fb.force = true;
+                self.fb_due = true;
                 if !live {
                     self.deactivate(i);
                 }
@@ -469,6 +526,8 @@ impl Worker {
             }
         }
         if changed {
+            // Feedback targets are resolved again for the new live set.
+            self.outputs_generation += 1;
             let maps = &self.maps;
             self.index = Arc::new(SourceIndex::build(&self.cfg.mappings, |i| maps[i].live));
             self.cx.dirty = true;
@@ -580,6 +639,9 @@ impl Worker {
         if !before.blocks_os() && after.blocks_os() {
             self.release_outputs(false);
         }
+        if before.paused && !after.paused {
+            self.refresh_feedback();
+        }
         if before.paused != after.paused
             || before.learning != after.learning
             || before.focus_suspended() != after.focus_suspended()
@@ -647,6 +709,8 @@ impl Worker {
 
     /// Delivers queued events and (coalesced) status changes. `force` delivers the status now.
     fn flush(&mut self, force: bool) {
+        // After this event's key output, before its events go out.
+        self.feedback_pass();
         if !self.cx.outbox.is_empty() {
             let mut events = std::mem::take(&mut self.cx.outbox);
             for event in events.drain(..) {
@@ -795,6 +859,8 @@ impl Worker {
         }
         self.profiles.effective = None;
         self.refresh_liveness(true);
+        // Mapping states were reset: lights that were on are switched off at the next pass.
+        self.fb_due = true;
         self.tests.clear();
         self.retry_timer = None;
         self.latency_timer = None;
@@ -805,6 +871,8 @@ impl Worker {
 
     /// Final cleanup on the engine thread: release everything and deliver the last status.
     fn stop(&mut self) {
+        // Lights keep showing the state the app was in.
+        self.fb_enabled = false;
         let _ = catch_unwind(AssertUnwindSafe(|| {
             self.release_outputs(true);
             // Last chances for releases the backend refused (the thread is about to end, so a
@@ -826,7 +894,8 @@ impl Worker {
 /// Whether two definitions of a mapping behave the same (its label does not matter). Destructured
 /// exhaustively so a field added to `Mapping` later has to be considered here.
 fn same_behavior(a: &crate::model::Mapping, b: &crate::model::Mapping) -> bool {
-    // TODO(engine): `feedback` is new in the model; decide whether changing it alone resets state.
+    // `feedback` alone does not reset the mapping: a new light colour keeps a latched toggle
+    // latched (the install sends the old light's `off` and the new feedback's current state).
     let crate::model::Mapping {
         id,
         name: _,
