@@ -244,7 +244,12 @@ export const useApp = create<State>((set, get) => {
           if (e.type === "fired" && e.outcome.type === "failed") {
             // The system refused something (an elevated window, a missing permission, a key this
             // platform lacks): worth saying out loud, but not for every repeat.
-            const message = `Could not send ${e.description}: ${e.outcome.error}`;
+            // The engine words MIDI firings as "send CC 7 = 90 …" and "light on: …" already.
+            const message = e.description.startsWith("send ")
+              ? `Could not ${e.description}: ${e.outcome.error}`
+              : e.description.startsWith("light ")
+                ? `The controller's ${e.description.replace(": ", " (")}) could not be sent: ${e.outcome.error}`
+                : `Could not send ${e.description}: ${e.outcome.error}`;
             const now = Date.now();
             if (now - (recentErrors.get(e.outcome.error) ?? 0) > 30_000) {
               recentErrors.set(e.outcome.error, now);
