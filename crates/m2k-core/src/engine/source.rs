@@ -14,6 +14,9 @@ use crate::model::{ValueEncoding, ValueRange};
 /// Index of a device in [`Devices`]. Stable for the life of the engine.
 pub type DeviceId = u16;
 
+/// Stands for "no device" (an action started from the UI, not by a message).
+pub const NO_DEVICE: DeviceId = DeviceId::MAX;
+
 /// One independently tracked thing a source can match: (device, channel, note / controller /
 /// parameter number). Channel 0 is used for system messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,6 +187,11 @@ impl Devices {
         self.list.push(DeviceState::new(name.clone()));
         self.by_name.insert(name, id);
         id
+    }
+
+    /// The device's port name (`None` for [`NO_DEVICE`]).
+    pub fn name(&self, id: DeviceId) -> Option<&Arc<str>> {
+        self.list.get(usize::from(id)).map(|device| &device.name)
     }
 
     pub fn get(&self, id: DeviceId) -> &DeviceState {

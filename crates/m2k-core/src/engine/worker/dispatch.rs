@@ -133,6 +133,7 @@ impl Worker {
                     channel,
                     controller: Some(u16::from(controller)),
                     value: i32::from(value),
+                    value7: value,
                     ..base
                 };
                 let inst = InstKey::new(dev, channel, u16::from(controller));
@@ -164,7 +165,7 @@ impl Worker {
                 }
             }
             MidiMessage::ProgramChange { channel, program } => {
-                let ctx = Ctx { channel, value: i32::from(program), ..base };
+                let ctx = Ctx { channel, value: i32::from(program), value7: program, ..base };
                 let inst = InstKey::new(dev, channel, 0);
                 let program = u16::from(program);
                 self.pulse(&index.program, name, Some(channel), inst, ctx, matched, |kind| {
@@ -172,7 +173,8 @@ impl Worker {
                 });
             }
             MidiMessage::PitchBend { channel, value } => {
-                let ctx = Ctx { channel, value: i32::from(value), ..base };
+                let ctx =
+                    Ctx { channel, value: i32::from(value), value7: (value >> 7) as u8, ..base };
                 let inst = InstKey::new(dev, channel, 0);
                 self.level(
                     &index.pitch_bend,
@@ -189,7 +191,7 @@ impl Worker {
                 );
             }
             MidiMessage::ChannelPressure { channel, pressure } => {
-                let ctx = Ctx { channel, value: i32::from(pressure), ..base };
+                let ctx = Ctx { channel, value: i32::from(pressure), value7: pressure, ..base };
                 let inst = InstKey::new(dev, channel, 0);
                 let list = &index.channel_pressure;
                 let value = u16::from(pressure);
@@ -199,7 +201,8 @@ impl Worker {
                 });
             }
             MidiMessage::PolyPressure { channel, note, pressure } => {
-                let ctx = Ctx { channel, note: Some(note), value: i32::from(pressure), ..base };
+                let value = i32::from(pressure);
+                let ctx = Ctx { channel, note: Some(note), value, value7: pressure, ..base };
                 let inst = InstKey::new(dev, channel, u16::from(note));
                 let list = &index.poly_pressure;
                 let value = u16::from(pressure);
@@ -227,14 +230,14 @@ impl Worker {
                 });
             }
             MidiMessage::SongSelect { song } => {
-                let ctx = Ctx { value: i32::from(song), ..base };
+                let ctx = Ctx { value: i32::from(song), value7: song, ..base };
                 let song = u16::from(song);
                 self.pulse(&index.song_select, name, None, system, ctx, matched, |kind| {
                     matches!(kind, CSourceKind::SongSelect { songs } if songs.contains(song))
                 });
             }
             MidiMessage::SongPosition { position } => {
-                let ctx = Ctx { value: i32::from(position), ..base };
+                let ctx = Ctx { value: i32::from(position), value7: (position >> 7) as u8, ..base };
                 let list = &index.song_position;
                 self.level(list, name, None, system, position, ctx, matched, |k| match k {
                     CSourceKind::SongPosition { range } => Some(*range),
@@ -287,6 +290,7 @@ impl Worker {
             note: Some(note),
             velocity: Some(velocity),
             value: i32::from(velocity),
+            value7: velocity,
             ..Ctx::default()
         };
         let inst = InstKey::new(dev, channel, u16::from(note));
@@ -382,6 +386,7 @@ impl Worker {
                     device: dev,
                     channel: param.channel,
                     controller: Some(param.number),
+                    value7: param.value7(),
                     ..Ctx::default()
                 };
                 let inst = InstKey::new(dev, param.channel, param.number);
@@ -412,6 +417,7 @@ impl Worker {
                     channel: cc.channel,
                     controller: Some(u16::from(cc.controller)),
                     value: i32::from(cc.value),
+                    value7: (cc.value >> 7) as u8,
                     ..Ctx::default()
                 };
                 let inst = InstKey::new(dev, cc.channel, u16::from(cc.controller));
@@ -472,7 +478,7 @@ impl Worker {
             let active = self.maps[i]
                 .active(|key| key.device() == dev && channel.is_none_or(|c| key.channel() == c));
             for (key, ctx) in active {
-                let ctx = Ctx { velocity: ctx.velocity.map(|_| 0), value: 0, ..ctx };
+                let ctx = Ctx { velocity: ctx.velocity.map(|_| 0), value: 0, value7: 0, ..ctx };
                 self.feed(i, key, Obs::Inactive, ctx, matched);
             }
         }
@@ -528,7 +534,9 @@ impl Worker {
                 if number.is_some_and(|n| ctx.controller != Some(n)) {
                     continue;
                 }
-                self.feed(i, key, Obs::Inactive, Ctx { value: i32::from(value), ..ctx }, matched);
+                let value7 = if value > 127 { (value >> 7) as u8 } else { value as u8 };
+                let ctx = Ctx { value: i32::from(value), value7, ..ctx };
+                self.feed(i, key, Obs::Inactive, ctx, matched);
             }
         }
     }

@@ -27,6 +27,7 @@ use super::cx::{Ctx, Cx, Gate, OwnerInfo, Request, TimerKind};
 use super::executor::Executor;
 use super::foreground::Tracker;
 use super::launch::Launcher;
+use super::midi_out::MidiSink;
 use super::output::Output;
 use super::pattern::Foreground;
 use super::sys::TimerResolution;
@@ -56,6 +57,7 @@ pub enum Command {
     },
     SetConfig(Box<Config>),
     SetInjector(Box<dyn Injector>),
+    SetMidiSink(Box<dyn MidiSink>),
     DeviceDisconnected(String),
     SetPaused(bool),
     SetWindowFocused(bool),
@@ -184,7 +186,8 @@ impl Worker {
         };
         let cfg = compile::compile(&empty);
         let out = Output::new(options.injector);
-        let cx = Cx::new(start, cfg.settings.clone(), out, Launcher::new(tx.clone()));
+        let launcher = Launcher::new(tx.clone());
+        let cx = Cx::new(start, cfg.settings.clone(), out, options.midi_out, launcher);
         let index = Arc::new(SourceIndex::build(&[], |_| false));
         let mut worker = Worker {
             sink,
@@ -256,6 +259,7 @@ impl Worker {
             Command::Midi { device, message } => self.on_midi(device, message),
             Command::SetConfig(config) => self.install(&config),
             Command::SetInjector(injector) => self.set_injector(injector),
+            Command::SetMidiSink(sink) => self.cx.midi = sink,
             Command::DeviceDisconnected(device) => self.device_disconnected(&device),
             Command::SetPaused(paused) => self.set_gate(|g| g.paused = paused),
             Command::SetWindowFocused(focused) => self.set_gate(|g| g.window_focused = focused),

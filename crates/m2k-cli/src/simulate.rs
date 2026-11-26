@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use m2k_core::{
-    Action, Config, Engine, EngineEvent, EngineOptions, EngineStatus, Outcome, SkipReason,
+    Action, Config, Engine, EngineEvent, EngineOptions, EngineStatus, MidiSink, Outcome, SkipReason,
 };
 use m2k_midi::{Derived, MidiMessage, ParameterChange, ParameterKind, Parser, names::note_name};
 use m2k_output::platform::ForegroundApp;
@@ -21,7 +21,9 @@ use m2k_output::{Injector, Key, MouseButton, OutputError};
 const USAGE: &str = "usage: m2k simulate <config.json> [script | -] [options]
 
 Runs the config against a script of timed input (read from stdin when no script is given or
-it is -) and prints every backend call and engine event with a millisecond timestamp.
+it is -) and prints every backend call and engine event with a millisecond timestamp. MIDI the
+engine sends is printed as MIDI-OUT lines; every output port exists unless --absent-output says
+otherwise.
 
 script lines (a time prefix is optional: +MS = after the previous line, @MS = since start):
   +0 \"Device A\" 90 3C 64        MIDI bytes from a device (running status works)
@@ -50,6 +52,7 @@ options:
   --clock           also show MIDI clock / active sensing messages
   --track-foreground  poll the real foreground application (default: only `foreground` lines)
   --panic-sink <N>  the event sink panics on its Nth event (tests that the engine survives)
+  --absent-output <name>  there is no MIDI output port of this name (repeatable)
   --quiet-status    do not print status events";
 
 fn say(line: std::fmt::Arguments<'_>) {
@@ -92,6 +95,29 @@ struct Tally {
     skipped: u64,
     failed: u64,
     errors: u64,
+}
+
+/// The MIDI output of the simulation: prints what the engine sends.
+struct LogMidiSink {
+    clock: Arc<Clock>,
+    absent: Arc<Mutex<BTreeSet<String>>>,
+    sent: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl MidiSink for LogMidiSink {
+    fn send(&self, port: &str, bytes: &[u8]) -> Result<(), String> {
+        if !self.has_port(port) {
+            return Err(format!("there is no MIDI output named \"{port}\""));
+        }
+        let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+        self.clock.print("MIDI-OUT", format_args!("\"{port}\" {}", hex.join(" ")));
+        self.sent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn has_port(&self, name: &str) -> bool {
+        !self.absent.lock().unwrap_or_else(|e| e.into_inner()).contains(name)
+    }
 }
 
 /// The output backend of the simulation: prints and records what it is asked to do.
@@ -592,6 +618,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut settle_ms = 1000u64;
     let mut track_foreground = false;
     let mut panic_sink: Option<u64> = None;
+    let mut absent: BTreeSet<String> = BTreeSet::new();
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
     let mut iter = args.iter();
@@ -641,6 +668,15 @@ pub fn run(args: &[String]) -> i32 {
                 Some(name) => backend_name = Box::leak(name.clone().into_boxed_str()),
                 None => {
                     eprintln!("--as-backend needs a backend name");
+                    return 2;
+                }
+            },
+            "--absent-output" => match iter.next() {
+                Some(name) => {
+                    absent.insert(name.clone());
+                }
+                None => {
+                    eprintln!("--absent-output needs a port name");
                     return 2;
                 }
             },
@@ -718,10 +754,21 @@ pub fn run(args: &[String]) -> i32 {
         text_chunk,
     };
     let injector = backend(backend_name);
+    let midi_sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let midi_out = LogMidiSink {
+        clock: clock.clone(),
+        absent: Arc::new(Mutex::new(absent)),
+        sent: midi_sent.clone(),
+    };
+    let options = EngineOptions {
+        injector: Box::new(injector),
+        track_foreground,
+        midi_out: Box::new(midi_out),
+    };
     let engine = {
         let clock = clock.clone();
         let tally = tally.clone();
-        Engine::start(config, EngineOptions { injector: Box::new(injector), track_foreground }, {
+        Engine::start(config, options, {
             let seen = std::sync::atomic::AtomicU64::new(0);
             move |event| {
                 let n = seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -784,6 +831,10 @@ pub fn run(args: &[String]) -> i32 {
         "summary: {} key downs, {} key ups; fired: {} sent, {} skipped, {} failed; {} errors",
         held.key_downs, held.key_ups, tally.sent, tally.skipped, tally.failed, tally.errors
     ));
+    let midi_sent = midi_sent.load(std::sync::atomic::Ordering::Relaxed);
+    if midi_sent > 0 {
+        say(format_args!("midi out: {midi_sent} messages"));
+    }
     if held.keys.is_empty() && held.buttons.is_empty() {
         say(format_args!("RESULT: OK, nothing is left held"));
         0

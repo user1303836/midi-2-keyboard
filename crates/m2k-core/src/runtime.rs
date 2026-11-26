@@ -21,7 +21,7 @@ use m2k_output::platform::{self, Permissions};
 use m2k_output::{Injector, Key, NullInjector};
 
 use crate::app::{AppInfo, RuntimeEvent, Snapshot};
-use crate::engine::{Engine, EngineOptions};
+use crate::engine::{Engine, EngineOptions, NullMidiSink};
 use crate::events::{EngineEvent, EngineStatus};
 use crate::model::{Action, Config};
 use crate::store;
@@ -181,7 +181,11 @@ impl Runtime {
             let for_engine = weak.clone();
             let engine = Engine::start(
                 config.clone(),
-                EngineOptions { injector, track_foreground: true },
+                EngineOptions {
+                    injector,
+                    track_foreground: true,
+                    midi_out: Box::new(NullMidiSink),
+                },
                 move |event| {
                     if let Some(inner) = for_engine.upgrade() {
                         inner.on_engine_event(event);

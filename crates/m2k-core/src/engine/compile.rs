@@ -9,6 +9,7 @@ use m2k_midi::ParameterKind;
 use m2k_output::{Key, MouseButton};
 
 use super::cx::Ctx;
+use super::midi_out::{CSend, parse_raw};
 use super::pattern::{AppRule, SysExPattern};
 use super::source::Obs;
 use super::text::{TextTemplate, shorten, type_label};
@@ -274,6 +275,9 @@ pub struct CompiledAction {
 impl CompiledAction {
     /// Short human description for the monitor.
     pub fn describe(&self, ctx: &Ctx, middle_c_octave: i8) -> String {
+        if let ActionKind::Midi(midi) = &self.kind {
+            return midi.describe(None, ctx.value7, middle_c_octave);
+        }
         match &self.dynamic {
             Some(template) => type_label(&template.render(ctx, middle_c_octave)),
             None => self.label.clone(),
@@ -304,6 +308,28 @@ pub enum ActionKind {
     },
     Engine(EngineOp),
     Launch(Launch),
+    /// MIDI to an output port, sent at once (not through the action queue, so forwarding a
+    /// knob is never slowed down by key gaps).
+    Midi(CMidi),
+}
+
+/// A compiled "Send MIDI": the output (`None` = the one named like the device the triggering
+/// message came from) and the message.
+#[derive(Debug, Clone)]
+pub struct CMidi {
+    pub device: Option<Arc<str>>,
+    pub send: CSend,
+}
+
+impl CMidi {
+    /// `send CC 20 = 127 (ch 1) → "Faderfox EC4"`; `port` = where it actually goes, when known.
+    pub fn describe(&self, port: Option<&str>, incoming: u8, middle_c_octave: i8) -> String {
+        let text = self.send.text(incoming, middle_c_octave);
+        match port.or(self.device.as_deref()) {
+            Some(port) => format!("send {text} \u{2192} \"{port}\""),
+            None => format!("send {text}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -334,6 +360,8 @@ pub enum Prim {
         absolute: bool,
     },
     Wait(u32),
+    /// A "Send MIDI" macro step.
+    Midi(CMidi),
 }
 
 /// A compiled [`HoldTarget`] with its monitor labels.
@@ -563,6 +591,12 @@ fn compile_mapping(
     };
 
     for action in behavior_actions(&mapping.behavior) {
+        if let Some(problem) = midi_problem(action) {
+            errors.push(format!(
+                "Mapping \"{label}\" in profile \"{}\": {problem}. That message will not be sent.",
+                profiles[pi].name
+            ));
+        }
         if let Action::SwitchProfile { target: ProfileTarget::Profile { id } } = action
             && !action.is_empty()
             && !profiles.iter().any(|p| &*p.id == id)
@@ -682,9 +716,14 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             Class::Os,
             move_label(*x, *y, *absolute),
         ),
-        Action::Sequence { steps } => {
-            (ActionKind::Output(sequence(steps, settings, gap)), Class::Os, sequence_label(steps))
-        }
+        Action::Sequence { steps } => match sequence(steps, settings, gap) {
+            Ok(prims) => (ActionKind::Output(prims), sequence_class(steps), sequence_label(steps)),
+            Err(error) => (
+                ActionKind::Unavailable(format!("its MIDI bytes cannot be sent: {error}")),
+                sequence_class(steps),
+                sequence_label(steps),
+            ),
+        },
         Action::SwitchProfile { target } => (
             match target {
                 ProfileTarget::Profile { id } if !profiles.iter().any(|p| &*p.id == id) => {
@@ -744,9 +783,17 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             Class::Os,
             format!("open {}", shorten(target, 60)),
         ),
-        // TODO(engine): "Send MIDI" is new in the model (see `Action::Midi`, `MidiSend`).
-        Action::Midi { .. } => (
-            ActionKind::Unavailable("sending MIDI is not implemented yet".to_string()),
+        // Not held back while the app's window is in front (lighting a pad is not typing into
+        // the editor), but stopped by pause and learning like layers and profile switches.
+        Action::Midi { device, message } => (
+            match CSend::new(message) {
+                Ok(send) => {
+                    ActionKind::Midi(CMidi { device: device.as_deref().map(Arc::from), send })
+                }
+                Err(error) => {
+                    ActionKind::Unavailable(format!("the MIDI bytes cannot be sent: {error}"))
+                }
+            },
             Class::Internal,
             "send MIDI".to_string(),
         ),
@@ -798,14 +845,17 @@ fn push_click(steps: &mut Vec<Prim>, button: MouseButton, clicks: u8, hold_ms: u
     }
 }
 
-fn sequence(steps: &[SequenceStep], settings: &Settings, gap: u32) -> Vec<Prim> {
+/// The steps of a macro; fails on raw MIDI bytes that are not MIDI.
+fn sequence(steps: &[SequenceStep], settings: &Settings, gap: u32) -> Result<Vec<Prim>, String> {
     let mut out = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         // Separate consecutive taps so each one registers, unless a delay follows anyway.
         let separate = !matches!(steps.get(i + 1), None | Some(SequenceStep::Delay { .. }));
         match step {
-            // TODO(engine): "Send MIDI" as a macro step is new in the model.
-            SequenceStep::Midi { .. } => {}
+            SequenceStep::Midi { device, message } => out.push(Prim::Midi(CMidi {
+                device: device.as_deref().map(Arc::from),
+                send: CSend::new(message)?,
+            })),
             SequenceStep::Keys { keys, tap_ms } => {
                 let tap_ms = tap_ms.unwrap_or(settings.tap_ms).max(1);
                 push_tap(&mut out, keys, tap_ms, settings.key_stagger_ms);
@@ -837,7 +887,33 @@ fn sequence(steps: &[SequenceStep], settings: &Settings, gap: u32) -> Vec<Prim> 
             }
         }
     }
-    out
+    Ok(out)
+}
+
+/// A macro that only sends MIDI (and waits) is gated like MIDI, not like typing.
+fn sequence_class(steps: &[SequenceStep]) -> Class {
+    let midi_only = steps
+        .iter()
+        .all(|step| matches!(step, SequenceStep::Midi { .. } | SequenceStep::Delay { .. }));
+    if midi_only && !steps.is_empty() { Class::Internal } else { Class::Os }
+}
+
+/// What is wrong with the raw MIDI bytes of an action (or of its macro steps), if anything.
+fn midi_problem(action: &Action) -> Option<String> {
+    let raw = |message: &MidiSend| match message {
+        MidiSend::Raw { bytes } => parse_raw(bytes).err().map(|error| {
+            format!("the MIDI bytes \"{}\" are not valid ({error})", shorten(bytes.trim(), 40))
+        }),
+        _ => None,
+    };
+    match action {
+        Action::Midi { message, .. } => raw(message),
+        Action::Sequence { steps } => steps.iter().find_map(|step| match step {
+            SequenceStep::Midi { message, .. } => raw(message),
+            _ => None,
+        }),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

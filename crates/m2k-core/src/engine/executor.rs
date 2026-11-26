@@ -369,6 +369,7 @@ impl Cx {
                         return Progress::Wait(*ms);
                     }
                 }
+                Prim::Midi(midi) => self.send_midi_step(info, midi, &run.ctx),
             }
         }
         Progress::Done

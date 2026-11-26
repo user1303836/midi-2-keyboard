@@ -33,6 +33,7 @@ mod foreground;
 mod latency;
 mod launch;
 mod limiter;
+mod midi_out;
 mod output;
 mod pattern;
 mod source;
@@ -52,6 +53,7 @@ use m2k_output::platform::ForegroundApp;
 
 use crate::events::{EngineEvent, EngineStatus};
 use crate::model::{Action, Config};
+pub use midi_out::{MidiSink, NullMidiSink};
 use worker::{Command, Envelope, Shared};
 
 pub struct EngineOptions {
@@ -60,6 +62,8 @@ pub struct EngineOptions {
     /// Poll the foreground application (on a helper thread) while any profile or condition
     /// needs it. Disable for headless/CLI simulations.
     pub track_foreground: bool,
+    /// Where "Send MIDI" actions and feedback go. [`NullMidiSink`] = no MIDI outputs.
+    pub midi_out: Box<dyn MidiSink>,
 }
 
 /// How long [`Engine::stop`] waits for the engine thread. Releasing everything takes
@@ -118,6 +122,11 @@ impl Engine {
     /// Everything held is released through the old backend first.
     pub fn set_injector(&self, injector: Box<dyn Injector>) {
         self.post(Command::SetInjector(injector));
+    }
+
+    /// Replaces the MIDI output (for example once the output ports are available).
+    pub fn set_midi_sink(&self, sink: Box<dyn MidiSink>) {
+        self.post(Command::SetMidiSink(sink));
     }
 
     /// Feeds one MIDI message received on `device` (normalized port name).

@@ -9,19 +9,21 @@ use std::time::{Duration, Instant};
 
 use m2k_output::{MouseButton, OutputError};
 
-use super::compile::{CAction, CCondition, CHoldTarget, Class, HoldWhat};
+use super::compile::{CAction, CCondition, CHoldTarget, CMidi, Class, HoldWhat};
 use super::executor::{Enqueued, Executor, Typematic};
 use super::launch::Launcher;
+use super::midi_out::MidiSink;
 use super::output::Output;
 use super::pattern::Foreground;
-use super::source::{DeviceId, Devices};
+use super::source::{DeviceId, Devices, NO_DEVICE};
 use super::timers::{TimerId, Timers};
 use crate::events::{EngineEvent, FiredLog, Outcome, SkipReason};
 use crate::model::{EngineOp, LayerOp, ProfileTarget, Settings};
 
 /// Data of the message that triggered something (for text placeholders and the monitor).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ctx {
+    /// [`NO_DEVICE`] when nothing came from a device (the UI's Test button).
     pub device: DeviceId,
     /// 1..=16, 0 for system messages.
     pub channel: u8,
@@ -31,6 +33,23 @@ pub struct Ctx {
     pub controller: Option<u16>,
     /// The value (velocity, CC value, 14-bit value, program, signed ticks, ...).
     pub value: i32,
+    /// The message's value as 7 bits (a 14-bit value's upper 7, a relative encoder's raw
+    /// byte): what "Send MIDI" passes on as the incoming value.
+    pub value7: u8,
+}
+
+impl Default for Ctx {
+    fn default() -> Self {
+        Ctx {
+            device: NO_DEVICE,
+            channel: 0,
+            note: None,
+            velocity: None,
+            controller: None,
+            value: 0,
+            value7: 0,
+        }
+    }
 }
 
 /// Owner key of actions started by [`crate::Engine::run_action`].
@@ -220,6 +239,8 @@ pub struct Cx {
     pub settings: Settings,
     pub timers: Timers<TimerKind>,
     pub out: Output,
+    /// Where MIDI goes ("Send MIDI", feedback).
+    pub midi: Box<dyn MidiSink>,
     pub exec: Executor,
     pub typematic: Option<Typematic>,
     pub layers: Layers,
@@ -241,7 +262,13 @@ pub struct Cx {
 }
 
 impl Cx {
-    pub fn new(start: Instant, settings: Settings, out: Output, launcher: Launcher) -> Self {
+    pub fn new(
+        start: Instant,
+        settings: Settings,
+        out: Output,
+        midi: Box<dyn MidiSink>,
+        launcher: Launcher,
+    ) -> Self {
         Cx {
             start,
             now: start,
@@ -249,6 +276,7 @@ impl Cx {
             settings,
             timers: Timers::new(),
             out,
+            midi,
             exec: Executor::default(),
             typematic: None,
             layers: Layers::default(),
@@ -304,7 +332,11 @@ impl Cx {
     /// Reports a backend failure: as the outcome of the firing being sent right now, or as its
     /// own event unless the same failure was just reported for this owner.
     pub fn report_failure(&mut self, info: &OwnerInfo, description: String, error: OutputError) {
-        let error = error.to_string();
+        self.report_failure_message(info, description, error.to_string());
+    }
+
+    /// [`Cx::report_failure`] with the error as text.
+    pub fn report_failure_message(&mut self, info: &OwnerInfo, description: String, error: String) {
         if let Some(index) = self.firing
             && let Some(EngineEvent::Fired(fired)) = self.outbox.get_mut(index)
         {
@@ -482,8 +514,61 @@ impl Cx {
                 // Reported by the launcher once the program started (or failed to).
                 self.launcher.launch(launch.clone(), info.clone(), description);
             }
+            ActionKind::Midi(midi) => {
+                let incoming = ctx.value7;
+                match self.midi_port(midi.device.as_ref(), &ctx) {
+                    Ok(port) => {
+                        let octave = self.settings.middle_c_octave;
+                        let description = midi.describe(Some(&port), incoming, octave);
+                        match midi.send.send(self.midi.as_ref(), &port, incoming) {
+                            Ok(()) => self.report(info, description, Outcome::Sent),
+                            Err(error) => self.report_failed_once(info, description, error),
+                        }
+                    }
+                    Err(error) => self.report_failed_once(info, description, error),
+                }
+            }
         }
         true
+    }
+
+    // ----- MIDI output -----
+
+    /// The output port for a send: the configured one, or the one named like the device the
+    /// triggering message came from (back to the controller itself).
+    pub fn midi_port(&self, device: Option<&Arc<str>>, ctx: &Ctx) -> Result<Arc<str>, String> {
+        match device {
+            Some(name) if self.midi.has_port(name) => Ok(name.clone()),
+            Some(name) => Err(format!("there is no MIDI output named \"{name}\"")),
+            None => match self.devices.name(ctx.device) {
+                Some(input) => match self.midi.paired_output(input) {
+                    Some(output) if *output == **input => Ok(input.clone()),
+                    Some(output) => Ok(Arc::from(output)),
+                    None => Err(format!("there is no MIDI output named \"{input}\"")),
+                },
+                None => Err("choose an output (no message came from a device)".into()),
+            },
+        }
+    }
+
+    /// A "Send MIDI" macro step (its failures are reported like the macro's other ones).
+    pub fn send_midi_step(&mut self, info: &OwnerInfo, midi: &CMidi, ctx: &Ctx) {
+        let incoming = ctx.value7;
+        let sent = self
+            .midi_port(midi.device.as_ref(), ctx)
+            .and_then(|port| midi.send.send(self.midi.as_ref(), &port, incoming));
+        if let Err(error) = sent {
+            let description = midi.describe(None, incoming, self.settings.middle_c_octave);
+            self.report_failure_message(info, description, error);
+        }
+    }
+
+    /// A failed firing, reported once per burst (the same failure of the same owner within a
+    /// couple of seconds is not reported again).
+    fn report_failed_once(&mut self, info: &OwnerInfo, description: String, error: String) {
+        if !self.failures.seen(info.owner, &error, self.now) {
+            self.report(info, description, Outcome::Failed { error });
+        }
     }
 
     // ----- hold targets -----

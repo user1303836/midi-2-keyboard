@@ -379,6 +379,84 @@ fn sanitize_mapping(mapping: &mut Mapping) {
     if let Some(limit) = &mut mapping.rate_limit {
         limit.interval_ms = limit.interval_ms.clamp(1, 3_600_000);
     }
+    for action in behavior_actions_mut(&mut mapping.behavior) {
+        match action {
+            Action::Midi { device, message } => sanitize_send(device, message),
+            Action::Sequence { steps } => {
+                for step in steps {
+                    if let SequenceStep::Midi { device, message } = step {
+                        sanitize_send(device, message);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Every action a behavior can fire.
+fn behavior_actions_mut(behavior: &mut Behavior) -> Vec<&mut Action> {
+    match behavior {
+        Behavior::Trigger { on_press, on_release, .. } => {
+            on_press.iter_mut().chain(on_release.iter_mut()).collect()
+        }
+        Behavior::Cycle { actions, .. } => actions.iter_mut().collect(),
+        Behavior::TapHold { tap, hold, .. } => tap.iter_mut().chain(hold.iter_mut()).collect(),
+        Behavior::MultiTap { single, double, triple, hold, .. } => single
+            .iter_mut()
+            .chain(double.iter_mut())
+            .chain(triple.iter_mut())
+            .chain(hold.iter_mut())
+            .collect(),
+        Behavior::Change { action, .. } => vec![action],
+        Behavior::Step { up, down, fast, .. } => {
+            let mut all: Vec<&mut Action> = up.iter_mut().chain(down.iter_mut()).collect();
+            if let Some(fast) = fast {
+                all.extend(fast.up.iter_mut().chain(fast.down.iter_mut()));
+            }
+            all
+        }
+        Behavior::Hold { .. } | Behavior::Toggle { .. } => Vec::new(),
+    }
+}
+
+/// An output port name without surrounding blanks (blank = none), channels 1..=16 and data bytes
+/// 0..=127.
+fn sanitize_send(device: &mut Option<String>, message: &mut MidiSend) {
+    if let Some(name) = device {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            *device = None;
+        } else if trimmed.len() != name.len() {
+            *name = trimmed.to_string();
+        }
+    }
+    let fixed = |value: &mut SendValue| {
+        if let SendValue::Fixed { value } = value {
+            *value = (*value).min(127);
+        }
+    };
+    match message {
+        MidiSend::NoteOn { channel, note, velocity } => {
+            *channel = (*channel).clamp(1, 16);
+            *note = (*note).min(127);
+            fixed(velocity);
+        }
+        MidiSend::NoteOff { channel, note } => {
+            *channel = (*channel).clamp(1, 16);
+            *note = (*note).min(127);
+        }
+        MidiSend::ControlChange { channel, controller, value } => {
+            *channel = (*channel).clamp(1, 16);
+            *controller = (*controller).min(127);
+            fixed(value);
+        }
+        MidiSend::ProgramChange { channel, program } => {
+            *channel = (*channel).clamp(1, 16);
+            fixed(program);
+        }
+        MidiSend::Raw { .. } => {}
+    }
 }
 
 /// Writes the config atomically (temp file + rename), keeping the previous file as a backup.
