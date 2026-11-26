@@ -81,6 +81,11 @@ interface State {
   updateMapping(id: string, change: (mapping: Mapping) => Mapping, coalesceKey?: string): void;
   removeMapping(id: string): void;
   cloneMapping(id: string): void;
+  /**
+   * Gives a control a second job on a layer: the mapping itself becomes "only while the layer is
+   * off", and a copy "only while the layer is on" is added right below it and opened.
+   */
+  addLayerVariant(id: string, layer: string): void;
   moveMapping(id: string, toIndex: number): void;
   moveMappingToProfile(id: string, profileId: string): void;
   selectMapping(id: string | null): void;
@@ -487,6 +492,28 @@ export const useApp = create<State>((set, get) => {
         }),
       );
       set({ selectedMappingId: copy.id });
+    },
+
+    addLayerVariant(id, layer) {
+      const owner = profileOfMapping(get().config, id);
+      const source = owner?.mappings.find((m) => m.id === id);
+      if (!owner || !source || !layer) return;
+      const others = source.conditions.filter((c) => !(c.type === "layer" && c.layer === layer));
+      const base: Mapping = { ...source, conditions: [...others, { type: "layer", layer, active: false }] };
+      const variant: Mapping = {
+        ...duplicateMapping(source),
+        name: source.name ? `${source.name} (${layer})` : "",
+        conditions: [...others, { type: "layer", layer, active: true }],
+      };
+      get().edit((config) =>
+        mapProfile(config, owner.id, (profile) => {
+          const index = profile.mappings.findIndex((m) => m.id === id);
+          const mappings = profile.mappings.slice();
+          mappings.splice(index, 1, base, variant);
+          return { ...profile, mappings };
+        }),
+      );
+      set({ selectedMappingId: variant.id });
     },
 
     moveMapping(id, toIndex) {

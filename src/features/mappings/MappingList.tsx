@@ -207,7 +207,8 @@ const MappingRow = memo(function MappingRow({
         {mapping.conditions.length > 0 && (
           <Badge tone="neutral" title={mapping.conditions.map((c) => conditionText(c, null, octave)).join("\n")}>
             <Filter size={11} />
-            <span className="hidden @min-[700px]:inline">
+            {/* Always shown: two mappings on the same control often differ only by their condition. */}
+            <span className="max-w-[104px] truncate @min-[700px]:max-w-[200px]">
               {mapping.conditions.length === 1 ? conditionText(mapping.conditions[0], null, octave) : `${mapping.conditions.length} conditions`}
             </span>
           </Badge>

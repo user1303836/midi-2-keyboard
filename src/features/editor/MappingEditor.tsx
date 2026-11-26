@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Copy, FolderInput, MoreHorizontal, Play, Radio, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, Copy, FolderInput, Layers, MoreHorizontal, Play, Radio, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
@@ -6,9 +6,10 @@ import type { Behavior } from "@/bindings/Behavior";
 import type { Mapping } from "@/bindings/Mapping";
 import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
-import { Switch } from "@/components/ui/inputs";
+import { Switch, TextInput } from "@/components/ui/inputs";
 import { Badge, Collapsible } from "@/components/ui/misc";
 import {
+  Dialog,
   Menu,
   MenuContent,
   MenuItem,
@@ -32,7 +33,7 @@ import {
   supportsRateLimit,
   type BehaviorType,
 } from "@/lib/model";
-import { api, useApp, useOctave } from "@/lib/store";
+import { api, useApp, useKnownLayers, useOctave } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 import { BehaviorEditor } from "./BehaviorEditor";
@@ -98,6 +99,8 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
   const octave = useOctave();
 
   const commitDraft = useApp((state) => state.commitDraft);
+  const addLayerVariant = useApp((state) => state.addLayerVariant);
+  const [variantOpen, setVariantOpen] = useState(false);
 
   const update = (change: (m: Mapping) => Mapping, key?: string) =>
     updateMapping(mapping.id, (current) => reconcile(current, change(current)), key);
@@ -146,6 +149,9 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
             <MenuItem icon={<Copy size={14} />} shortcut="Ctrl+D" onSelect={() => cloneMapping(mapping.id)}>
               Duplicate
             </MenuItem>
+            <MenuItem icon={<Layers size={14} />} onSelect={() => setVariantOpen(true)}>
+              Add a layer variant…
+            </MenuItem>
             {profiles.length > 1 && (
               <MenuSub>
                 <MenuSubTrigger icon={<FolderInput size={14} />}>Move to profile</MenuSubTrigger>
@@ -170,6 +176,17 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
           <X size={16} />
         </IconButton>
       </header>
+      <LayerVariantDialog
+        open={variantOpen}
+        onOpenChange={setVariantOpen}
+        onCreate={(layer) => {
+          addLayerVariant(mapping.id, layer);
+          toast(
+            `This control now has a second job while layer “${layer}” is on. Give a pad the behavior Hold → Layer “${layer}” to switch.`,
+            { kind: "success" },
+          );
+        }}
+      />
 
       {wizard ? (
         <Wizard
@@ -244,6 +261,73 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
         </div>
       )}
     </aside>
+  );
+}
+
+/** Asks which layer a mapping should get a variant for. */
+function LayerVariantDialog({
+  open,
+  onOpenChange,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (layer: string) => void;
+}) {
+  const layers = useKnownLayers();
+  const [layer, setLayer] = useState("");
+  useEffect(() => {
+    if (open) setLayer(layers[0] ?? "shift");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const name = layer.trim();
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Add a layer variant"
+      description="Layers work like a Shift key for your controller: while a layer is on, controls can do something else."
+      width={460}
+      footer={
+        <>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={!name}
+            onClick={() => {
+              onCreate(name);
+              onOpenChange(false);
+            }}
+          >
+            Add variant
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <label className="flex items-center gap-3">
+          <span className="text-fg-muted">Layer</span>
+          <TextInput
+            aria-label="Layer name"
+            className="w-[200px]"
+            list="m2k-layer-variant-names"
+            autoFocus
+            value={layer}
+            onChange={setLayer}
+          />
+          <datalist id="m2k-layer-variant-names">
+            {layers.map((known) => (
+              <option key={known} value={known} />
+            ))}
+          </datalist>
+        </label>
+        <div className="text-sm leading-relaxed text-fg-faint">
+          This mapping will only fire while the layer is <b>off</b>, and a copy that only fires while
+          it is <b>on</b> is added below it for you to change. To turn the layer on, give another
+          control the behavior <b>Hold</b> (or Toggle) with the target <b>Layer</b>.
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
