@@ -20,7 +20,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-coder-snippet",
-          "name": "Pad 1 types a log line (with the note that was hit)",
+          "name": "Log line snippet",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -82,7 +82,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-coder-format",
-          "name": "Pad 2 runs \"Format Document\" from the command palette",
+          "name": "Format document (macro)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -124,7 +124,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-coder-esc-ctrl",
-          "name": "Pad 3: tap = Esc, hold = Ctrl",
+          "name": "Esc, hold for Ctrl",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -156,7 +156,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-coder-fn",
-          "name": "Pad 4 held = Fn layer",
+          "name": "Fn layer while held",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -200,7 +200,7 @@
           ],
           "enabled": true,
           "id": "ex-coder-pad5",
-          "name": "Pad 5: build (Ctrl+Shift+B)",
+          "name": "Build",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -242,7 +242,7 @@
           ],
           "enabled": true,
           "id": "ex-coder-pad5-fn",
-          "name": "Pad 5 with Fn: run tests (F5)",
+          "name": "Run tests (Fn)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -285,7 +285,7 @@
           ],
           "enabled": true,
           "id": "ex-coder-pad6",
-          "name": "Pad 6: comment line (Ctrl+/)",
+          "name": "Comment line",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -327,7 +327,7 @@
           ],
           "enabled": true,
           "id": "ex-coder-pad6-fn",
-          "name": "Pad 6 with Fn: go to definition (F12)",
+          "name": "Go to definition (Fn)",
           "rate_limit": null,
           "source": {
             "channel": null,

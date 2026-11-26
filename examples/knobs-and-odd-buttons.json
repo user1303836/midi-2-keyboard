@@ -22,7 +22,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-throttled-hotkey",
-          "name": "Knob CC 20 on channel 2 fires Ctrl+Shift+O at most every 500 ms",
+          "name": "Hotkey knob (at most every 500 ms)",
           "rate_limit": {
             "interval_ms": 500,
             "mode": "throttle",
@@ -68,7 +68,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-volume",
-          "name": "Volume knob (CC 7) turns the system volume up / down",
+          "name": "System volume",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -98,7 +98,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-settled",
-          "name": "Knob CC 21: once it stops moving, type its value",
+          "name": "Type the value once the knob stops",
           "rate_limit": {
             "interval_ms": 400,
             "mode": "debounce",
@@ -136,7 +136,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-press-only-button",
-          "name": "Button that only sends 127 (CC 80): every press screenshots (Win+Shift+S)",
+          "name": "Screenshot (button that only sends 127)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -168,7 +168,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-toggling-button",
-          "name": "Button that alternates 127 / 0 (CC 81): every press toggles play (Space)",
+          "name": "Play / pause (button that alternates 127 / 0)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -202,7 +202,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-crossfader",
-          "name": "Crossfader (CC 8): left third = 1, middle = 2, right third = 3",
+          "name": "Crossfader: left third",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -236,7 +236,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-crossfader-mid",
-          "name": "Crossfader in the middle third: 2",
+          "name": "Crossfader: middle third",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -270,7 +270,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-knobs-crossfader-right",
-          "name": "Crossfader in the right third: 3",
+          "name": "Crossfader: right third",
           "rate_limit": null,
           "source": {
             "channel": null,

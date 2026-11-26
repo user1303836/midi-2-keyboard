@@ -36,7 +36,7 @@
           ],
           "enabled": true,
           "id": "ex-daw-enc-select",
-          "name": "Encoder 1 moves the selection up / down",
+          "name": "Move the selection",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -80,7 +80,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-daw-enc-zoom",
-          "name": "Encoder 2 zooms in / out, at most every 120 ms",
+          "name": "Zoom (throttled)",
           "rate_limit": {
             "interval_ms": 120,
             "mode": "throttle",
@@ -122,7 +122,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-daw-enc-scroll",
-          "name": "Encoder 3 scrolls the timeline sideways",
+          "name": "Scroll the timeline",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -164,7 +164,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-daw-push-transport",
-          "name": "Push encoder 1: tap = play / stop, hold = save",
+          "name": "Play / stop, hold to save",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -194,7 +194,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-daw-fine-mode",
-          "name": "Push encoder 2 held: encoder 1 nudges with Shift",
+          "name": "Fine mode while held",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -244,7 +244,7 @@
           ],
           "enabled": true,
           "id": "ex-daw-enc-select-fine",
-          "name": "Encoder 1 in fine mode: Shift + up / down",
+          "name": "Move the selection (fine mode)",
           "rate_limit": null,
           "source": {
             "channel": null,

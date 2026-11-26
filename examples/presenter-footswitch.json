@@ -37,7 +37,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-present-switch",
-          "name": "Foot switch: once = next slide, twice = previous, three times = black screen",
+          "name": "Next / previous / black screen (1, 2, 3 presses)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -79,7 +79,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-present-second-pedal",
-          "name": "Second pedal (CC 67): tap = laser pointer on / off (Ctrl+L), hold = end the show (Esc)",
+          "name": "Laser pointer, hold to end the show",
           "rate_limit": null,
           "source": {
             "channel": null,

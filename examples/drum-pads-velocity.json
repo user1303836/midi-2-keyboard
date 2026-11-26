@@ -22,7 +22,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-soft",
-          "name": "Kick pad hit softly: light attack (1)",
+          "name": "Light attack (soft hit)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -58,7 +58,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-hard",
-          "name": "Kick pad hit hard: heavy attack (2)",
+          "name": "Heavy attack (hard hit)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -97,7 +97,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-turbo",
-          "name": "Snare pad held: auto-fire X every 100 ms",
+          "name": "Auto-fire while held",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -131,7 +131,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-hihat-click",
-          "name": "Hi-hat pad clicks the mouse",
+          "name": "Click",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -163,7 +163,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-crash-drag",
-          "name": "Crash pad held: hold the left mouse button (drag)",
+          "name": "Drag while held",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -197,7 +197,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-drums-squeeze",
-          "name": "Press a pad hard after hitting it (aftertouch): hold Shift",
+          "name": "Modifier by pressing harder",
           "rate_limit": null,
           "source": {
             "channel": null,

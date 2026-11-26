@@ -30,7 +30,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-hires-nrpn-knob",
-          "name": "NRPN 130 knob (14-bit data) nudges with , and .",
+          "name": "Fine nudge (14-bit NRPN knob)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -72,7 +72,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-hires-nrpn-buttons",
-          "name": "Data increment / decrement buttons on NRPN 131 move the selection",
+          "name": "Selection up / down (NRPN +/- buttons)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -114,7 +114,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-hires-fader",
-          "name": "14-bit fader (CC 7 + 39): one step per 1/16 of its travel",
+          "name": "Steps along a 14-bit fader",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -143,7 +143,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-hires-pitch-range",
-          "name": "RPN 0 (pitch bend range) changed on the synth: type the new range",
+          "name": "Type the new pitch bend range",
           "rate_limit": {
             "interval_ms": 300,
             "mode": "debounce",

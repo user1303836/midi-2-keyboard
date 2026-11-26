@@ -22,7 +22,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-pc1",
-          "name": "Program 0 (\"patch 1\" on most devices) selects song A",
+          "name": "Song A (program 0 = patch 1)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -54,7 +54,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-pc2",
-          "name": "Program 1 (\"patch 2\" on most devices) selects song B",
+          "name": "Song B (program 1 = patch 2)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -86,7 +86,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-bar",
-          "name": "MIDI clock: press F13 on every bar (4 beats)",
+          "name": "Every bar",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -115,7 +115,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-mmc-play",
-          "name": "MMC Play from the DAW: media play / pause",
+          "name": "DAW play: media play / pause",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -144,7 +144,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-mmc-stop",
-          "name": "MMC Stop from the DAW: media stop",
+          "name": "DAW stop: media stop",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -173,7 +173,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-transport-stop",
-          "name": "MIDI Stop message: pause the backing video (Space)",
+          "name": "Sequencer stop pauses the video",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -210,7 +210,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-a-lyrics",
-          "name": "Pad 1: next lyrics page (Page Down)",
+          "name": "Next lyrics page",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -254,7 +254,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-live-b-scene",
-          "name": "Pad 1: next lighting scene (F14)",
+          "name": "Next lighting scene",
           "rate_limit": null,
           "source": {
             "channel": null,

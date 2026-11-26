@@ -20,7 +20,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-w",
-          "name": "C4 holds W (forward)",
+          "name": "Forward",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -54,7 +54,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-a",
-          "name": "D4 holds A (left)",
+          "name": "Left",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -88,7 +88,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-s",
-          "name": "E4 holds S (back)",
+          "name": "Back",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -122,7 +122,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-d",
-          "name": "F4 holds D (right)",
+          "name": "Right",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -158,7 +158,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-jump",
-          "name": "C major chord (C3 E3 G3) jumps (Space)",
+          "name": "Jump (C major chord)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -190,7 +190,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-sprint",
-          "name": "Mod wheel up sprints (holds Shift)",
+          "name": "Sprint (mod wheel up)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -222,7 +222,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-bend-up",
-          "name": "Pitch wheel up looks up (holds Up)",
+          "name": "Look up (pitch wheel)",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -252,7 +252,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-game-bend-down",
-          "name": "Pitch wheel down looks down (holds Down)",
+          "name": "Look down (pitch wheel)",
           "rate_limit": null,
           "source": {
             "channel": null,

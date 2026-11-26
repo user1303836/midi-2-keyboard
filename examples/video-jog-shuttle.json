@@ -30,7 +30,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-jog-frames",
-          "name": "Jog encoder steps one frame back / forward",
+          "name": "Jog: step frames",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -62,7 +62,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-shuttle-back",
-          "name": "Shuttle knob left of center plays backwards (hold J)",
+          "name": "Shuttle: play backwards",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -94,7 +94,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-shuttle-forward",
-          "name": "Shuttle knob right of center plays forwards (hold L)",
+          "name": "Shuttle: play forwards",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -128,7 +128,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-shuttle-stop",
-          "name": "Shuttle knob back at center stops (K)",
+          "name": "Shuttle centred: stop",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -162,7 +162,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-mark-in",
-          "name": "Pad 1 marks in (I)",
+          "name": "Mark in",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -198,7 +198,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-mark-out",
-          "name": "Pad 2 marks out (O)",
+          "name": "Mark out",
           "rate_limit": null,
           "source": {
             "channel": null,
@@ -234,7 +234,7 @@
           "conditions": [],
           "enabled": true,
           "id": "ex-video-play",
-          "name": "Pad 3 plays / pauses (Space)",
+          "name": "Play / pause",
           "rate_limit": null,
           "source": {
             "channel": null,
