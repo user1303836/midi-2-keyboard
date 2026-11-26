@@ -115,9 +115,10 @@ impl Output {
         self.injector.repeats_held_keys()
     }
 
-    /// Long text has to be sent in small pieces (the uinput backend drops events otherwise).
-    pub fn paces_text(&self) -> bool {
-        self.injector.name() == "linux-uinput"
+    /// The most characters one text call may carry (`None`: any length; see
+    /// [`Injector::max_text_chunk`]).
+    pub fn text_chunk(&self) -> Option<usize> {
+        self.injector.max_text_chunk().map(|chars| chars.max(1))
     }
 
     pub fn key_count(&self, key: Key) -> u32 {

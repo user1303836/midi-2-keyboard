@@ -44,7 +44,8 @@ options:
   --fail <Key>      the backend rejects this key (repeatable), e.g. --fail F13
   --panic <Key>     the backend panics when this key goes down (tests recovery)
   --fail-up <Key>[:N]  the backend refuses the first N (default 1) releases of this key
-  --as-backend <name>  report this backend name (e.g. linux-uinput, to see its text pacing)
+  --as-backend <name>  report this backend name
+  --text-chunk <N>  the backend takes at most N characters per text call (like linux-uinput)
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
   --quiet-status    do not print status events";
@@ -103,6 +104,7 @@ struct LogInjector {
     /// Releases of these keys are refused this many more times (like Windows UIPI while an
     /// elevated window has focus). Shared by all backends of the run.
     fail_up: Arc<Mutex<HashMap<Key, u32>>>,
+    text_chunk: Option<usize>,
 }
 
 impl Injector for LogInjector {
@@ -116,6 +118,10 @@ impl Injector for LogInjector {
 
     fn repeats_held_keys(&self) -> bool {
         self.repeats
+    }
+
+    fn max_text_chunk(&self) -> Option<usize> {
+        self.text_chunk
     }
 
     fn key_down(&mut self, key: Key) -> Result<(), OutputError> {
@@ -574,6 +580,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut panic_key = None;
     let mut fail_up: HashMap<Key, u32> = HashMap::new();
     let mut backend_name: &'static str = "simulate";
+    let mut text_chunk: Option<usize> = None;
     let mut settle_ms = 1000u64;
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
@@ -605,6 +612,13 @@ pub fn run(args: &[String]) -> i32 {
                     }
                 }
             }
+            "--text-chunk" => match iter.next().and_then(|v| v.parse().ok()) {
+                Some(chars) => text_chunk = Some(chars),
+                None => {
+                    eprintln!("--text-chunk needs a number of characters");
+                    return 2;
+                }
+            },
             "--as-backend" => match iter.next() {
                 Some(name) => backend_name = Box::leak(name.clone().into_boxed_str()),
                 None => {
@@ -683,6 +697,7 @@ pub fn run(args: &[String]) -> i32 {
         fail: fail.clone(),
         panic: panic_key,
         fail_up: fail_up.clone(),
+        text_chunk,
     };
     let injector = backend(backend_name);
     let engine = {

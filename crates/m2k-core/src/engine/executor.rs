@@ -78,12 +78,9 @@ struct Typing {
     delay_ms: u32,
 }
 
-/// The Linux uinput backend loses events when one call queues too many (a reader's evdev
-/// buffer can be as small as 64 events, 4-8 per character): long text goes out in chunks of
-/// this many characters...
-const PACED_TEXT_CHARS: usize = 8;
-/// ...this far apart.
-const PACED_TEXT_GAP_MS: u32 = 5;
+/// Pause between the pieces of a text for a backend that limits how much one call may carry
+/// (`Injector::max_text_chunk`; one frame is always enough for the reader to catch up).
+const TEXT_CHUNK_GAP_MS: u32 = 16;
 
 /// Byte offset `chars` characters after `offset` (or the end of `text`).
 fn advance_chars(text: &str, offset: usize, chars: usize) -> usize {
@@ -292,8 +289,8 @@ impl Cx {
                     let rendered = text.render(&run.ctx, self.settings.middle_c_octave);
                     let (chars, delay_ms) = if *char_delay_ms > 0 {
                         (1, *char_delay_ms)
-                    } else if self.out.paces_text() {
-                        (PACED_TEXT_CHARS, PACED_TEXT_GAP_MS)
+                    } else if let Some(chars) = self.out.text_chunk() {
+                        (chars, TEXT_CHUNK_GAP_MS)
                     } else {
                         (usize::MAX, 0)
                     };
