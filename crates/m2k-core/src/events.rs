@@ -35,6 +35,21 @@ pub struct EngineStatus {
     pub foreground: Option<ForegroundApp>,
     /// Name of the output backend in use (`Injector::name`).
     pub backend: String,
+    /// How quickly MIDI turned into output over the last few seconds. `None` while there was
+    /// nothing to measure. Updated at most once a second.
+    #[serde(default)]
+    pub latency: Option<LatencyStats>,
+}
+
+/// Time from a MIDI message reaching the engine (`Engine::midi` being called) to the return of
+/// the first backend call it caused, for messages that produced output right away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub struct LatencyStats {
+    /// Messages measured.
+    pub samples: u32,
+    pub median_us: u32,
+    pub p99_us: u32,
+    pub max_us: u32,
 }
 
 /// Why a mapping matched but did not produce output.

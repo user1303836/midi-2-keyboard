@@ -78,11 +78,12 @@ struct Typing {
     delay_ms: u32,
 }
 
-/// The Linux uinput backend loses events when one call queues too many (the kernel buffers
-/// about 128 events per reader): long text goes out in chunks of this many characters...
-const PACED_TEXT_CHARS: usize = 25;
+/// The Linux uinput backend loses events when one call queues too many (a reader's evdev
+/// buffer can be as small as 64 events, 4-8 per character): long text goes out in chunks of
+/// this many characters...
+const PACED_TEXT_CHARS: usize = 8;
 /// ...this far apart.
-const PACED_TEXT_GAP_MS: u32 = 10;
+const PACED_TEXT_GAP_MS: u32 = 5;
 
 /// Byte offset `chars` characters after `offset` (or the end of `text`).
 fn advance_chars(text: &str, offset: usize, chars: usize) -> usize {

@@ -31,7 +31,7 @@ use super::output::Output;
 use super::pattern::Foreground;
 use super::sys::TimerResolution;
 use super::timers::TimerId;
-use crate::events::{EngineEvent, EngineStatus, Outcome};
+use crate::events::{EngineEvent, EngineStatus, LatencyStats, Outcome};
 use crate::model::{Action, Config, EngineOp, ProfileTarget};
 
 mod dispatch;
@@ -118,6 +118,9 @@ pub struct Worker {
     tests: HashMap<u64, CAction>,
     /// Pending retry of stuck keys / buttons.
     retry_timer: Option<TimerId>,
+    /// Published latency statistics, and the timer for their next update.
+    latency: Option<LatencyStats>,
+    latency_timer: Option<TimerId>,
     next_test: u64,
     test_info: OwnerInfo,
     cx: Cx,
@@ -184,6 +187,8 @@ impl Worker {
             status: StatusState::default(),
             tests: HashMap::new(),
             retry_timer: None,
+            latency: None,
+            latency_timer: None,
             next_test: 0,
             test_info: OwnerInfo::test(),
             cx,
@@ -200,7 +205,13 @@ impl Worker {
                 let at = envelope.at.max(self.cx.now);
                 self.run_timers(at);
                 self.cx.now = at;
-                if !self.handle(envelope.command) {
+                if matches!(envelope.command, Command::Midi { .. }) {
+                    // Measured from when `Engine::midi` was called, on the caller's thread.
+                    self.cx.out.latency_origin = Some(envelope.at);
+                }
+                let keep_running = self.handle(envelope.command);
+                self.cx.out.latency_origin = None;
+                if !keep_running {
                     return false;
                 }
                 self.apply_requests();
@@ -280,6 +291,11 @@ impl Worker {
                 }
             }
             TimerKind::Sensing(dev) => self.on_sensing_timer(dev, id),
+            TimerKind::Latency => {
+                if self.latency_timer == Some(id) {
+                    self.latency_timer = None;
+                }
+            }
             TimerKind::RetryStuck => {
                 if self.retry_timer == Some(id) {
                     self.retry_timer = None;
@@ -597,6 +613,7 @@ impl Worker {
             let at = self.cx.now.max(Instant::now()) + STUCK_RETRY_INTERVAL;
             self.retry_timer = Some(self.cx.timers.schedule(at, TimerKind::RetryStuck));
         }
+        self.publish_latency();
         if self.cx.out.changed {
             self.cx.out.changed = false;
             self.cx.dirty = true;
@@ -628,6 +645,25 @@ impl Worker {
         }
     }
 
+    /// Latency statistics change the status at most once a second; one timer makes sure the
+    /// last burst's numbers (and their expiry) are published without further traffic.
+    fn publish_latency(&mut self) {
+        let now = self.cx.now.max(Instant::now());
+        if let Some(stats) = self.cx.out.meter.publish(now)
+            && stats != self.latency
+        {
+            self.latency = stats;
+            self.cx.dirty = true;
+        }
+        let due = self.cx.out.meter.next_due();
+        if self.latency_timer.map(TimerId::at) != due {
+            self.cx.timers.cancel_slot(&mut self.latency_timer);
+            if let Some(at) = due {
+                self.latency_timer = Some(self.cx.timers.schedule(at, TimerKind::Latency));
+            }
+        }
+    }
+
     fn build_status(&self) -> EngineStatus {
         let id = |index: Option<usize>| index.map(|i| self.cfg.profiles[i].id.to_string());
         EngineStatus {
@@ -648,6 +684,7 @@ impl Worker {
                 .collect(),
             foreground: self.cx.foreground.as_ref().map(|f| f.app.clone()),
             backend: self.cx.out.name().to_string(),
+            latency: self.latency,
         }
     }
 
@@ -708,6 +745,7 @@ impl Worker {
         self.refresh_liveness(true);
         self.tests.clear();
         self.retry_timer = None;
+        self.latency_timer = None;
         self.status.timer = None;
         self.status.pending = true;
         self.cx.dirty = true;

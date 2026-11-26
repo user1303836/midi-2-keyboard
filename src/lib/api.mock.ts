@@ -224,6 +224,7 @@ export function createMockBackend(): Backend {
     engaged_mappings: [],
     foreground: null,
     backend: "mock",
+    latency: null,
   };
   const ports: PortStatus[] = [
     { name: "Launchkey Mini MK3", state: "connected", error: "", is_virtual: false },

@@ -115,6 +115,7 @@ const EMPTY_STATUS: EngineStatus = {
   engaged_mappings: [],
   foreground: null,
   backend: "",
+  latency: null,
 };
 
 const EMPTY_CONFIG = { version: 1, settings: {}, devices: [], profiles: [], selected_profile: null } as unknown as Config;

@@ -19,7 +19,8 @@
 //! - `limiter`: throttle / debounce.
 //! - `cx`: the context behaviors act on (gating, layers, conditions, reporting).
 //! - `executor`: action queues, hold engagements with key stagger, keyboard auto-repeat.
-//! - `output`: reference-counted keys and buttons over the injector.
+//! - `output`: reference-counted keys and buttons over the injector; latency measurement
+//!   (`latency`).
 //! - `timers`, `pattern`, `text`, `foreground`, `launch`, `sys`: supporting pieces.
 
 mod behavior;
@@ -27,6 +28,7 @@ mod compile;
 mod cx;
 mod executor;
 mod foreground;
+mod latency;
 mod launch;
 mod limiter;
 mod output;

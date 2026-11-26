@@ -467,6 +467,15 @@ fn describe_status(status: &EngineStatus) -> String {
             text.push_str(name);
         }
     }
+    if let Some(latency) = &status.latency {
+        text.push_str(&format!(
+            "  latency n={} median {:.2} ms p99 {:.2} ms max {:.2} ms",
+            latency.samples,
+            f64::from(latency.median_us) / 1000.0,
+            f64::from(latency.p99_us) / 1000.0,
+            f64::from(latency.max_us) / 1000.0
+        ));
+    }
     if let Some(app) = &status.foreground {
         text.push_str(&format!("  fg {:?}", app.process));
     }

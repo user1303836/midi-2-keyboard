@@ -71,6 +71,8 @@ pub enum TimerKind {
     Sensing(DeviceId),
     /// Retry releasing keys / buttons the backend refused to release.
     RetryStuck,
+    /// Latency statistics are due for publication.
+    Latency,
     /// Coalesced status emission.
     Status,
 }

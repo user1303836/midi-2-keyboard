@@ -13,8 +13,11 @@
 //! cannot exit (or swap backends) with a key down.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use m2k_output::{Injector, Key, MouseButton, OutputError};
+
+use super::latency::LatencyMeter;
 
 #[derive(Debug, Default)]
 struct Holders {
@@ -63,8 +66,17 @@ pub struct Output {
     /// OS until a retry succeeds.
     stuck_keys: BTreeSet<Key>,
     stuck_buttons: BTreeSet<MouseButton>,
+    /// Keys / buttons whose press reached the OS since their last successful release. Only
+    /// these can be stuck: when the press never got through either (macOS without the
+    /// Accessibility permission), a refused release leaves nothing down.
+    down_keys: BTreeSet<Key>,
+    down_buttons: BTreeSet<MouseButton>,
     /// Set whenever the set of held keys changes (for the status snapshot).
     pub changed: bool,
+    /// While a MIDI message is being handled: when it was handed to the engine. The first
+    /// backend call that returns takes it and records the latency.
+    pub latency_origin: Option<Instant>,
+    pub meter: LatencyMeter,
 }
 
 type Result = std::result::Result<(), OutputError>;
@@ -77,8 +89,22 @@ impl Output {
             buttons: BTreeMap::new(),
             stuck_keys: BTreeSet::new(),
             stuck_buttons: BTreeSet::new(),
+            down_keys: BTreeSet::new(),
+            down_buttons: BTreeSet::new(),
             changed: true,
+            latency_origin: None,
+            meter: LatencyMeter::default(),
         }
+    }
+
+    /// Every injection goes through here (latency measurement).
+    fn call<T>(&mut self, inject: impl FnOnce(&mut dyn Injector) -> T) -> T {
+        let result = inject(self.injector.as_mut());
+        if let Some(origin) = self.latency_origin.take() {
+            let now = Instant::now();
+            self.meter.record(now, now.saturating_duration_since(origin));
+        }
+        result
     }
 
     pub fn name(&self) -> &'static str {
@@ -112,7 +138,11 @@ impl Output {
             self.changed = true;
         }
         holders.add(owner);
-        self.injector.key_down(key)
+        let result = self.call(|i| i.key_down(key));
+        if result.is_ok() {
+            self.down_keys.insert(key);
+        }
+        result
     }
 
     /// Releases one reference of `owner`; sends the key up when nobody holds the key any more.
@@ -131,13 +161,15 @@ impl Output {
         Ok(())
     }
 
-    /// Sends a key up for a key nobody holds; a refused one becomes stuck.
+    /// Sends a key up for a key nobody holds; a refused one becomes stuck if its press had
+    /// reached the OS.
     fn key_up(&mut self, key: Key) -> Result {
-        let result = self.injector.key_up(key);
-        if result.is_err() {
-            self.stuck_keys.insert(key);
-        } else {
+        let result = self.call(|i| i.key_up(key));
+        if result.is_ok() || !self.down_keys.contains(&key) {
             self.stuck_keys.remove(&key);
+            self.down_keys.remove(&key);
+        } else {
+            self.stuck_keys.insert(key);
         }
         self.changed = true;
         result
@@ -145,7 +177,11 @@ impl Output {
 
     /// Keyboard auto-repeat emulation: another key down for a key that is held.
     pub fn repeat_key(&mut self, key: Key) -> Result {
-        self.injector.key_down(key)
+        let result = self.call(|i| i.key_down(key));
+        if result.is_ok() {
+            self.down_keys.insert(key);
+        }
+        result
     }
 
     /// A key up for a key nobody holds (a macro's `KeyUp` of a key it never pressed).
@@ -159,7 +195,11 @@ impl Output {
     pub fn press_button(&mut self, button: MouseButton, owner: u64) -> Result {
         self.stuck_buttons.remove(&button);
         self.buttons.entry(button).or_default().add(owner);
-        self.injector.mouse_button(button, true)
+        let result = self.call(|i| i.mouse_button(button, true));
+        if result.is_ok() {
+            self.down_buttons.insert(button);
+        }
+        result
     }
 
     pub fn release_button(&mut self, button: MouseButton, owner: u64) -> Result {
@@ -177,11 +217,12 @@ impl Output {
     }
 
     fn button_up(&mut self, button: MouseButton) -> Result {
-        let result = self.injector.mouse_button(button, false);
-        if result.is_err() {
-            self.stuck_buttons.insert(button);
-        } else {
+        let result = self.call(|i| i.mouse_button(button, false));
+        if result.is_ok() || !self.down_buttons.contains(&button) {
             self.stuck_buttons.remove(&button);
+            self.down_buttons.remove(&button);
+        } else {
+            self.stuck_buttons.insert(button);
         }
         result
     }
@@ -197,18 +238,18 @@ impl Output {
         if text.is_empty() {
             return Ok(());
         }
-        self.injector.text(text)
+        self.call(|i| i.text(text))
     }
 
     pub fn scroll(&mut self, dx: i32, dy: i32) -> Result {
-        self.injector.scroll(dx, dy)
+        self.call(|i| i.scroll(dx, dy))
     }
 
     pub fn move_pointer(&mut self, x: i32, y: i32, absolute: bool) -> Result {
         if absolute {
-            self.injector.mouse_move_absolute(x, y)
+            self.call(|i| i.mouse_move_absolute(x, y))
         } else {
-            self.injector.mouse_move_relative(x, y)
+            self.call(|i| i.mouse_move_relative(x, y))
         }
     }
 
