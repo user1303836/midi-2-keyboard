@@ -11,9 +11,17 @@
 //! - [`platform`]: probes the UI needs (permissions, foreground application).
 
 pub mod key;
+mod keymap;
 pub mod platform;
 
+#[cfg(windows)]
+mod windows;
+
 pub use key::{Key, MouseButton};
+
+/// Marker carried by every injected event where the platform has room for one (`dwExtraInfo`
+/// on Windows). Lets low-level hooks recognize this application's own events. ASCII `"M2K!"`.
+pub const INJECTION_TAG: u32 = 0x4D32_4B21;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -145,7 +153,25 @@ impl Injector for NullInjector {
 }
 
 /// Creates the best available injector for this platform and session.
+///
+/// Never panics; when no backend can be started the error says what to do about it.
 pub fn create_injector(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
-    let _ = options;
-    Err(OutputError::Unavailable("no output backend implemented yet".into()))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend::create(options)))
+        .unwrap_or_else(|_| {
+            Err(OutputError::Unavailable("the output backend crashed while starting".into()))
+        })
+}
+
+#[cfg(windows)]
+use windows as backend;
+
+#[cfg(not(windows))]
+mod backend {
+    use super::*;
+
+    pub fn create(_options: &InjectorOptions) -> Result<Box<dyn Injector>> {
+        Err(OutputError::Unavailable(
+            "keyboard and mouse output is not implemented for this operating system yet".into(),
+        ))
+    }
 }

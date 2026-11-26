@@ -209,9 +209,19 @@ impl Key {
         format!("{self:?}")
     }
 
-    /// A short human label for logs and the CLI (`"A"`, `"1"`, `"Ctrl"`, `"Up"`, `"F13"`).
-    /// The UI has its own, platform-aware labels.
+    /// A short human label for logs and the CLI (`"A"`, `"1"`, `"Ctrl"`, `"Up"`, `"F13"`,
+    /// `"Num +"`). Modifier names follow the platform this is built for (`"Win"` / `"Cmd"` /
+    /// `"Super"`, `"Alt"` / `"Option"`). The UI has its own, layout-aware labels.
     pub fn label(self) -> String {
+        const META: &str = if cfg!(target_os = "macos") {
+            "Cmd"
+        } else if cfg!(windows) {
+            "Win"
+        } else {
+            "Super"
+        };
+        const ALT: &str = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+
         let code = self.code();
         if let Some(letter) = code.strip_prefix("Key")
             && letter.len() == 1
@@ -221,23 +231,31 @@ impl Key {
         if let Some(digit) = code.strip_prefix("Digit") {
             return digit.to_string();
         }
-        if let Some(rest) = code.strip_prefix("Numpad") {
-            return format!("Num {rest}");
+        if let Some(digit) = code.strip_prefix("Numpad")
+            && digit.len() == 1
+        {
+            return format!("Num {digit}");
         }
         let label = match self {
             Key::ControlLeft => "Ctrl",
             Key::ControlRight => "Right Ctrl",
             Key::ShiftLeft => "Shift",
             Key::ShiftRight => "Right Shift",
-            Key::AltLeft => "Alt",
-            Key::AltRight => "Right Alt",
-            Key::MetaLeft => "Meta",
-            Key::MetaRight => "Right Meta",
+            Key::AltLeft => ALT,
+            Key::AltRight => return format!("Right {ALT}"),
+            Key::MetaLeft => META,
+            Key::MetaRight => return format!("Right {META}"),
             Key::ArrowUp => "Up",
             Key::ArrowDown => "Down",
             Key::ArrowLeft => "Left",
             Key::ArrowRight => "Right",
             Key::Escape => "Esc",
+            Key::CapsLock => "Caps Lock",
+            Key::ContextMenu => "Menu",
+            Key::PageUp => "Page Up",
+            Key::PageDown => "Page Down",
+            Key::PrintScreen => "Print Screen",
+            Key::ScrollLock => "Scroll Lock",
             Key::Backquote => "`",
             Key::Minus => "-",
             Key::Equal => "=",
@@ -249,12 +267,45 @@ impl Key {
             Key::Comma => ",",
             Key::Period => ".",
             Key::Slash => "/",
+            Key::IntlBackslash => "Intl \\",
+            Key::IntlRo => "Ro",
+            Key::IntlYen => "Yen",
+            Key::NumLock => "Num Lock",
+            Key::NumpadAdd => "Num +",
+            Key::NumpadSubtract => "Num -",
+            Key::NumpadMultiply => "Num *",
+            Key::NumpadDivide => "Num /",
+            Key::NumpadDecimal => "Num .",
+            Key::NumpadEnter => "Num Enter",
+            Key::NumpadEqual => "Num =",
+            Key::NumpadComma => "Num ,",
             Key::AudioVolumeUp => "Volume Up",
             Key::AudioVolumeDown => "Volume Down",
             Key::AudioVolumeMute => "Mute",
             Key::MediaPlayPause => "Play/Pause",
+            Key::MediaStop => "Stop",
             Key::MediaTrackNext => "Next Track",
             Key::MediaTrackPrevious => "Previous Track",
+            Key::MediaFastForward => "Fast Forward",
+            Key::MediaRewind => "Rewind",
+            Key::MediaSelect => "Media Select",
+            Key::BrightnessUp => "Brightness Up",
+            Key::BrightnessDown => "Brightness Down",
+            Key::BrowserBack => "Browser Back",
+            Key::BrowserForward => "Browser Forward",
+            Key::BrowserRefresh => "Browser Refresh",
+            Key::BrowserStop => "Browser Stop",
+            Key::BrowserSearch => "Browser Search",
+            Key::BrowserFavorites => "Browser Favorites",
+            Key::BrowserHome => "Browser Home",
+            Key::LaunchMail => "Mail",
+            Key::LaunchApp1 => "My Computer",
+            Key::LaunchApp2 => "Calculator",
+            Key::WakeUp => "Wake Up",
+            Key::NonConvert => "Non-Convert",
+            Key::KanaMode => "Kana",
+            Key::Lang1 => "Lang 1",
+            Key::Lang2 => "Lang 2",
             _ => return code,
         };
         label.to_string()

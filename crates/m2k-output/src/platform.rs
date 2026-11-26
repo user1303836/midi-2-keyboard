@@ -3,6 +3,8 @@
 //! CONTRACT (keep stable): [`foreground_app`] and [`permissions`]. Both must be cheap enough to
 //! poll a few times per second and must never panic.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -33,15 +35,43 @@ pub struct Permissions {
 }
 
 /// Returns the application that currently has keyboard focus, if it can be determined.
+///
+/// Windows: the process owning the foreground window (for UWP apps hosted by
+/// `ApplicationFrameHost.exe`, the app's own process); `app_id` is the AppUserModelID of
+/// packaged apps.
 pub fn foreground_app() -> Option<ForegroundApp> {
-    None
+    catch_unwind(imp::foreground_app).unwrap_or(None)
 }
 
 /// Reports whether the permissions needed for input injection are in place.
 pub fn permissions() -> Permissions {
-    Permissions { can_inject: true, can_detect_foreground: false, hint: String::new() }
+    catch_unwind(imp::permissions).unwrap_or_else(|_| Permissions {
+        can_inject: false,
+        can_detect_foreground: false,
+        hint: "The permission check failed unexpectedly.".into(),
+    })
 }
 
 /// Asks the OS to show its permission prompt / settings pane when one exists (macOS
 /// Accessibility). No-op elsewhere.
-pub fn request_permissions() {}
+pub fn request_permissions() {
+    let _ = catch_unwind(AssertUnwindSafe(imp::request_permissions));
+}
+
+#[cfg(windows)]
+use crate::windows::platform as imp;
+
+#[cfg(not(windows))]
+mod imp {
+    use super::{ForegroundApp, Permissions};
+
+    pub fn foreground_app() -> Option<ForegroundApp> {
+        None
+    }
+
+    pub fn permissions() -> Permissions {
+        Permissions { can_inject: true, can_detect_foreground: false, hint: String::new() }
+    }
+
+    pub fn request_permissions() {}
+}
