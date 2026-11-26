@@ -15,6 +15,7 @@ import {
   MousePointerClick,
   Move,
   Music2,
+  Music4,
   Pause,
   Play,
   RotateCw,
@@ -44,6 +45,8 @@ export function SourceIcon({ event, size = 15, className }: { event: SourceEvent
   switch (event.type) {
     case "note":
       return <Music2 {...props} />;
+    case "chord":
+      return <Music4 {...props} />;
     case "control_change": {
       const shape = sourceShape(event);
       if (shape === "relative") return <RotateCw {...props} />;

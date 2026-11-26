@@ -344,6 +344,9 @@ fn compile_mapping(
         SourceEvent::Note { notes, velocity } => {
             CSourceKind::Note { notes: *notes, velocity: *velocity }
         }
+        // TODO(engine): chord sources and `source.hysteresis` are new in the model and not
+        // matched yet; an inert source keeps the build green until they are implemented.
+        SourceEvent::Chord { .. } => CSourceKind::SysEx { pattern: None },
         SourceEvent::ControlChange { controller, range, encoding } => CSourceKind::Cc {
             controller: (*controller).min(127),
             range: *range,

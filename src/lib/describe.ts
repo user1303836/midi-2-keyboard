@@ -36,6 +36,8 @@ export function sourceTitle(event: SourceEvent, octave = 4): string {
   switch (event.type) {
     case "note":
       return noteRangeText(event.notes, octave);
+    case "chord":
+      return event.notes.length ? event.notes.map((note) => noteName(note, octave)).join(" + ") : "Empty chord";
     case "control_change":
       return `CC ${event.controller}`;
     case "control_change14":

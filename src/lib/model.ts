@@ -36,6 +36,7 @@ export interface SourceTypeInfo {
 
 export const SOURCE_TYPES: SourceTypeInfo[] = [
   { type: "note", label: "Note", hint: "Keys and pads", channel: true },
+  { type: "chord", label: "Chord", hint: "Several notes held together", channel: true },
   { type: "control_change", label: "Control Change", hint: "Knobs, faders, pedals, buttons", channel: true },
   { type: "program_change", label: "Program Change", hint: "Patch / preset buttons", channel: true },
   { type: "pitch_bend", label: "Pitch Bend", hint: "The pitch wheel", channel: true },
@@ -64,6 +65,8 @@ export function defaultSourceEvent(type: SourceType): SourceEvent {
   switch (type) {
     case "note":
       return { type, notes: { min: 60, max: 60 }, velocity: { min: 1, max: 127 } };
+    case "chord":
+      return { type, notes: [60, 64, 67], window_ms: 0 };
     case "control_change":
       return { type, controller: 1, range: { ...FULL7 }, encoding: "absolute" };
     case "control_change14":
@@ -133,6 +136,7 @@ export function isFullRange(event: SourceEvent): boolean {
 export function sourceShape(event: SourceEvent): SourceShape {
   switch (event.type) {
     case "note":
+    case "chord":
       return "button";
     case "control_change":
       if (event.encoding !== "absolute") return "relative";
@@ -453,7 +457,7 @@ export function defaultRateLimit(): RateLimit {
 // ---------------------------------------------------------------------------------------------
 
 export function newSource(event: SourceEvent = defaultSourceEvent("note")): Source {
-  return { device: null, channel: null, event };
+  return { device: null, channel: null, event, hysteresis: 0 };
 }
 
 export function newMapping(source: Source = newSource(), behavior?: Behavior): Mapping {

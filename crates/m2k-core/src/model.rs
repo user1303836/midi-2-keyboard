@@ -17,6 +17,7 @@
 //! | Source                         | Active while                                   | Value            |
 //! |--------------------------------|------------------------------------------------|------------------|
 //! | Note                           | note on (velocity in range) until its note off | velocity         |
+//! | Chord                          | all of its notes are down                      | last velocity    |
 //! | CC / CC14 / NRPN / RPN         | last value is inside `range`                   | the value        |
 //! | Pitch bend / pressure          | last value is inside `range`                   | the value        |
 //! | Program change, song select    | a pulse (active then immediately inactive)     | program / song   |
@@ -267,6 +268,13 @@ pub struct Source {
     #[serde(default)]
     pub channel: Option<u8>,
     pub event: SourceEvent,
+    /// Extra distance the value must travel *beyond* the edge of the event's `range` before an
+    /// active source counts as inactive again (it still becomes active exactly at the edge).
+    /// Stops a jittery pedal, fader or pressure sensor from flickering around the threshold.
+    /// Applies to ranged, absolute sources (CC, 14-bit CC, NRPN/RPN, pitch bend, pressure, song
+    /// position); ignored by everything else. `0` = off.
+    #[serde(default)]
+    pub hysteresis: u16,
 }
 
 /// How a controller encodes its value.
@@ -290,6 +298,19 @@ pub enum SourceEvent {
     /// Note on/off. `notes` selects note numbers (a single note has `min == max`),
     /// `velocity` filters note-on velocity (1..=127).
     Note { notes: ValueRange, velocity: ValueRange },
+    /// Several notes held at the same time. Tracked per device and channel: the source is active
+    /// while **all** of `notes` are down — it presses when the last of them goes down and
+    /// releases as soon as any of them goes up (it can press again once that note returns).
+    /// With `window_ms > 0` the notes must have been struck within that many milliseconds of
+    /// each other, so playing them one after another does not count; `0` = no time limit
+    /// (holding some and adding the rest later works). Other notes being held do not matter.
+    /// The value is the velocity of the last note struck. Mappings on the individual notes are
+    /// not suppressed.
+    Chord {
+        notes: Vec<u8>,
+        #[serde(default)]
+        window_ms: u32,
+    },
     /// 7-bit control change. With an absolute `encoding` the source is active while the value is
     /// inside `range`. With a relative encoding every message is a pulse whose value is a signed
     /// tick count (`range` is ignored).

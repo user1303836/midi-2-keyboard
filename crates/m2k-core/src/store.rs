@@ -196,12 +196,20 @@ fn sanitize_mapping(mapping: &mut Mapping) {
     if mapping.source.device.as_deref() == Some("") {
         mapping.source.device = None;
     }
+    mapping.source.hysteresis = mapping.source.hysteresis.min(8_191);
     match &mut mapping.source.event {
         SourceEvent::Note { notes, velocity } => {
             sanitize_range(notes, 127);
             sanitize_range(velocity, 127);
             velocity.min = velocity.min.max(1);
             velocity.max = velocity.max.max(1);
+        }
+        SourceEvent::Chord { notes, window_ms } => {
+            notes.iter_mut().for_each(|note| *note = (*note).min(127));
+            notes.sort_unstable();
+            notes.dedup();
+            notes.truncate(16);
+            *window_ms = (*window_ms).min(10_000);
         }
         SourceEvent::ControlChange { controller, range, .. } => {
             *controller = (*controller).min(127);

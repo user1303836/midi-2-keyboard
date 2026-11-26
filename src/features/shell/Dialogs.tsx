@@ -122,7 +122,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         {info.platform === "windows" && (
           <Option
             title="How keys are sent"
-            description="Automatic suits almost everything. Scan codes are what some DirectInput / raw-input games need; virtual keys ignore the physical layout."
+            description={
+              settings.injector.windows_key_mode === "scan_code"
+                ? "Scan codes only: for games that read the keyboard directly and ignore normal input. Numpad keys act as navigation keys in this mode. Use Automatic unless something does not react."
+                : settings.injector.windows_key_mode === "virtual_key"
+                  ? "Virtual keys only: for the rare program that mishandles scan codes. Use Automatic unless something does not react."
+                  : "Automatic works for normal applications and most games. Change it only if a particular game or program does not react."
+            }
           >
             <Select
               aria-label="Windows key mode"

@@ -12,4 +12,12 @@ device: string | null,
 /**
  * Only this MIDI channel, 1..=16. `None` = any channel. Ignored for system messages.
  */
-channel: number | null, event: SourceEvent, };
+channel: number | null, event: SourceEvent, 
+/**
+ * Extra distance the value must travel *beyond* the edge of the event's `range` before an
+ * active source counts as inactive again (it still becomes active exactly at the edge).
+ * Stops a jittery pedal, fader or pressure sensor from flickering around the threshold.
+ * Applies to ranged, absolute sources (CC, 14-bit CC, NRPN/RPN, pitch bend, pressure, song
+ * position); ignored by everything else. `0` = off.
+ */
+hysteresis: number, };

@@ -52,7 +52,7 @@ function sampleConfig(): Config {
             enabled: true,
             source: {
               device: null,
-              channel: null,
+              channel: null, hysteresis: 0,
               event: { type: "note", notes: { min: 60, max: 60 }, velocity: { min: 1, max: 127 } },
             },
             behavior: { type: "trigger", on_press: keys("ArrowUp"), on_release: null, repeat: null },
@@ -65,7 +65,7 @@ function sampleConfig(): Config {
             enabled: true,
             source: {
               device: null,
-              channel: 2,
+              channel: 2, hysteresis: 0,
               event: { type: "control_change", controller: 20, range: { min: 0, max: 127 }, encoding: "absolute" },
             },
             behavior: { type: "change", action: keys("ControlLeft", "ShiftLeft", "KeyO") },
@@ -78,7 +78,7 @@ function sampleConfig(): Config {
             enabled: true,
             source: {
               device: "Launchkey Mini MK3",
-              channel: null,
+              channel: null, hysteresis: 0,
               event: { type: "control_change", controller: 64, range: { min: 64, max: 127 }, encoding: "absolute" },
             },
             behavior: { type: "hold", target: { type: "keys", keys: ["Space"] }, auto_repeat: true },
@@ -91,7 +91,7 @@ function sampleConfig(): Config {
             enabled: true,
             source: {
               device: null,
-              channel: null,
+              channel: null, hysteresis: 0,
               event: {
                 type: "control_change",
                 controller: 21,
@@ -116,7 +116,7 @@ function sampleConfig(): Config {
             enabled: false,
             source: {
               device: null,
-              channel: 10,
+              channel: 10, hysteresis: 0,
               event: { type: "note", notes: { min: 36, max: 36 }, velocity: { min: 1, max: 127 } },
             },
             behavior: {

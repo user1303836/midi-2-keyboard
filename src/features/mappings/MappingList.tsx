@@ -1,4 +1,4 @@
-import { ArrowRight, Copy, Filter, GripVertical, MoreHorizontal, Plus, Search, Timer, Trash2, X } from "lucide-react";
+import { ArrowRight, Copy, CopyPlus, Filter, GripVertical, MoreHorizontal, Plus, Search, Timer, Trash2, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Mapping } from "@/bindings/Mapping";
@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/inputs";
 import { Badge, Kbd } from "@/components/ui/misc";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tooltip } from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
+import { findConflicts, type Conflict } from "@/lib/conflicts";
 import { onMappingActivity, type ActivityKind } from "@/lib/monitor";
 import { useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
@@ -51,10 +52,12 @@ const MappingRow = memo(function MappingRow({
   onDrop,
   onDragEnd,
   draggable,
+  conflicts,
 }: {
   mapping: Mapping;
   selected: boolean;
   engaged: boolean;
+  conflicts: Conflict[] | undefined;
   dragging: boolean;
   dropBefore: boolean;
   onDragStart: () => void;
@@ -139,6 +142,26 @@ const MappingRow = memo(function MappingRow({
       {/* Meta */}
       <div className="flex shrink-0 items-center gap-1.5">
         {engaged && <Badge tone="key">ON</Badge>}
+        {conflicts && conflicts.length > 0 && (
+          <Tooltip
+            content={
+              <>
+                The same control also triggers{" "}
+                {conflicts
+                  .map((c) => `“${c.mapping.name || sourceTitle(c.mapping.source.event, octave)}”${c.profile ? ` in ${c.profile}` : ""}`)
+                  .join(", ")}
+                . Both will fire. Give them different conditions if that is not what you want.
+              </>
+            }
+          >
+            <span>
+              <Badge tone="warn">
+                <CopyPlus size={11} />
+                <span className="hidden @min-[700px]:inline">shared</span>
+              </Badge>
+            </span>
+          </Tooltip>
+        )}
         {mapping.rate_limit && (
           <Badge tone="accent" title={`Rate limit: ${rateLimitText(mapping.rate_limit)}`}>
             <Timer size={11} />
@@ -221,6 +244,8 @@ export function MappingList({ profile }: { profile: Profile }) {
     [profile.mappings, search, config, octave],
   );
 
+  const conflicts = useMemo(() => findConflicts(config, profile), [config, profile]);
+
   const quickAdd = startWizard;
   const reorderable = search === "";
 
@@ -277,6 +302,7 @@ export function MappingList({ profile }: { profile: Profile }) {
               mapping={mapping}
               selected={mapping.id === selectedId}
               engaged={engaged.includes(mapping.id)}
+              conflicts={conflicts.get(mapping.id)}
               draggable={reorderable}
               dragging={dragId === mapping.id}
               dropBefore={dropIndex === index && dragId !== null && dragId !== mapping.id}
