@@ -132,6 +132,8 @@ let lastEditKey: string | null = null;
 let lastEditAt = 0;
 let toastId = 1;
 let initStarted = false;
+/** When each error message was last shown, so a recurring one does not spam. */
+const recentErrors = new Map<string, number>();
 
 function mapProfile(config: Config, id: string, change: (profile: Profile) => Profile): Config {
   let touched = false;
@@ -191,6 +193,15 @@ export const useApp = create<State>((set, get) => {
       case "engine": {
         pushEngineEvents(event.events);
         for (const e of event.events) {
+          if (e.type === "error") {
+            // Problems the user should hear about even with the monitor closed (once each).
+            const now = Date.now();
+            if (now - (recentErrors.get(e.message) ?? 0) > 30_000) {
+              recentErrors.set(e.message, now);
+              get().toast(e.message, { kind: "error" });
+            }
+            continue;
+          }
           if (e.type !== "status") continue;
           const { type: _type, ...engine } = e;
           const state = get();
@@ -218,9 +229,29 @@ export const useApp = create<State>((set, get) => {
           unsupportedKeys: event.unsupported_keys ?? [],
         });
         break;
-      case "config":
-        set({ config: event.config, past: [], future: [] });
+      case "config": {
+        // The config changed behind our back (the file was edited by hand, a profile was
+        // switched from the tray, …): adopt it and keep the view pointing at things that exist.
+        const state = get();
+        const config = event.config;
+        const viewed = config.profiles.some((p) => p.id === state.viewProfileId)
+          ? state.viewProfileId
+          : (config.selected_profile ?? config.profiles[0]?.id ?? null);
+        const selected =
+          state.selectedMappingId && profileOfMapping(config, state.selectedMappingId) ? state.selectedMappingId : null;
+        const edited = !deepEqual({ ...config, selected_profile: null }, { ...state.config, selected_profile: null });
+        set({
+          config,
+          past: [],
+          future: [],
+          viewProfileId: viewed,
+          selectedMappingId: selected,
+          wizardMappingId: null,
+          draft: null,
+        });
+        if (edited) get().toast("The configuration file changed on disk and was reloaded.", { kind: "info" });
         break;
+      }
     }
   };
 
