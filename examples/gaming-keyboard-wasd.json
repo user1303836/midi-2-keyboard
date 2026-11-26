@@ -1,0 +1,75 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-game-keys",
+      "name": "Gaming: piano keys as WASD",
+      "mappings": [
+        {
+          "id": "ex-game-w",
+          "name": "C4 holds W (forward)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 60, "max": 60 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyW"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-a",
+          "name": "D4 holds A (left)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 62, "max": 62 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyA"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-s",
+          "name": "E4 holds S (back)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 64, "max": 64 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyS"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-d",
+          "name": "F4 holds D (right)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 65, "max": 65 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["KeyD"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-jump",
+          "name": "C major chord (C3 E3 G3) jumps (Space)",
+          "source": { "device": null, "channel": null, "event": { "type": "chord", "notes": [48, 52, 55], "window_ms": 60 } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Space"] } }
+        },
+        {
+          "id": "ex-game-sprint",
+          "name": "Mod wheel up sprints (holds Shift)",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 1, "range": { "min": 64, "max": 127 } },
+            "hysteresis": 8
+          },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ShiftLeft"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-bend-up",
+          "name": "Pitch wheel up looks up (holds Up)",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "pitch_bend", "range": { "min": 10000, "max": 16383 } },
+            "hysteresis": 500
+          },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ArrowUp"] }, "auto_repeat": false }
+        },
+        {
+          "id": "ex-game-bend-down",
+          "name": "Pitch wheel down looks down (holds Down)",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "pitch_bend", "range": { "min": 0, "max": 6383 } },
+            "hysteresis": 500
+          },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ArrowDown"] }, "auto_repeat": false }
+        }
+      ]
+    }
+  ]
+}

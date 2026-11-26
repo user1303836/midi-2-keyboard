@@ -1,0 +1,35 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-present",
+      "name": "Presenting: foot switch",
+      "mappings": [
+        {
+          "id": "ex-present-switch",
+          "name": "Foot switch: once = next slide, twice = previous, three times = black screen",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 64, "range": { "min": 64, "max": 127 } } },
+          "behavior": {
+            "type": "multi_tap",
+            "single": { "type": "keys", "keys": ["ArrowRight"] },
+            "double": { "type": "keys", "keys": ["ArrowLeft"] },
+            "triple": { "type": "keys", "keys": ["KeyB"] },
+            "window_ms": 350
+          }
+        },
+        {
+          "id": "ex-present-second-pedal",
+          "name": "Second pedal (CC 67): tap = laser pointer on / off (Ctrl+L), hold = end the show (Esc)",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 67, "range": { "min": 64, "max": 127 } } },
+          "behavior": {
+            "type": "tap_hold",
+            "tap": { "type": "keys", "keys": ["ControlLeft", "KeyL"] },
+            "hold": { "type": "keys", "keys": ["Escape"] },
+            "hold_ms": 1000
+          }
+        }
+      ]
+    }
+  ]
+}

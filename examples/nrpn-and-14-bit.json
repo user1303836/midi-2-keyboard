@@ -1,0 +1,55 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-hires",
+      "name": "High resolution: NRPN & 14-bit controls",
+      "mappings": [
+        {
+          "id": "ex-hires-nrpn-knob",
+          "name": "NRPN 130 knob (14-bit data) nudges with , and .",
+          "source": { "device": null, "channel": null, "event": { "type": "nrpn", "number": 130, "range": { "min": 0, "max": 16383 }, "hires": true } },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["Period"], "tap_ms": 5 },
+            "down": { "type": "keys", "keys": ["Comma"], "tap_ms": 5 },
+            "step": 128,
+            "max_burst": 8
+          }
+        },
+        {
+          "id": "ex-hires-nrpn-buttons",
+          "name": "Data increment / decrement buttons on NRPN 131 move the selection",
+          "source": { "device": null, "channel": null, "event": { "type": "nrpn", "number": 131, "range": { "min": 0, "max": 127 }, "hires": false } },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["ArrowUp"] },
+            "down": { "type": "keys", "keys": ["ArrowDown"] },
+            "step": 1,
+            "max_burst": 8
+          }
+        },
+        {
+          "id": "ex-hires-fader",
+          "name": "14-bit fader (CC 7 + 39): one step per 1/16 of its travel",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change14", "controller": 7, "range": { "min": 0, "max": 16383 } } },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["BracketRight"], "tap_ms": 5 },
+            "down": { "type": "keys", "keys": ["BracketLeft"], "tap_ms": 5 },
+            "step": 1024,
+            "max_burst": 16
+          }
+        },
+        {
+          "id": "ex-hires-pitch-range",
+          "name": "RPN 0 (pitch bend range) changed on the synth: type the new range",
+          "source": { "device": null, "channel": null, "event": { "type": "rpn", "number": 0, "range": { "min": 0, "max": 127 }, "hires": false } },
+          "behavior": { "type": "change", "action": { "type": "text", "text": "bend range {value} " } },
+          "rate_limit": { "mode": "debounce", "interval_ms": 300, "trailing": false }
+        }
+      ]
+    }
+  ]
+}

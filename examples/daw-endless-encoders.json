@@ -1,0 +1,104 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-daw-encoders",
+      "name": "DAW: endless encoders",
+      "mappings": [
+        {
+          "id": "ex-daw-enc-select",
+          "name": "Encoder 1 moves the selection up / down",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 16, "range": { "min": 0, "max": 127 }, "encoding": "relative_twos_complement" }
+          },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["ArrowUp"], "tap_ms": 5 },
+            "down": { "type": "keys", "keys": ["ArrowDown"], "tap_ms": 5 },
+            "step": 1,
+            "max_burst": 8
+          },
+          "conditions": [{ "type": "layer", "layer": "fine", "active": false }]
+        },
+        {
+          "id": "ex-daw-enc-zoom",
+          "name": "Encoder 2 zooms in / out, at most every 120 ms",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 17, "range": { "min": 0, "max": 127 }, "encoding": "relative_binary_offset" }
+          },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["ControlLeft", "Equal"], "tap_ms": 5 },
+            "down": { "type": "keys", "keys": ["ControlLeft", "Minus"], "tap_ms": 5 },
+            "step": 1,
+            "max_burst": 1
+          },
+          "rate_limit": { "mode": "throttle", "interval_ms": 120, "trailing": true }
+        },
+        {
+          "id": "ex-daw-enc-scroll",
+          "name": "Encoder 3 scrolls the timeline sideways",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 18, "range": { "min": 0, "max": 127 }, "encoding": "relative_sign_magnitude" }
+          },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "mouse_scroll", "dx": 1, "dy": 0 },
+            "down": { "type": "mouse_scroll", "dx": -1, "dy": 0 },
+            "step": 1,
+            "max_burst": 8
+          }
+        },
+        {
+          "id": "ex-daw-push-transport",
+          "name": "Push encoder 1: tap = play / stop, hold = save",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 48, "range": { "min": 64, "max": 127 } }
+          },
+          "behavior": {
+            "type": "tap_hold",
+            "tap": { "type": "keys", "keys": ["Space"] },
+            "hold": { "type": "keys", "keys": ["ControlLeft", "KeyS"] },
+            "hold_ms": 500
+          }
+        },
+        {
+          "id": "ex-daw-fine-mode",
+          "name": "Push encoder 2 held: encoder 1 nudges with Shift",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 49, "range": { "min": 64, "max": 127 } }
+          },
+          "behavior": { "type": "hold", "target": { "type": "layer", "layer": "fine" } }
+        },
+        {
+          "id": "ex-daw-enc-select-fine",
+          "name": "Encoder 1 in fine mode: Shift + up / down",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "control_change", "controller": 16, "range": { "min": 0, "max": 127 }, "encoding": "relative_twos_complement" }
+          },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["ShiftLeft", "ArrowUp"], "tap_ms": 5 },
+            "down": { "type": "keys", "keys": ["ShiftLeft", "ArrowDown"], "tap_ms": 5 },
+            "step": 1,
+            "max_burst": 8
+          },
+          "conditions": [{ "type": "layer", "layer": "fine", "active": true }]
+        }
+      ]
+    }
+  ]
+}

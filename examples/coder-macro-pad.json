@@ -1,0 +1,81 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-coder",
+      "name": "Coding: macro pad with an Fn layer",
+      "mappings": [
+        {
+          "id": "ex-coder-snippet",
+          "name": "Pad 1 types a log line (with the note that was hit)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "text", "text": "console.log(\"pad {note_name}, velocity {velocity}\");" } }
+        },
+        {
+          "id": "ex-coder-format",
+          "name": "Pad 2 runs \"Format Document\" from the command palette",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 37, "max": 37 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": {
+            "type": "trigger",
+            "on_press": {
+              "type": "sequence",
+              "steps": [
+                { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyP"] },
+                { "type": "delay", "ms": 150 },
+                { "type": "text", "text": "Format Document" },
+                { "type": "delay", "ms": 50 },
+                { "type": "keys", "keys": ["Enter"] }
+              ]
+            }
+          }
+        },
+        {
+          "id": "ex-coder-esc-ctrl",
+          "name": "Pad 3: tap = Esc, hold = Ctrl",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 38, "max": 38 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": {
+            "type": "tap_hold",
+            "tap": { "type": "keys", "keys": ["Escape"] },
+            "hold_target": { "type": "keys", "keys": ["ControlLeft"] },
+            "hold_ms": 200
+          }
+        },
+        {
+          "id": "ex-coder-fn",
+          "name": "Pad 4 held = Fn layer",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 39, "max": 39 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "layer", "layer": "fn" } }
+        },
+        {
+          "id": "ex-coder-pad5",
+          "name": "Pad 5: build (Ctrl+Shift+B)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyB"] } },
+          "conditions": [{ "type": "layer", "layer": "fn", "active": false }]
+        },
+        {
+          "id": "ex-coder-pad5-fn",
+          "name": "Pad 5 with Fn: run tests (F5)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 40, "max": 40 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F5"] } },
+          "conditions": [{ "type": "layer", "layer": "fn", "active": true }]
+        },
+        {
+          "id": "ex-coder-pad6",
+          "name": "Pad 6: comment line (Ctrl+/)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["ControlLeft", "Slash"] } },
+          "conditions": [{ "type": "layer", "layer": "fn", "active": false }]
+        },
+        {
+          "id": "ex-coder-pad6-fn",
+          "name": "Pad 6 with Fn: go to definition (F12)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 41, "max": 41 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F12"] } },
+          "conditions": [{ "type": "layer", "layer": "fn", "active": true }]
+        }
+      ]
+    }
+  ]
+}

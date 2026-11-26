@@ -1,0 +1,68 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-knobs",
+      "name": "Knobs & odd buttons: rate limits",
+      "mappings": [
+        {
+          "id": "ex-knobs-throttled-hotkey",
+          "name": "Knob CC 20 on channel 2 fires Ctrl+Shift+O at most every 500 ms",
+          "source": { "device": null, "channel": 2, "event": { "type": "control_change", "controller": 20, "range": { "min": 0, "max": 127 } } },
+          "behavior": { "type": "change", "action": { "type": "keys", "keys": ["ControlLeft", "ShiftLeft", "KeyO"] } },
+          "rate_limit": { "mode": "throttle", "interval_ms": 500, "trailing": false }
+        },
+        {
+          "id": "ex-knobs-volume",
+          "name": "Volume knob (CC 7) turns the system volume up / down",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 7, "range": { "min": 0, "max": 127 } } },
+          "behavior": {
+            "type": "step",
+            "up": { "type": "keys", "keys": ["AudioVolumeUp"] },
+            "down": { "type": "keys", "keys": ["AudioVolumeDown"] },
+            "step": 4,
+            "max_burst": 8
+          }
+        },
+        {
+          "id": "ex-knobs-settled",
+          "name": "Knob CC 21: once it stops moving, type its value",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 21, "range": { "min": 0, "max": 127 } } },
+          "behavior": { "type": "change", "action": { "type": "text", "text": "{value}\n" } },
+          "rate_limit": { "mode": "debounce", "interval_ms": 400, "trailing": false }
+        },
+        {
+          "id": "ex-knobs-press-only-button",
+          "name": "Button that only sends 127 (CC 80): every press screenshots (Win+Shift+S)",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 80, "range": { "min": 64, "max": 127 } } },
+          "behavior": { "type": "change", "action": { "type": "keys", "keys": ["MetaLeft", "ShiftLeft", "KeyS"] } }
+        },
+        {
+          "id": "ex-knobs-toggling-button",
+          "name": "Button that alternates 127 / 0 (CC 81): every press toggles play (Space)",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 81, "range": { "min": 0, "max": 127 } } },
+          "behavior": { "type": "change", "action": { "type": "keys", "keys": ["Space"] } }
+        },
+        {
+          "id": "ex-knobs-crossfader",
+          "name": "Crossfader (CC 8): left third = 1, middle = 2, right third = 3",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 8, "range": { "min": 0, "max": 42 } }, "hysteresis": 3 },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit1"] } }
+        },
+        {
+          "id": "ex-knobs-crossfader-mid",
+          "name": "Crossfader in the middle third: 2",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 8, "range": { "min": 43, "max": 84 } }, "hysteresis": 3 },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit2"] } }
+        },
+        {
+          "id": "ex-knobs-crossfader-right",
+          "name": "Crossfader in the right third: 3",
+          "source": { "device": null, "channel": null, "event": { "type": "control_change", "controller": 8, "range": { "min": 85, "max": 127 } }, "hysteresis": 3 },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit3"] } }
+        }
+      ]
+    }
+  ]
+}

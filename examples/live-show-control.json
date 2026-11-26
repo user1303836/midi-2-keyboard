@@ -1,0 +1,73 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-live-control",
+      "name": "Live show: control (always on)",
+      "always_on": true,
+      "mappings": [
+        {
+          "id": "ex-live-pc1",
+          "name": "Program 0 (\"patch 1\" on most devices) selects song A",
+          "source": { "device": null, "channel": null, "event": { "type": "program_change", "programs": { "min": 0, "max": 0 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "switch_profile", "target": { "type": "profile", "id": "ex-live-song-a" } } }
+        },
+        {
+          "id": "ex-live-pc2",
+          "name": "Program 1 (\"patch 2\" on most devices) selects song B",
+          "source": { "device": null, "channel": null, "event": { "type": "program_change", "programs": { "min": 1, "max": 1 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "switch_profile", "target": { "type": "profile", "id": "ex-live-song-b" } } }
+        },
+        {
+          "id": "ex-live-bar",
+          "name": "MIDI clock: press F13 on every bar (4 beats)",
+          "source": { "device": null, "channel": null, "event": { "type": "clock", "divisor": 96 } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F13"] } }
+        },
+        {
+          "id": "ex-live-mmc-play",
+          "name": "MMC Play from the DAW: media play / pause",
+          "source": { "device": null, "channel": null, "event": { "type": "sys_ex", "pattern": "F0 7F ?? 06 02 F7" } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["MediaPlayPause"] } }
+        },
+        {
+          "id": "ex-live-mmc-stop",
+          "name": "MMC Stop from the DAW: media stop",
+          "source": { "device": null, "channel": null, "event": { "type": "sys_ex", "pattern": "F0 7F ?? 06 01 F7" } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["MediaStop"] } }
+        },
+        {
+          "id": "ex-live-transport-stop",
+          "name": "MIDI Stop message: pause the backing video (Space)",
+          "source": { "device": null, "channel": null, "event": { "type": "system", "message": "stop" } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Space"] } }
+        }
+      ]
+    },
+    {
+      "id": "ex-live-song-a",
+      "name": "Live show: song A",
+      "mappings": [
+        {
+          "id": "ex-live-a-lyrics",
+          "name": "Pad 1: next lyrics page (Page Down)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["PageDown"] } }
+        }
+      ]
+    },
+    {
+      "id": "ex-live-song-b",
+      "name": "Live show: song B",
+      "mappings": [
+        {
+          "id": "ex-live-b-scene",
+          "name": "Pad 1: next lighting scene (F14)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["F14"] } }
+        }
+      ]
+    }
+  ]
+}

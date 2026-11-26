@@ -1,0 +1,57 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ex-drums",
+      "name": "Drum pads: velocity zones & auto-fire",
+      "mappings": [
+        {
+          "id": "ex-drums-soft",
+          "name": "Kick pad hit softly: light attack (1)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 1, "max": 80 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit1"] } }
+        },
+        {
+          "id": "ex-drums-hard",
+          "name": "Kick pad hit hard: heavy attack (2)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 36, "max": 36 }, "velocity": { "min": 81, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "keys", "keys": ["Digit2"] } }
+        },
+        {
+          "id": "ex-drums-turbo",
+          "name": "Snare pad held: auto-fire X every 100 ms",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 38, "max": 38 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": {
+            "type": "trigger",
+            "on_press": { "type": "keys", "keys": ["KeyX"] },
+            "repeat": { "delay_ms": 150, "interval_ms": 100 }
+          }
+        },
+        {
+          "id": "ex-drums-hihat-click",
+          "name": "Hi-hat pad clicks the mouse",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 42, "max": 42 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "trigger", "on_press": { "type": "mouse_click", "button": "left", "clicks": 1 } }
+        },
+        {
+          "id": "ex-drums-crash-drag",
+          "name": "Crash pad held: hold the left mouse button (drag)",
+          "source": { "device": null, "channel": null, "event": { "type": "note", "notes": { "min": 49, "max": 49 }, "velocity": { "min": 1, "max": 127 } } },
+          "behavior": { "type": "hold", "target": { "type": "mouse_button", "button": "left" } }
+        },
+        {
+          "id": "ex-drums-squeeze",
+          "name": "Press a pad hard after hitting it (aftertouch): hold Shift",
+          "source": {
+            "device": null,
+            "channel": null,
+            "event": { "type": "poly_pressure", "notes": { "min": 36, "max": 51 }, "range": { "min": 90, "max": 127 } },
+            "hysteresis": 25
+          },
+          "behavior": { "type": "hold", "target": { "type": "keys", "keys": ["ShiftLeft"] }, "auto_repeat": false }
+        }
+      ]
+    }
+  ]
+}
