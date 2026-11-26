@@ -547,6 +547,8 @@ function Wizard({
   const event = mapping.source.event;
   const shape = sourceShape(event);
   const done = !isEmptyAction(primaryAction(mapping.behavior));
+  // What kind of action is being set up (the heading of step 2 follows it).
+  const primaryKind = primaryAction(mapping.behavior)?.type ?? null;
   // Does another mapping of this profile already react to the control that was just learned?
   const clash = useMemo(() => {
     const owner = profileOfMapping(config, mapping.id);
@@ -657,15 +659,23 @@ function Wizard({
             <StepDot n={2} done={done} tone="key" />
             <div className="min-w-0 flex-1">
               <div className="text-lg font-semibold">
-                {shape === "continuous" || shape === "relative"
-                  ? "Now press the key or shortcut it should send"
-                  : "Now press the key or shortcut to send"}
+                {primaryKind === "text"
+                  ? "Now type the text it should send"
+                  : primaryKind !== null && primaryKind !== "keys"
+                    ? "Now choose what it should do"
+                    : shape === "continuous" || shape === "relative"
+                      ? "Now press the key or shortcut it should send"
+                      : "Now press the key or shortcut to send"}
               </div>
               {stage === "action" && (
                 <div className="text-fg-muted">
-                  {shape === "relative"
-                    ? "First for turning up, then set the other direction below."
-                    : "Just press it on your computer keyboard."}
+                  {primaryKind === "text"
+                    ? "It is typed into whatever application is in front."
+                    : primaryKind !== null && primaryKind !== "keys"
+                      ? "Fill in the details below."
+                      : shape === "relative"
+                        ? "First for turning up, then set the other direction below."
+                        : "Just press it on your computer keyboard."}
                 </div>
               )}
             </div>

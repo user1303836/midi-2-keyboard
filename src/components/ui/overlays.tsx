@@ -7,7 +7,7 @@ import {
   Tooltip as RTooltip,
 } from "radix-ui";
 import { Check, X } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import { useRef, type ComponentProps, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -83,6 +83,13 @@ export function PopoverContent({
 // Dialog
 // ---------------------------------------------------------------------------------------------
 
+// Whether the user's last input was a key press (rather than the pointer).
+let lastInputWasKey = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("keydown", () => (lastInputWasKey = true), true);
+  window.addEventListener("pointerdown", () => (lastInputWasKey = false), true);
+}
+
 export function Dialog({
   open,
   onOpenChange,
@@ -100,11 +107,26 @@ export function Dialog({
   width?: number;
   footer?: ReactNode;
 }) {
+  // What had the focus when the dialog opened. These dialogs open from state, not from a Radix
+  // trigger, so Radix has nothing to give the focus back to: without this a keyboard user
+  // would be thrown back to the top of the window every time a dialog closes.
+  const opener = useRef<Element | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) opener.current = document.activeElement;
+  wasOpen.current = open;
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
         <RDialog.Overlay className="fixed inset-0 z-40 animate-fade-in bg-overlay backdrop-blur-[2px]" />
         <RDialog.Content
+          onCloseAutoFocus={(event) => {
+            const target = opener.current;
+            // Pointer users would only get a tooltip popping up on the button they came from.
+            if (lastInputWasKey && target instanceof HTMLElement && target.isConnected && target !== document.body) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
           style={{ width }}
           aria-describedby={description ? undefined : undefined}
           className="fixed top-1/2 left-1/2 z-50 flex max-h-[86vh] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 animate-pop-in flex-col rounded-xl border border-line-strong bg-surface shadow-pop"
@@ -189,6 +211,8 @@ export function MenuContent({ className, align = "end", ...props }: ComponentPro
         className={cn(
           "z-50 min-w-[190px] animate-pop-in rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop",
           "origin-(--radix-dropdown-menu-content-transform-origin)",
+          // Never taller than the room there is: a long menu scrolls instead of running off the window.
+          "max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto",
           className,
         )}
         {...props}
@@ -259,6 +283,7 @@ export function ContextMenuContent({ className, ...props }: ComponentProps<typeo
         collisionPadding={8}
         className={cn(
           "z-50 min-w-[200px] animate-pop-in rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop",
+          "max-h-(--radix-context-menu-content-available-height) overflow-y-auto",
           className,
         )}
         {...props}
@@ -335,7 +360,7 @@ export function MenuSubContent({ children }: { children: ReactNode }) {
       <DropdownMenu.SubContent
         sideOffset={4}
         collisionPadding={8}
-        className="z-50 min-w-[170px] animate-pop-in rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop"
+        className="z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[170px] animate-pop-in overflow-y-auto rounded-lg border border-line-strong bg-raised p-1 text-fg shadow-pop"
       >
         {children}
       </DropdownMenu.SubContent>

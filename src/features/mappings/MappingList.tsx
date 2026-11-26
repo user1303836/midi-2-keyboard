@@ -1,5 +1,7 @@
 import {
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   ChevronDown,
   Copy,
   CopyPlus,
@@ -22,7 +24,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Config } from "@/bindings/Config";
 import type { Mapping } from "@/bindings/Mapping";
 import type { Profile } from "@/bindings/Profile";
-import { Button, IconButton } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/inputs";
 import { Badge, Kbd } from "@/components/ui/misc";
 import {
@@ -37,7 +39,6 @@ import {
   Menu,
   MenuContent,
   MenuItem,
-  MenuSeparator,
   MenuTrigger,
   Tooltip,
 } from "@/components/ui/overlays";
@@ -123,13 +124,9 @@ const MappingRow = memo(function MappingRow({
 }) {
   const selectMapping = useApp((state) => state.selectMapping);
   const updateMapping = useApp((state) => state.updateMapping);
-  const removeMapping = useApp((state) => state.removeMapping);
-  const cloneMapping = useApp((state) => state.cloneMapping);
   // Only the device list (for friendly names), not the whole config.
   const devices = useApp((state) => state.config.devices);
   const octave = useOctave();
-  const toast = useApp((state) => state.toast);
-  const undo = useApp((state) => state.undo);
 
   const event = mapping.source.event;
   const qualifiers = sourceQualifiers(mapping.source, { devices } as Config);
@@ -163,11 +160,11 @@ const MappingRow = memo(function MappingRow({
         e.currentTarget.title = mappingSentence(mapping, useApp.getState().config, octave);
       }}
       className={cn(
-        "group relative flex min-h-[46px] cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 outline-hidden transition-colors",
+        "group relative flex min-h-[46px] cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 outline-hidden transition-colors [contain-intrinsic-size:auto_46px] [content-visibility:auto]",
         selected ? "border-accent-line bg-accent-soft" : "border-transparent hover:bg-hover focus-visible:border-accent-line",
         menuTarget && !selected && "border-line-strong bg-hover",
         dragging && "opacity-40",
-        dropBefore && "before:absolute before:-top-[3px] before:right-2 before:left-2 before:h-[2px] before:rounded-full before:bg-accent",
+        dropBefore && "shadow-[0_-2px_0_0_var(--accent)]",
       )}
     >
       {draggable && (
@@ -241,39 +238,33 @@ const MappingRow = memo(function MappingRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <Tooltip content={mapping.enabled ? "Enabled" : "Disabled"}>
-          <span className="flex">
-            <Switch
-              tone="midi"
-              aria-label="Enabled"
-              checked={mapping.enabled}
-              onChange={(enabled) => updateMapping(mapping.id, (m) => ({ ...m, enabled }))}
-            />
-          </span>
-        </Tooltip>
-        <Menu>
-          <MenuTrigger asChild>
-            <IconButton label="More" size="sm" className="opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 focus-visible:opacity-100">
-              <MoreHorizontal size={15} />
-            </IconButton>
-          </MenuTrigger>
-          <MenuContent>
-            <MenuItem icon={<Copy size={14} />} onSelect={() => cloneMapping(mapping.id)}>
-              Duplicate
-            </MenuItem>
-            <MenuSeparator />
-            <MenuItem
-              tone="danger"
-              icon={<Trash2 size={14} />}
-              onSelect={() => {
-                removeMapping(mapping.id);
-                toast("Mapping deleted", { action: { label: "Undo", run: undo } });
-              }}
-            >
-              Delete
-            </MenuItem>
-          </MenuContent>
-        </Menu>
+        <span className="flex" title={mapping.enabled ? "Enabled" : "Disabled"}>
+          <Switch
+            tone="midi"
+            aria-label="Enabled"
+            checked={mapping.enabled}
+            onChange={(enabled) => updateMapping(mapping.id, (m) => ({ ...m, enabled }))}
+          />
+        </span>
+        {/* Opens the list's one right-click menu, anchored under the button. */}
+        <button
+          type="button"
+          aria-label="More"
+          aria-haspopup="menu"
+          title="More"
+          className={cn(
+            "inline-flex size-[24px] items-center justify-center rounded-md text-fg-muted opacity-0 outline-hidden transition-opacity group-hover:opacity-100 hover:bg-hover hover:text-fg focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent",
+            menuTarget && "opacity-100",
+          )}
+          onClick={(e) => {
+            const box = e.currentTarget.getBoundingClientRect();
+            e.currentTarget.dispatchEvent(
+              new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom + 4 }),
+            );
+          }}
+        >
+          <MoreHorizontal size={15} />
+        </button>
       </div>
     </div>
   );
@@ -443,7 +434,13 @@ export function MappingList({ profile }: { profile: Profile }) {
           {dropIndex === visible.length && dragId && <div className="mx-2 h-[2px] rounded-full bg-accent" />}
         </div>
           </ContextMenuTrigger>
-          <ContextMenuContent>
+          <ContextMenuContent
+            onCloseAutoFocus={(event) => {
+              if (!menu.id) return;
+              event.preventDefault();
+              document.querySelector<HTMLElement>(`[data-mapping-id="${CSS.escape(menu.id)}"]`)?.focus();
+            }}
+          >
             {menuMapping ? (
               <RowMenu mapping={menuMapping} otherProfiles={otherProfiles} />
             ) : (
@@ -467,6 +464,9 @@ export function MappingList({ profile }: { profile: Profile }) {
 function RowMenu({ mapping, otherProfiles }: { mapping: Mapping; otherProfiles: Profile[] }) {
   const act = useApp.getState;
   const undoable = (message: string) => act().toast(message, { action: { label: "Undo", run: act().undo } });
+  const siblings = act().config.profiles.find((p) => p.mappings.some((m) => m.id === mapping.id))?.mappings ?? [];
+  const index = siblings.findIndex((m) => m.id === mapping.id);
+  const searching = act().search !== "";
   return (
     <>
       <ContextMenuItem icon={<Pencil size={14} />} shortcut="Enter" onSelect={() => act().selectMapping(mapping.id)}>
@@ -481,6 +481,26 @@ function RowMenu({ mapping, otherProfiles }: { mapping: Mapping; otherProfiles: 
       >
         {mapping.enabled ? "Disable" : "Enable"}
       </ContextMenuItem>
+      {!searching && siblings.length > 1 && (
+        <>
+          <ContextMenuItem
+            icon={<ArrowUp size={14} />}
+            shortcut="Alt+↑"
+            disabled={index <= 0}
+            onSelect={() => act().moveMapping(mapping.id, index - 1)}
+          >
+            Move up
+          </ContextMenuItem>
+          <ContextMenuItem
+            icon={<ArrowDown size={14} />}
+            shortcut="Alt+↓"
+            disabled={index >= siblings.length - 1}
+            onSelect={() => act().moveMapping(mapping.id, index + 1)}
+          >
+            Move down
+          </ContextMenuItem>
+        </>
+      )}
       {otherProfiles.length > 0 && (
         <>
           <ContextMenuSeparator />

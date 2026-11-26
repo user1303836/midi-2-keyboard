@@ -180,7 +180,7 @@ export function KeyComboInput({
           </span>
         )}
         {capturing && shown.length > 0 && live.length === 0 && (
-          <span className="ml-1 text-sm text-key">press new keys…</span>
+          <span className="ml-1 text-sm text-key">press new keys… · Esc cancels</span>
         )}
         {!capturing && escNote && (
           <span className="ml-1 text-sm text-fg-muted">To send Esc itself, pick it from the list →</span>

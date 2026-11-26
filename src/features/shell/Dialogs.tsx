@@ -314,7 +314,9 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               {port?.state === "error" && (
                 <div className="mt-2 flex gap-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
                   <AlertTriangle size={14} className="mt-[1px] shrink-0" />
-                  <span className="selectable">{port.error || "The device could not be opened."} It is retried automatically.</span>
+                  <span className="selectable">
+                    {(port.error || "The device could not be opened").trim().replace(/[.!]?$/, ".")} It is retried automatically.
+                  </span>
                 </div>
               )}
             </div>

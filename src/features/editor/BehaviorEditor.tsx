@@ -347,7 +347,7 @@ export function BehaviorEditor({
                 onChange={(down, key) => onChange({ ...b, fast: { ...b.fast!, down } }, key && `fdown:${key}`)}
               />
               <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
-                Fast means at least
+                Counts as fast when one message jumps
                 <NumberInput
                   aria-label="Steps that count as fast"
                   className="w-[60px]"
@@ -356,7 +356,12 @@ export function BehaviorEditor({
                   value={b.fast.ticks}
                   onChange={(ticks) => onChange({ ...b, fast: { ...b.fast!, ticks } }, "fticks")}
                 />
-                steps in one message. The fast action then fires once instead of the normal one per step.
+                steps or more: the fast action then fires once, instead of the normal one per step.
+              </div>
+              <div className="text-sm leading-snug text-fg-faint">
+                A direction left empty keeps its normal action.
+                {shape === "relative" &&
+                  " An encoder only ever jumps several steps at once when its acceleration is switched on (on the controller)."}
               </div>
             </div>
           )}

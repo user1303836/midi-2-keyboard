@@ -42,8 +42,9 @@ const HOW_TO_REOPEN: &str = if cfg!(target_os = "macos") {
     "Click its icon in the menu bar (or in the Dock) to open it again, or choose Quit in that menu \
      to exit."
 } else if cfg!(windows) {
-    "Click its icon in the notification area to open it again, or right-click the icon and choose \
-     Quit to exit."
+    "Click its icon in the notification area (it may be tucked away behind the ^ arrow) to open it \
+     again, or simply start MIDI 2 Keyboard once more. To exit, right-click the icon and choose \
+     Quit."
 } else {
     "Choose \"Open MIDI 2 Keyboard\" in the menu of its icon on the panel to open it again, or Quit \
      there to exit."

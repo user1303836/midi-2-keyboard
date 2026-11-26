@@ -63,6 +63,25 @@ const TARGET_ICONS: Record<HoldTarget["type"], ReactNode> = {
 };
 
 /** The compact "what kind of thing is this" button at the end of an action row. */
+/** What the engine fills in while typing text, with what each one stands for. */
+const TEXT_PLACEHOLDERS: [string, string][] = [
+  ["value", "The value of the message: a knob's position, a note's velocity, a program number"],
+  ["note", "The note number, e.g. 60"],
+  ["note_name", "The note name, e.g. C4"],
+  ["velocity", "How hard the note was hit, 1–127"],
+  ["channel", "The MIDI channel, 1–16"],
+  ["controller", "The controller number of a control change"],
+];
+
+function unknownPlaceholders(text: string): string[] {
+  const known = new Set(TEXT_PLACEHOLDERS.map(([name]) => name));
+  const found = new Set<string>();
+  for (const match of text.matchAll(/\{([a-z_]+)\}/gi)) {
+    if (!known.has(match[1])) found.add(match[1]);
+  }
+  return [...found].slice(0, 3);
+}
+
 function TypeMenu({
   label,
   icon,
@@ -437,9 +456,29 @@ export function ActionEditor({
             value={action.char_delay_ms}
             onChange={(char_delay_ms) => onChange({ ...action, char_delay_ms }, "chardelay")}
           />
-          <span title="Replaced with data from the MIDI message that triggered the action">
-            Placeholders: {"{value} {note} {note_name} {velocity} {channel}"}
-          </span>
+        </div>
+      )}
+      {action.type === "text" && (
+        <div className="flex flex-col gap-1 text-sm text-fg-faint">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="mr-0.5">Insert from the MIDI message:</span>
+            {TEXT_PLACEHOLDERS.map(([name, meaning]) => (
+              <button
+                key={name}
+                type="button"
+                title={meaning}
+                className="rounded border border-line-strong bg-app px-1 font-mono text-xs text-fg-muted hover:border-accent hover:text-fg"
+                onClick={() => onChange({ ...action, text: `${action.text}{${name}}` })}
+              >
+                {`{${name}}`}
+              </button>
+            ))}
+          </div>
+          {unknownPlaceholders(action.text).map((name) => (
+            <div key={name} className="text-warn">
+              {`{${name}}`} is not a placeholder — it is typed exactly as written.
+            </div>
+          ))}
         </div>
       )}
     </div>

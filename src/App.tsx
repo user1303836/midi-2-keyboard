@@ -33,6 +33,22 @@ function useTheme() {
   }, [theme]);
 }
 
+/** The mapping whose row holds the keyboard focus, if any. */
+function focusedMappingId(): string | null {
+  const row = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-mapping-id]");
+  return row?.dataset.mappingId ?? null;
+}
+
+/** Moves the keyboard focus to a mapping's row (once it is rendered) and brings it into view. */
+function focusMappingRow(id: string | null | undefined) {
+  if (!id) return;
+  requestAnimationFrame(() => {
+    const row = document.querySelector<HTMLElement>(`[data-mapping-id="${CSS.escape(id)}"]`);
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "nearest" });
+  });
+}
+
 /** App-wide keyboard shortcuts. Key capture fields stop propagation, so they are never in conflict. */
 function useShortcuts() {
   useEffect(() => {
@@ -77,28 +93,52 @@ function useShortcuts() {
       } else if (mod && key === "f") {
         event.preventDefault();
         document.querySelector<HTMLInputElement>('input[aria-label="Search mappings"]')?.focus();
-      } else if (mod && key === "d" && state.selectedMappingId && !typing) {
+      } else if (mod && key === "d" && (focusedMappingId() ?? state.selectedMappingId) && !typing) {
         event.preventDefault();
-        state.cloneMapping(state.selectedMappingId);
+        state.cloneMapping((focusedMappingId() ?? state.selectedMappingId)!);
+        focusMappingRow(useApp.getState().selectedMappingId);
       } else if (!mod && document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) {
         // A dialog or menu is open: single-key shortcuts belong to it, not to the list behind it.
         return;
       } else if (!mod && !event.altKey && key === "n" && !typing && state.panel === "none") {
         event.preventDefault();
         state.startWizard();
-      } else if ((key === "delete" || key === "backspace") && state.selectedMappingId && !typing && state.panel === "none") {
+      } else if (
+        (key === "delete" || key === "backspace") &&
+        (focusedMappingId() ?? state.selectedMappingId) &&
+        !typing &&
+        state.panel === "none"
+      ) {
         if ((event.target as HTMLElement | null)?.closest("[data-radix-popper-content-wrapper],[role=dialog]")) return;
         event.preventDefault();
-        state.removeMapping(state.selectedMappingId);
+        // The row with the focus ring is the one that goes; the focus moves on to its neighbor.
+        const id = (focusedMappingId() ?? state.selectedMappingId)!;
+        const siblings = state.config.profiles.find((p) => p.mappings.some((m) => m.id === id))?.mappings ?? [];
+        const at = siblings.findIndex((m) => m.id === id);
+        state.removeMapping(id);
         state.toast("Mapping deleted", { action: { label: "Undo", run: state.undo } });
+        focusMappingRow((siblings[at + 1] ?? siblings[at - 1])?.id);
       } else if ((key === "arrowdown" || key === "arrowup") && !typing && state.panel === "none") {
         const profile = state.config.profiles.find((p) => p.id === state.viewProfileId);
         if (!profile || profile.mappings.length === 0) return;
         if ((event.target as HTMLElement | null)?.closest("aside,[role=dialog],[role=menu],[role=listbox],[role=radiogroup]")) return;
         event.preventDefault();
-        const index = profile.mappings.findIndex((m) => m.id === state.selectedMappingId);
-        const next = index < 0 ? 0 : Math.min(profile.mappings.length - 1, Math.max(0, index + (key === "arrowdown" ? 1 : -1)));
+        // Start from the row with the focus ring; selection and focus then travel together.
+        const from = focusedMappingId() ?? state.selectedMappingId;
+        const index = profile.mappings.findIndex((m) => m.id === from);
+        const step = key === "arrowdown" ? 1 : -1;
+        if (event.altKey) {
+          // Alt+arrows carry the mapping along (not while a search hides part of the list).
+          if (index < 0 || state.search !== "") return;
+          const to = index + step;
+          if (to < 0 || to >= profile.mappings.length) return;
+          state.moveMapping(profile.mappings[index].id, to);
+          focusMappingRow(profile.mappings[index].id);
+          return;
+        }
+        const next = index < 0 ? 0 : Math.min(profile.mappings.length - 1, Math.max(0, index + step));
         state.selectMapping(profile.mappings[next].id);
+        focusMappingRow(profile.mappings[next].id);
       }
     };
     window.addEventListener("keydown", onKeyDown);

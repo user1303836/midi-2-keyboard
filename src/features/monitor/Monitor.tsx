@@ -34,7 +34,7 @@ export function outcomeText(outcome: Outcome): string | null {
   if (outcome.type === "failed") return `failed: ${outcome.error}`;
   const base = SKIP_TEXT[outcome.reason] ?? outcome.reason;
   // The engine may say exactly which condition was not met / how long the rate limit still runs.
-  return outcome.detail ? `${base}: ${outcome.detail}` : base;
+  return outcome.detail ? `${base}: ${outcome.detail.replace(/"([^"]*)"/g, "“$1”")}` : base;
 }
 
 function mappingLabel(id: string): string {
@@ -509,7 +509,7 @@ export function MonitorPanel() {
 export function LastEvent() {
   const octave = useOctave();
   const config = useApp((state) => state.config);
-  type Result = { mappingId: string; text: string; sent: boolean; note: string | null };
+  type Result = { mappingId: string; text: string; sent: boolean; note: string | null; earlier?: boolean };
   const [shown, setShown] = useState<{ midi: MidiLog; fired: Result | null } | null>(null);
 
   useEffect(() => {
@@ -520,7 +520,8 @@ export function LastEvent() {
       setShown((current) => ({
         midi: log,
         // The same control's last result stays through its release or the rest of a knob turn.
-        fired: current?.fired && log.mappings.includes(current.fired.mappingId) ? current.fired : null,
+        fired:
+          current?.fired && log.mappings.includes(current.fired.mappingId) ? { ...current.fired, earlier: true } : null,
       }));
     });
     const offFired = onFired((log) => {
@@ -560,8 +561,13 @@ export function LastEvent() {
       {fired && (
         <>
           <ArrowRight size={12} className="shrink-0 text-fg-faint" />
-          <span className={cn("truncate font-medium", fired.sent ? "text-key" : "text-fg-faint")}>{fired.text}</span>
-          {fired.note && <span className="truncate text-fg-faint">({fired.note})</span>}
+          <span
+            className={cn("truncate font-medium", fired.sent && !fired.earlier ? "text-key" : "text-fg-faint")}
+            title={fired.earlier ? "What this control did last — this message itself sent nothing new" : undefined}
+          >
+            {fired.text}
+          </span>
+          {fired.note && !fired.earlier && <span className="truncate text-fg-faint">({fired.note})</span>}
         </>
       )}
       {!fired && midi.mappings.length === 0 && (
