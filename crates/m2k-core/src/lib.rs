@@ -8,7 +8,7 @@ pub mod runtime;
 pub mod store;
 
 pub use app::{AppInfo, RuntimeEvent, Snapshot};
-pub use runtime::Runtime;
+pub use runtime::{Runtime, RuntimeOptions};
 pub use engine::{Engine, EngineOptions};
 pub use events::{EngineEvent, EngineStatus, FiredLog, MidiLog, Outcome, SkipReason};
 pub use model::*;

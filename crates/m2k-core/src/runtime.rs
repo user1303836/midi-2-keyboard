@@ -43,6 +43,8 @@ struct Pending {
 
 struct Inner {
     path: PathBuf,
+    /// Never build a real injector (see [`RuntimeOptions::dry_run`]).
+    dry_run: bool,
     sink: Box<Sink>,
     config: Mutex<Config>,
     engine: Engine,
@@ -64,7 +66,18 @@ pub struct Runtime {
     inner: Arc<Inner>,
 }
 
-fn make_injector(config: &Config) -> (Box<dyn Injector>, String) {
+/// How [`Runtime::start_with`] runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeOptions {
+    /// Run everything (MIDI input, matching, behaviors, monitor events) but never send input to
+    /// the OS: the engine always gets a [`NullInjector`], also after injector settings change.
+    pub dry_run: bool,
+}
+
+fn make_injector(config: &Config, dry_run: bool) -> (Box<dyn Injector>, String) {
+    if dry_run {
+        return (Box::new(NullInjector), String::new());
+    }
     match m2k_output::create_injector(&config.settings.injector) {
         Ok(injector) => (injector, String::new()),
         Err(error) => (Box::new(NullInjector), error.to_string()),
@@ -101,6 +114,15 @@ impl Runtime {
     /// Loads the config at `path` and starts everything. `sink` receives live updates from
     /// background threads.
     pub fn start(path: &Path, sink: impl Fn(RuntimeEvent) + Send + Sync + 'static) -> Runtime {
+        Self::start_with(path, RuntimeOptions::default(), sink)
+    }
+
+    /// [`start`](Self::start) with options (e.g. a dry run that never sends input to the OS).
+    pub fn start_with(
+        path: &Path,
+        options: RuntimeOptions,
+        sink: impl Fn(RuntimeEvent) + Send + Sync + 'static,
+    ) -> Runtime {
         let loaded = store::load(path);
         let config = loaded.config;
         if loaded.created {
@@ -109,7 +131,7 @@ impl Runtime {
                 log::warn!("could not write the initial config: {error}");
             }
         }
-        let (injector, backend_error) = make_injector(&config);
+        let (injector, backend_error) = make_injector(&config, options.dry_run);
 
         let inner = Arc::new_cyclic(|weak: &Weak<Inner>| {
             let for_engine = weak.clone();
@@ -124,6 +146,7 @@ impl Runtime {
             );
             Inner {
                 path: path.to_path_buf(),
+                dry_run: options.dry_run,
                 sink: Box::new(sink),
                 config: Mutex::new(config.clone()),
                 engine,
@@ -392,7 +415,7 @@ impl Inner {
     }
 
     fn rebuild_injector(&self, config: &Config) {
-        let (injector, error) = make_injector(config);
+        let (injector, error) = make_injector(config, self.dry_run);
         self.engine.set_injector(injector);
         *lock(&self.backend_error) = error;
         self.publish_permissions();
@@ -419,7 +442,7 @@ impl Inner {
         if broken {
             // No working backend yet: try again (the user may just have granted access).
             let config = lock(&self.config).clone();
-            let (injector, error) = make_injector(&config);
+            let (injector, error) = make_injector(&config, self.dry_run);
             if error.is_empty() {
                 self.engine.set_injector(injector);
             }
