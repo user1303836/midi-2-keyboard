@@ -217,6 +217,7 @@ export function BehaviorSummary({ behavior }: { behavior: Behavior }) {
               ["1×", b.single],
               ["2×", b.double],
               ["3×", b.triple],
+              ["long", b.hold],
             ] as const
           )
             .filter(([, action]) => action)

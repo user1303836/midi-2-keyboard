@@ -125,6 +125,7 @@ export function sourceQualifiers(source: Source, config: Config | null): string[
   }
   if (event.type === "chord" && event.window_ms > 0) parts.push(`within ${event.window_ms} ms`);
   if (source.hysteresis > 0 && !isFullRange(event)) parts.push(`slack ${source.hysteresis}`);
+  if (source.debounce_ms > 0) parts.push(`debounce ${source.debounce_ms} ms`);
   if (source.device) parts.push(deviceLabel(source.device, config));
   return parts;
 }
@@ -211,6 +212,7 @@ export function actionText(action: Action | null, config: Config | null = null):
     case "switch_profile":
       if (action.target.type === "next") return "next profile";
       if (action.target.type === "previous") return "previous profile";
+      if (action.target.type === "by_value") return "profile picked by the value";
       {
         const id = action.target.id;
         const profile = config?.profiles.find((p) => p.id === id);
@@ -309,6 +311,7 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
         b.single && `single: ${actionText(b.single, config)}`,
         b.double && `double: ${actionText(b.double, config)}`,
         b.triple && `triple: ${actionText(b.triple, config)}`,
+        b.hold && `long press: ${actionText(b.hold, config)}`,
       ]
         .filter(Boolean)
         .join("; ");

@@ -197,6 +197,7 @@ fn sanitize_mapping(mapping: &mut Mapping) {
         mapping.source.device = None;
     }
     mapping.source.hysteresis = mapping.source.hysteresis.min(8_191);
+    mapping.source.debounce_ms = mapping.source.debounce_ms.min(2_000);
     match &mut mapping.source.event {
         SourceEvent::Note { notes, velocity } => {
             sanitize_range(notes, 127);
@@ -252,7 +253,10 @@ fn sanitize_mapping(mapping: &mut Mapping) {
     }
     match &mut mapping.behavior {
         Behavior::TapHold { hold_ms, .. } => *hold_ms = (*hold_ms).clamp(50, 10_000),
-        Behavior::MultiTap { window_ms, .. } => *window_ms = (*window_ms).clamp(50, 5_000),
+        Behavior::MultiTap { window_ms, hold_ms, .. } => {
+            *window_ms = (*window_ms).clamp(50, 5_000);
+            *hold_ms = (*hold_ms).clamp(100, 10_000);
+        }
         Behavior::Step { step, .. } => *step = (*step).max(1),
         Behavior::Trigger { repeat: Some(repeat), .. } => {
             repeat.interval_ms = repeat.interval_ms.max(5);

@@ -115,7 +115,7 @@ export class Learner {
   private chordResult(): LearnResult {
     const chord = this.chord!;
     const notes = [...chord.notes].sort((a, b) => a - b);
-    const base = { device: this.device(chord.device), channel: chord.channel, hysteresis: 0 };
+    const base = { device: this.device(chord.device), channel: chord.channel, hysteresis: 0, debounce_ms: 0 };
     if (notes.length === 1) {
       return {
         source: { ...base, event: { type: "note", notes: { min: notes[0], max: notes[0] }, velocity: { min: 1, max: 127 } } },
@@ -174,7 +174,7 @@ export class Learner {
         return pulse(
           {
             device: this.device(log.device),
-            channel: message.channel, hysteresis: 0,
+            channel: message.channel, hysteresis: 0, debounce_ms: 0,
             event: { type: "note", notes: { min: message.note, max: message.note }, velocity: { min: 1, max: 127 } },
           },
           message.channel === 10 ? "a pad" : "a key",
@@ -186,7 +186,7 @@ export class Learner {
         return pulse(
           {
             device: this.device(log.device),
-            channel: message.channel, hysteresis: 0,
+            channel: message.channel, hysteresis: 0, debounce_ms: 0,
             event: { type: "program_change", programs: { min: message.program, max: message.program } },
           },
           "a program change",
@@ -194,7 +194,7 @@ export class Learner {
       case "pitch_bend":
         if (this.cc) return;
         return pulse(
-          { device: this.device(log.device), channel: message.channel, hysteresis: 0, event: { type: "pitch_bend", range: { ...FULL14 } } },
+          { device: this.device(log.device), channel: message.channel, hysteresis: 0, debounce_ms: 0, event: { type: "pitch_bend", range: { ...FULL14 } } },
           "the pitch wheel",
         );
       case "channel_pressure":
@@ -202,14 +202,14 @@ export class Learner {
         return pulse(
           {
             device: this.device(log.device),
-            channel: message.channel, hysteresis: 0,
+            channel: message.channel, hysteresis: 0, debounce_ms: 0,
             event: { type: "channel_pressure", range: { min: 1, max: 127 } },
           },
           "aftertouch",
         );
       case "sys_ex":
         return pulse(
-          { device: this.device(log.device), channel: null, hysteresis: 0, event: { type: "sys_ex", pattern: bytesToHex(message.data) } },
+          { device: this.device(log.device), channel: null, hysteresis: 0, debounce_ms: 0, event: { type: "sys_ex", pattern: bytesToHex(message.data) } },
           "a SysEx message",
         );
       case "start":
@@ -218,14 +218,14 @@ export class Learner {
       case "tune_request":
       case "reset":
         return pulse(
-          { device: this.device(log.device), channel: null, hysteresis: 0, event: { type: "system", message: message.type } },
+          { device: this.device(log.device), channel: null, hysteresis: 0, debounce_ms: 0, event: { type: "system", message: message.type } },
           "a transport button",
         );
       case "song_select":
         return pulse(
           {
             device: this.device(log.device),
-            channel: null, hysteresis: 0,
+            channel: null, hysteresis: 0, debounce_ms: 0,
             event: { type: "song_select", songs: { min: message.song, max: message.song } },
           },
           "a song select",
@@ -241,7 +241,7 @@ export class Learner {
     const p = this.param!;
     const source: Source = {
       device: this.device(p.device),
-      channel: p.channel, hysteresis: 0,
+      channel: p.channel, hysteresis: 0, debounce_ms: 0,
       event: { type: p.kind, number: p.number, range: p.hires ? { ...FULL14 } : { ...FULL7 }, hires: p.hires },
     };
     return { source, shape: "continuous", what: `${p.kind.toUpperCase()} parameter ${p.number}` };
@@ -293,7 +293,7 @@ export class Learner {
 
   private classify(candidate: CcCandidate): LearnResult {
     const { device, channel, controller, values } = candidate;
-    const base = { device: this.device(device), channel, hysteresis: 0 };
+    const base = { device: this.device(device), channel, hysteresis: 0, debounce_ms: 0 };
     const name = ccName(controller);
 
     if (controller < 32 && candidate.partnerHits >= Math.max(2, values.length - 1)) {

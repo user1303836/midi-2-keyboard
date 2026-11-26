@@ -211,7 +211,7 @@ export const BEHAVIOR_TYPES: BehaviorTypeInfo[] = [
   {
     type: "multi_tap",
     label: "Multi-tap",
-    hint: "Different actions for single, double and triple press",
+    hint: "Different actions for single, double and triple press — and a long press",
     fits: ["button", "pulse"],
   },
   {
@@ -243,7 +243,7 @@ export function primaryAction(behavior: Behavior): Action | null {
     case "tap_hold":
       return behavior.tap ?? behavior.hold ?? (behavior.hold_target ? targetToAction(behavior.hold_target) : null);
     case "multi_tap":
-      return behavior.single ?? behavior.double ?? behavior.triple;
+      return behavior.single ?? behavior.double ?? behavior.triple ?? behavior.hold;
     case "change":
       return behavior.action;
     case "step":
@@ -285,7 +285,7 @@ export function defaultBehavior(type: BehaviorType, previous?: Behavior): Behavi
     case "tap_hold":
       return { type, tap: action, hold: emptyKeys(), hold_target: null, hold_ms: 350 };
     case "multi_tap":
-      return { type, single: action, double: emptyKeys(), triple: null, window_ms: 300 };
+      return { type, single: action, double: emptyKeys(), triple: null, window_ms: 300, hold: null, hold_ms: 500 };
     case "change":
       return { type, action };
     case "step":
@@ -457,7 +457,7 @@ export function defaultRateLimit(): RateLimit {
 // ---------------------------------------------------------------------------------------------
 
 export function newSource(event: SourceEvent = defaultSourceEvent("note")): Source {
-  return { device: null, channel: null, event, hysteresis: 0 };
+  return { device: null, channel: null, event, hysteresis: 0, debounce_ms: 0 };
 }
 
 export function newMapping(source: Source = newSource(), behavior?: Behavior): Mapping {
@@ -530,6 +530,7 @@ export function knownLayers(config: Config): string[] {
           visitAction(b.single);
           visitAction(b.double);
           visitAction(b.triple);
+          visitAction(b.hold);
           break;
         case "change":
           visitAction(b.action);

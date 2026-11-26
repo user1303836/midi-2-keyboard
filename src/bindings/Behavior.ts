@@ -9,7 +9,7 @@ import type { Repeat } from "./Repeat";
  * "Press" below means the source becoming active, "release" means it becoming inactive
  * (see the module docs). Pulse sources press and release in the same instant.
  */
-export type Behavior = { "type": "trigger", on_press: Action | null, on_release: Action | null, repeat: Repeat | null, } | { "type": "hold", target: HoldTarget, auto_repeat: boolean, } | { "type": "toggle", target: HoldTarget, } | { "type": "cycle", actions: Array<Action>, reset_after_ms: number | null, } | { "type": "tap_hold", tap: Action | null, hold: Action | null, hold_target: HoldTarget | null, hold_ms: number, } | { "type": "multi_tap", single: Action | null, double: Action | null, triple: Action | null, window_ms: number, } | { "type": "change", action: Action, } | { "type": "step", up: Action | null, down: Action | null, step: number, max_burst: number, 
+export type Behavior = { "type": "trigger", on_press: Action | null, on_release: Action | null, repeat: Repeat | null, } | { "type": "hold", target: HoldTarget, auto_repeat: boolean, } | { "type": "toggle", target: HoldTarget, } | { "type": "cycle", actions: Array<Action>, reset_after_ms: number | null, } | { "type": "tap_hold", tap: Action | null, hold: Action | null, hold_target: HoldTarget | null, hold_ms: number, } | { "type": "multi_tap", single: Action | null, double: Action | null, triple: Action | null, window_ms: number, hold: Action | null, hold_ms: number, } | { "type": "change", action: Action, } | { "type": "step", up: Action | null, down: Action | null, step: number, max_burst: number, 
 /**
  * Swap the directions.
  */

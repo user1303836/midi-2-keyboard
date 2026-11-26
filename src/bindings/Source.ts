@@ -20,4 +20,12 @@ channel: number | null, event: SourceEvent,
  * Applies to ranged, absolute sources (CC, 14-bit CC, NRPN/RPN, pitch bend, pressure, song
  * position); ignored by everything else. `0` = off.
  */
-hysteresis: number, };
+hysteresis: number, 
+/**
+ * Contact-bounce filter for switches, pedals and worn pads, in milliseconds. A press or
+ * release is taken immediately (no added latency); further press/release changes of the
+ * same source instance are then ignored for this long, and when that time is over the
+ * source is brought in line with the control's actual state (so a real, quick release is
+ * delayed, never lost). Applies to every behavior. `0` = off.
+ */
+debounce_ms: number, };

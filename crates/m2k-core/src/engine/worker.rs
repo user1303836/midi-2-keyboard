@@ -482,6 +482,8 @@ impl Worker {
 
     fn switch_profile(&mut self, target: &ProfileTarget, info: &OwnerInfo) {
         let index = match target {
+            // TODO(engine): pick the profile from the triggering value (new in the model).
+            ProfileTarget::ByValue => return,
             ProfileTarget::Profile { id } => match self.cfg.profile_index(id) {
                 Some(index) => index,
                 None => {

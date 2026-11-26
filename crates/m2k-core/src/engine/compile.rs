@@ -463,7 +463,9 @@ fn compile_mapping(
             hold_target: target.as_ref().map(hold_target),
             hold_ms: *hold_ms,
         },
-        Behavior::MultiTap { single, double, triple, window_ms } => {
+        // TODO(engine): `hold` / `hold_ms` (long press next to the tap counts) are new in the
+        // model and not acted on yet.
+        Behavior::MultiTap { single, double, triple, window_ms, .. } => {
             let actions =
                 [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
             let highest = actions.iter().rposition(Option::is_some).map_or(0, |i| i as u8 + 1);
@@ -605,6 +607,7 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             match target {
                 ProfileTarget::Next => "next profile".to_string(),
                 ProfileTarget::Previous => "previous profile".to_string(),
+                ProfileTarget::ByValue => "profile by value".to_string(),
                 ProfileTarget::Profile { id } => {
                     let name = profiles.iter().find(|p| &*p.id == id).map_or(id, |p| &p.name);
                     format!("switch to profile \"{name}\"")

@@ -275,6 +275,13 @@ pub struct Source {
     /// position); ignored by everything else. `0` = off.
     #[serde(default)]
     pub hysteresis: u16,
+    /// Contact-bounce filter for switches, pedals and worn pads, in milliseconds. A press or
+    /// release is taken immediately (no added latency); further press/release changes of the
+    /// same source instance are then ignored for this long, and when that time is over the
+    /// source is brought in line with the control's actual state (so a real, quick release is
+    /// delayed, never lost). Applies to every behavior. `0` = off.
+    #[serde(default)]
+    pub debounce_ms: u32,
 }
 
 /// How a controller encodes its value.
@@ -314,6 +321,13 @@ pub enum SourceEvent {
     /// 7-bit control change. With an absolute `encoding` the source is active while the value is
     /// inside `range`. With a relative encoding every message is a pulse whose value is a signed
     /// tick count (`range` is ignored).
+    ///
+    /// Press-only buttons: many foot switches and cheap pads send their "on" value on every
+    /// press and never a release. A real knob or fader never sends the same value twice in a
+    /// row, so for every absolute ranged source (CC, 14-bit CC, NRPN/RPN data, pressure, pitch
+    /// bend) an in-range message that **repeats the previous value** while the source is active
+    /// counts as a fresh press (release + press for `Trigger`, `Toggle`, `Cycle`, `TapHold` and
+    /// `MultiTap`; `Hold` stays held).
     ControlChange {
         controller: u8,
         range: ValueRange,
@@ -426,8 +440,16 @@ pub enum Behavior {
         hold_target: Option<HoldTarget>,
         hold_ms: u32,
     },
-    /// Single / double / triple press. The decision is made `window_ms` after the last press
-    /// (or immediately once the highest configured count is reached).
+    /// Single / double / triple press, and optionally a long press, on one control.
+    ///
+    /// Without `hold`: the decision is made `window_ms` after the last press (or immediately
+    /// once the highest configured count is reached).
+    ///
+    /// With `hold`: a press only counts as a tap when it is released before `hold_ms`; the
+    /// decision is made `window_ms` after the last such release (or immediately at the highest
+    /// configured count). A press that stays down for `hold_ms` fires `hold` once, right then,
+    /// and discards any taps counted so far — so a long press never also fires the single-press
+    /// action.
     MultiTap {
         #[serde(default)]
         single: Option<Action>,
@@ -436,6 +458,10 @@ pub enum Behavior {
         #[serde(default)]
         triple: Option<Action>,
         window_ms: u32,
+        #[serde(default)]
+        hold: Option<Action>,
+        #[serde(default = "default_hold_ms")]
+        hold_ms: u32,
     },
     /// Fire on every matching message (while the value is inside the source range). This is the
     /// natural behavior for "when I move this knob, do X"; combine with a rate limit.
@@ -462,6 +488,9 @@ pub enum Behavior {
 
 fn default_step() -> u16 {
     1
+}
+fn default_hold_ms() -> u32 {
+    500
 }
 fn default_max_burst() -> u16 {
     8
@@ -594,6 +623,10 @@ pub enum ProfileTarget {
     Next,
     Previous,
     Profile { id: String },
+    /// The triggering message's value picks the profile: value 0 = the first selectable (non
+    /// always-on) profile, 1 = the second, ... Values beyond the last profile do nothing. With
+    /// a "any program" Program Change source this makes program N select profile N.
+    ByValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

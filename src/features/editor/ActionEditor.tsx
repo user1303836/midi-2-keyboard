@@ -318,6 +318,12 @@ export function ActionEditor({
               options={[
                 { value: "next", label: "Next profile", group: "Relative" },
                 { value: "previous", label: "Previous profile", group: "Relative" },
+                {
+                  value: "by_value",
+                  label: "Picked by the value",
+                  hint: "Value 0 = first profile, 1 = second… (program N selects profile N)",
+                  group: "Relative",
+                },
                 ...profiles
                   .filter((p) => !p.always_on)
                   .map((p) => ({ value: `id:${p.id}`, label: p.name, group: "Profile" })),
@@ -326,7 +332,7 @@ export function ActionEditor({
                 onChange({
                   ...action,
                   target:
-                    value === "next" || value === "previous"
+                    value === "next" || value === "previous" || value === "by_value"
                       ? { type: value }
                       : { type: "profile", id: value.slice(3) },
                 })
