@@ -58,6 +58,10 @@ pub enum TimerKind {
     Repeat(u64),
     TapHold(u64),
     MultiTap(u64),
+    /// A multi-tap press reached `hold_ms`.
+    LongPress(u64),
+    /// A debounce window of one source instance ended.
+    Debounce(u64, super::source::InstKey),
     Limiter(u64, super::limiter::Slot),
     /// Key stagger of a hold engagement (owner key).
     Hold(u64),
@@ -80,7 +84,8 @@ pub enum TimerKind {
 /// Engine-wide changes requested by actions, applied after the current event.
 #[derive(Debug, Clone)]
 pub enum Request {
-    SwitchProfile(ProfileTarget, OwnerInfo),
+    /// With the index of the selectable profile to switch to, for `ProfileTarget::ByValue`.
+    SwitchProfile(ProfileTarget, OwnerInfo, Option<usize>),
     Engine(EngineOp),
 }
 
@@ -222,6 +227,8 @@ pub struct Cx {
     /// Something shown in the status snapshot changed.
     pub dirty: bool,
     pub launcher: Launcher,
+    /// Names of the selectable (not always-on) profiles, in order (`ProfileTarget::ByValue`).
+    pub selectable: Vec<String>,
     failures: FailureLog,
     /// Outbox index of the `Fired` event whose output is being sent right now: a backend
     /// failure turns that event's outcome into `Failed` instead of adding another event.
@@ -246,6 +253,7 @@ impl Cx {
             requests: Vec::new(),
             dirty: true,
             launcher,
+            selectable: Vec::new(),
             failures: FailureLog::default(),
             firing: None,
         }
@@ -373,8 +381,28 @@ impl Cx {
                 }
                 self.report(info, description, Outcome::Sent);
             }
+            ActionKind::SwitchProfile(ProfileTarget::ByValue) => {
+                // The triggering value picks the profile: 0 = the first selectable one.
+                let chosen = usize::try_from(ctx.value).ok().filter(|i| *i < self.selectable.len());
+                let Some(index) = chosen else {
+                    let error = format!(
+                        "value {} picks no profile (there are {} to choose from)",
+                        ctx.value,
+                        self.selectable.len()
+                    );
+                    self.report(info, description, Outcome::Failed { error });
+                    return false;
+                };
+                let description = format!("switch to profile \"{}\"", self.selectable[index]);
+                self.requests.push(Request::SwitchProfile(
+                    ProfileTarget::ByValue,
+                    info.clone(),
+                    Some(index),
+                ));
+                self.report(info, description, Outcome::Sent);
+            }
             ActionKind::SwitchProfile(target) => {
-                self.requests.push(Request::SwitchProfile(target.clone(), info.clone()));
+                self.requests.push(Request::SwitchProfile(target.clone(), info.clone(), None));
                 self.report(info, description, Outcome::Sent);
             }
             ActionKind::Unavailable(error) => {

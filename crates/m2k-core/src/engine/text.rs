@@ -66,6 +66,17 @@ impl TextTemplate {
         TextTemplate { parts }
     }
 
+    /// Characters of the literal parts plus a few per placeholder (for time estimates).
+    pub fn approx_chars(&self) -> usize {
+        self.parts
+            .iter()
+            .map(|part| match part {
+                Part::Lit(text) => text.chars().count(),
+                _ => 3,
+            })
+            .sum()
+    }
+
     /// `true` when the text contains no placeholder.
     pub fn is_literal(&self) -> bool {
         self.parts.iter().all(|p| matches!(p, Part::Lit(_)))

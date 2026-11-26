@@ -150,6 +150,7 @@ pub fn run(
     rx: Receiver<Envelope>,
 ) {
     let _resolution = TimerResolution::begin();
+    super::sys::raise_thread_priority();
     let mut worker = Worker::new(config, options, sink, shared, tx);
     loop {
         let received = match worker.cx.timers.next_deadline() {
@@ -284,6 +285,8 @@ impl Worker {
             TimerKind::Repeat(key)
             | TimerKind::TapHold(key)
             | TimerKind::MultiTap(key)
+            | TimerKind::LongPress(key)
+            | TimerKind::Debounce(key, _)
             | TimerKind::Limiter(key, _) => {
                 if let Some(&i) = self.by_key.get(&key) {
                     behavior::on_timer(
@@ -334,7 +337,9 @@ impl Worker {
                         self.set_gate(|g| g.paused = paused);
                     }
                     Request::Engine(EngineOp::ReleaseAll) => self.release_outputs(true),
-                    Request::SwitchProfile(target, info) => self.switch_profile(&target, &info),
+                    Request::SwitchProfile(target, info, chosen) => {
+                        self.switch_profile(&target, &info, chosen)
+                    }
                 }
             }
         }
@@ -403,6 +408,8 @@ impl Worker {
         self.maps = maps;
         self.by_key = self.maps.iter().enumerate().map(|(i, m)| (m.key, i)).collect();
         self.cx.settings = self.cfg.settings.clone();
+        self.cx.selectable =
+            self.cfg.profiles.iter().filter(|p| !p.always_on).map(|p| p.name.clone()).collect();
 
         self.profiles.selected = resolve_selected(&self.cfg, wanted.as_deref());
         self.refresh_candidate();
@@ -480,10 +487,17 @@ impl Worker {
         self.refresh_liveness(false);
     }
 
-    fn switch_profile(&mut self, target: &ProfileTarget, info: &OwnerInfo) {
+    fn switch_profile(&mut self, target: &ProfileTarget, info: &OwnerInfo, chosen: Option<usize>) {
         let index = match target {
-            // TODO(engine): pick the profile from the triggering value (new in the model).
-            ProfileTarget::ByValue => return,
+            ProfileTarget::ByValue => {
+                // `chosen` indexes the selectable profiles (resolved when the action fired).
+                let selectable =
+                    (0..self.cfg.profiles.len()).filter(|&i| !self.cfg.profiles[i].always_on);
+                match chosen.and_then(|n| selectable.into_iter().nth(n)) {
+                    Some(index) => index,
+                    None => return,
+                }
+            }
             ProfileTarget::Profile { id } => match self.cfg.profile_index(id) {
                 Some(index) => index,
                 None => {

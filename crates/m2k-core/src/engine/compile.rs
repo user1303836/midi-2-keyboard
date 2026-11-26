@@ -79,6 +79,10 @@ pub struct CSource {
     pub kind: CSourceKind,
     /// [`Source::hysteresis`] (0 for sources it does not apply to).
     pub hysteresis: u16,
+    /// A repeat of the same in-range value is a fresh press (press-only buttons).
+    pub presses_on_repeat: bool,
+    /// [`Source::debounce_ms`] (0 for sources it does not apply to).
+    pub debounce_ms: u32,
 }
 
 impl CSource {
@@ -197,6 +201,9 @@ pub enum CBehavior {
         actions: [Option<CAction>; 3],
         highest: u8,
         window_ms: u32,
+        /// The long-press action; with it, taps count on release.
+        hold: Option<CAction>,
+        hold_ms: u32,
     },
     Change {
         action: CAction,
@@ -226,6 +233,8 @@ pub type CAction = Arc<CompiledAction>;
 pub struct CompiledAction {
     pub kind: ActionKind,
     pub class: Class,
+    /// Roughly how long the action takes to play (its delays), in milliseconds.
+    pub est_ms: u32,
     label: String,
     /// Set when the label depends on the triggering message (text with placeholders).
     dynamic: Option<TextTemplate>,
@@ -241,6 +250,11 @@ impl CompiledAction {
     }
 
     /// The description without trigger data (for errors reported later).
+    /// Plays through the owner's action queue (OS output).
+    pub fn queues(&self) -> bool {
+        matches!(self.kind, ActionKind::Output(_))
+    }
+
     pub fn label(&self) -> &str {
         &self.label
     }
@@ -427,11 +441,25 @@ fn compile_mapping(
         | CSourceKind::SongPosition { .. } => true,
         _ => false,
     };
+    // Press-only buttons resend their "on" value: for these sources a repeated value presses.
+    let presses_on_repeat = match &kind {
+        CSourceKind::Cc { encoding, .. } => *encoding == ValueEncoding::Absolute,
+        CSourceKind::Cc14 { .. }
+        | CSourceKind::Param { .. }
+        | CSourceKind::PitchBend { .. }
+        | CSourceKind::ChannelPressure { .. }
+        | CSourceKind::PolyPressure { .. } => true,
+        _ => false,
+    };
+    // Debouncing filters press/release changes: notes, chords and ranged absolute values.
+    let gated = ranged || matches!(kind, CSourceKind::Note { .. } | CSourceKind::Chord { .. });
     let source = CSource {
         device: mapping.source.device.as_deref().filter(|d| !d.is_empty()).map(Box::from),
         channel: mapping.source.channel,
         kind,
         hysteresis: if ranged { mapping.source.hysteresis } else { 0 },
+        presses_on_repeat,
+        debounce_ms: if gated { mapping.source.debounce_ms } else { 0 },
     };
 
     let behavior = match &mapping.behavior {
@@ -463,13 +491,17 @@ fn compile_mapping(
             hold_target: target.as_ref().map(hold_target),
             hold_ms: *hold_ms,
         },
-        // TODO(engine): `hold` / `hold_ms` (long press next to the tap counts) are new in the
-        // model and not acted on yet.
-        Behavior::MultiTap { single, double, triple, window_ms, .. } => {
+        Behavior::MultiTap { single, double, triple, window_ms, hold, hold_ms } => {
             let actions =
                 [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
             let highest = actions.iter().rposition(Option::is_some).map_or(0, |i| i as u8 + 1);
-            CBehavior::MultiTap { actions, highest, window_ms: *window_ms }
+            CBehavior::MultiTap {
+                actions,
+                highest,
+                window_ms: *window_ms,
+                hold: hold.as_ref().map(act),
+                hold_ms: (*hold_ms).max(1),
+            }
         }
         Behavior::Change { action } => CBehavior::Change { action: act(action) },
         Behavior::Step { up, down, step, max_burst, invert } => CBehavior::Step {
@@ -656,7 +688,20 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             format!("open {}", shorten(target, 60)),
         ),
     };
-    Arc::new(CompiledAction { kind, class, label, dynamic })
+    let est_ms = match &kind {
+        ActionKind::Output(steps) => steps
+            .iter()
+            .map(|step| match step {
+                Prim::Wait(ms) => *ms,
+                Prim::Text { text, char_delay_ms } => {
+                    char_delay_ms.saturating_mul(text.approx_chars().saturating_sub(1) as u32)
+                }
+                _ => 0,
+            })
+            .fold(0u32, u32::saturating_add),
+        _ => 0,
+    };
+    Arc::new(CompiledAction { kind, class, est_ms, label, dynamic })
 }
 
 /// Downs in order (with stagger), hold for `tap_ms`, ups in reverse order (with stagger).

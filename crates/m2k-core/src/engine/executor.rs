@@ -47,6 +47,7 @@ struct Queue {
 struct Running {
     action: CAction,
     ctx: Ctx,
+    started: Instant,
     /// Next primitive step.
     pc: usize,
     /// Text being typed in pieces (one character at a time with `char_delay_ms`, or in chunks
@@ -113,6 +114,30 @@ impl Executor {
         self.queues.get(&owner).is_some_and(|q| !q.pending.is_empty())
     }
 
+    /// Drops queued (not yet started) actions of `owner` that `drop` selects.
+    pub fn drop_pending(&mut self, owner: u64, drop: impl Fn(&CAction) -> bool) {
+        if let Some(queue) = self.queues.get_mut(&owner) {
+            queue.pending.retain(|(action, _)| !drop(action));
+        }
+    }
+
+    /// Roughly how long, in milliseconds, it takes to play what `owner` has running and queued.
+    pub fn backlog_ms(&self, owner: u64, now: Instant) -> u32 {
+        let Some(queue) = self.queues.get(&owner) else {
+            return 0;
+        };
+        let gap = MIN_GAP_MS;
+        let running = queue.running.as_ref().map_or(0, |run| {
+            let elapsed = now.saturating_duration_since(run.started).as_millis();
+            run.action.est_ms.saturating_sub(u32::try_from(elapsed).unwrap_or(u32::MAX)) + gap
+        });
+        queue
+            .pending
+            .iter()
+            .map(|(action, _)| action.est_ms.saturating_add(gap))
+            .fold(running, u32::saturating_add)
+    }
+
     /// Rate limits queue overflow reports; `true` when this one should be reported.
     pub fn note_overflow(&mut self, owner: u64, now: Instant) -> bool {
         let Some(queue) = self.queues.get_mut(&owner) else {
@@ -131,7 +156,15 @@ impl Executor {
 
 impl Running {
     fn new(action: CAction, ctx: Ctx) -> Self {
-        Running { action, ctx, pc: 0, typing: None, keys: Vec::new(), buttons: Vec::new() }
+        Running {
+            action,
+            ctx,
+            started: Instant::now(),
+            pc: 0,
+            typing: None,
+            keys: Vec::new(),
+            buttons: Vec::new(),
+        }
     }
 }
 

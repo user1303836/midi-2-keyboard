@@ -55,7 +55,7 @@ impl Worker {
             return;
         }
         let was_active = !rt.instances.is_empty();
-        let Some(edge) = rt.observe(inst, obs, def.source.retriggers(), ctx) else {
+        let Some(edge) = rt.observe(def, &mut self.cx, inst, obs, ctx) else {
             return;
         };
         if !matched.iter().any(|id| id.as_str() == &*def.id) {

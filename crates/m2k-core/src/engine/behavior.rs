@@ -4,17 +4,22 @@
 //! channel its source matches). The table turns raw observations into edges:
 //!
 //! - `Press`: an instance became active; `Repress`: a note retriggered without a note off;
-//!   `Update`: an active continuous control moved inside its range; `Release`: an instance
-//!   became inactive; `Pulse`: press and release in one instant; `Ticks`: relative movement.
+//!   `Repeat`: a ranged control sent the value it already had (a press-only button pressed
+//!   again); `Update`: an active continuous control moved; `Release`: an instance became
+//!   inactive; `Pulse`: press and release in one instant; `Ticks`: relative movement.
+//! - With `debounce_ms`, the first press/release of an instance passes at once and further
+//!   ones are held back for that long; then the table catches up with the control's actual
+//!   state (a quick real release is delayed, never lost).
 //!
 //! Then the behavior decides what fires. Firings go through conditions (evaluated when
 //! something is about to fire or engage; releases always go through), the mapping's rate
 //! limiter (Trigger / Cycle / Change / Step), and gating (pause, focus, learning) in
 //! [`Cx::execute`] / [`Cx::engage`].
 
+use std::sync::Arc;
 use std::time::Instant;
 
-use super::compile::{CAction, CBehavior, CMapping, Class};
+use super::compile::{CAction, CBehavior, CMapping, CSource, Class};
 use super::cx::{Ctx, Cx, OwnerInfo, TimerKind};
 use super::limiter::{Admission, Limiter, SLOTS, Slot};
 use super::source::{DeviceId, InstKey, Obs};
@@ -24,10 +29,16 @@ use crate::events::SkipReason;
 /// Upper bound on the actions one message can fire through a `Step` with `max_burst: 0`.
 const MAX_STEPS_PER_MESSAGE: u32 = 256;
 
+/// A `Step` does not queue more output than can be played within this long: a fast spin
+/// should not leave seconds of key presses behind it.
+const STEP_BACKLOG_MS: u32 = 400;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Press,
     Repress,
+    /// A press-only button pressed again (the same in-range value once more).
+    Repeat,
     Update,
     Release,
     Pulse,
@@ -38,7 +49,12 @@ impl Edge {
     /// Counts as a press for Trigger / Toggle / Cycle (a retrigger counts, pulses count, every
     /// relative message counts once).
     fn is_press(self) -> bool {
-        matches!(self, Edge::Press | Edge::Repress | Edge::Pulse | Edge::Ticks(_))
+        matches!(self, Edge::Press | Edge::Repress | Edge::Repeat | Edge::Pulse | Edge::Ticks(_))
+    }
+
+    /// A press/release change of an instance (what debouncing filters).
+    fn is_gate(self) -> bool {
+        matches!(self, Edge::Press | Edge::Repress | Edge::Repeat | Edge::Release)
     }
 }
 
@@ -51,6 +67,16 @@ pub struct Inst {
 struct StepRef {
     last: i32,
     acc: i32,
+}
+
+/// Debounce window of one instance.
+struct Debounce {
+    key: InstKey,
+    until: Instant,
+    /// The control's actual state while the window holds the reported one: active (with its
+    /// latest data) or not.
+    actual: Option<Ctx>,
+    timer: Option<TimerId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,9 +112,15 @@ pub enum State {
         press: Ctx,
     },
     MultiTap {
+        /// Taps counted so far.
         count: u8,
+        /// Decides the count.
         timer: Option<TimerId>,
         last: Ctx,
+        /// With a long-press action: a press is down and `hold_ms` has not passed yet.
+        long: Option<TimerId>,
+        /// The long-press action fired for the press that is still down.
+        held: bool,
     },
     Plain,
 }
@@ -103,9 +135,13 @@ impl State {
             CBehavior::TapHold { .. } => {
                 State::TapHold { phase: TapPhase::Idle, press: Ctx::default() }
             }
-            CBehavior::MultiTap { .. } => {
-                State::MultiTap { count: 0, timer: None, last: Ctx::default() }
-            }
+            CBehavior::MultiTap { .. } => State::MultiTap {
+                count: 0,
+                timer: None,
+                last: Ctx::default(),
+                long: None,
+                held: false,
+            },
             CBehavior::Change { .. } | CBehavior::Step { .. } => State::Plain,
         }
     }
@@ -120,6 +156,7 @@ pub struct MappingRt {
     pub live: bool,
     pub instances: Vec<Inst>,
     step_refs: Vec<(InstKey, StepRef)>,
+    debounce: Vec<Debounce>,
     pub state: State,
     limiters: [Limiter; SLOTS],
     limit_reported: Option<Instant>,
@@ -137,6 +174,7 @@ impl MappingRt {
             live: false,
             instances: Vec::new(),
             step_refs: Vec::new(),
+            debounce: Vec::new(),
             state: State::initial(&def.behavior),
             limiters: Default::default(),
             limit_reported: None,
@@ -147,6 +185,7 @@ impl MappingRt {
     pub fn reset(&mut self, def: &CMapping) {
         self.instances.clear();
         self.step_refs.clear();
+        self.debounce.clear();
         self.state = State::initial(&def.behavior);
         self.limiters = Default::default();
         self.limit_reported = None;
@@ -162,13 +201,95 @@ impl MappingRt {
         }
     }
 
-    /// Applies an observation to the instance table and returns the resulting edge.
-    pub fn observe(&mut self, key: InstKey, obs: Obs, retriggers: bool, ctx: Ctx) -> Option<Edge> {
+    /// Applies an observation to the instance table (through the debounce filter when the
+    /// source has one) and returns the resulting edge.
+    pub fn observe(
+        &mut self,
+        def: &CMapping,
+        cx: &mut Cx,
+        key: InstKey,
+        obs: Obs,
+        ctx: Ctx,
+    ) -> Option<Edge> {
+        let source = &def.source;
+        let gate = matches!(obs, Obs::Active | Obs::Inactive | Obs::Level { .. });
+        if source.debounce_ms == 0 || !gate {
+            return self.apply(source, key, obs, ctx);
+        }
+        if let Some(pos) = self.debounce.iter().position(|d| d.key == key)
+            && cx.now < self.debounce[pos].until
+        {
+            // Inside the window: follow the control, report nothing but value changes of a
+            // control that stays held.
+            let actual = raw_state(self.debounce[pos].actual.is_some(), obs).then_some(ctx);
+            self.debounce[pos].actual = actual;
+            if actual.is_some()
+                && matches!(obs, Obs::Level { .. })
+                && let Some(inst) = self.instances.iter_mut().find(|i| i.key == key)
+                && inst.ctx.value != ctx.value
+            {
+                inst.ctx = ctx;
+                return Some(Edge::Update);
+            }
+            return None;
+        }
+        let edge = self.apply(source, key, obs, ctx)?;
+        if edge.is_gate() {
+            self.open_window(cx, source, key);
+        }
+        Some(edge)
+    }
+
+    /// Starts (or restarts) the debounce window of `key` at the reported state.
+    fn open_window(&mut self, cx: &mut Cx, source: &CSource, key: InstKey) {
+        let until = cx.now + Cx::ms(source.debounce_ms);
+        let actual = self.instances.iter().find(|i| i.key == key).map(|i| i.ctx);
+        let timer = cx.timers.schedule(until, TimerKind::Debounce(self.key, key));
+        match self.debounce.iter_mut().find(|d| d.key == key) {
+            Some(window) => {
+                cx.timers.cancel_slot(&mut window.timer);
+                window.until = until;
+                window.actual = actual;
+                window.timer = Some(timer);
+            }
+            None => self.debounce.push(Debounce { key, until, actual, timer: Some(timer) }),
+        }
+    }
+
+    /// A debounce window ended: if the control's actual state differs from the reported one,
+    /// returns the edge that catches up (and opens a new window for it).
+    pub fn debounce_expired(
+        &mut self,
+        def: &CMapping,
+        cx: &mut Cx,
+        key: InstKey,
+        id: TimerId,
+    ) -> Option<(Edge, Ctx)> {
+        let pos = self.debounce.iter().position(|d| d.key == key && d.timer == Some(id))?;
+        let window = self.debounce.swap_remove(pos);
+        let reported = self.instances.iter().position(|i| i.key == key);
+        let caught_up = match (reported, window.actual) {
+            (None, Some(ctx)) => {
+                self.instances.push(Inst { key, ctx });
+                (Edge::Press, ctx)
+            }
+            (Some(pos), None) => {
+                let ctx = self.instances.swap_remove(pos).ctx;
+                (Edge::Release, ctx)
+            }
+            _ => return None,
+        };
+        self.open_window(cx, &def.source, key);
+        Some(caught_up)
+    }
+
+    /// The instance table without debouncing.
+    fn apply(&mut self, source: &CSource, key: InstKey, obs: Obs, ctx: Ctx) -> Option<Edge> {
         match obs {
             Obs::Active => match self.instances.iter_mut().find(|i| i.key == key) {
                 Some(inst) => {
                     inst.ctx = ctx;
-                    Some(if retriggers { Edge::Repress } else { Edge::Update })
+                    Some(if source.retriggers() { Edge::Repress } else { Edge::Update })
                 }
                 None => {
                     self.instances.push(Inst { key, ctx });
@@ -182,8 +303,11 @@ impl MappingRt {
             }
             Obs::Level { inside, band } => match self.instances.iter().position(|i| i.key == key) {
                 Some(pos) if band => {
+                    let repeated = source.presses_on_repeat
+                        && inside
+                        && self.instances[pos].ctx.value == ctx.value;
                     self.instances[pos].ctx = ctx;
-                    Some(Edge::Update)
+                    Some(if repeated { Edge::Repeat } else { Edge::Update })
                 }
                 Some(pos) => {
                     self.instances.swap_remove(pos);
@@ -245,6 +369,33 @@ impl MappingRt {
 
     fn drop_ref(&mut self, key: InstKey) {
         self.step_refs.retain(|(k, _)| *k != key);
+    }
+
+    /// Forgets debounce windows (of one device, or all).
+    fn drop_windows(&mut self, cx: &mut Cx, device: Option<DeviceId>) {
+        self.debounce.retain_mut(|window| {
+            let drop = device.is_none_or(|d| window.key.device() == d);
+            if drop {
+                cx.timers.cancel_slot(&mut window.timer);
+            }
+            !drop
+        });
+    }
+}
+
+/// Whether the control is active after `obs`, given whether it was.
+fn raw_state(was_active: bool, obs: Obs) -> bool {
+    match obs {
+        Obs::Active => true,
+        Obs::Inactive => false,
+        Obs::Level { inside, band } => {
+            if was_active {
+                band
+            } else {
+                inside
+            }
+        }
+        Obs::Pulse | Obs::Ticks(_) => was_active,
     }
 }
 
@@ -374,9 +525,15 @@ pub fn on_edge(
     ctx: Ctx,
     was_active: bool,
 ) {
+    // A repeated value on the only active instance is a release and a new press of the
+    // mapping as a whole.
+    let only = rt.instances.len() == 1;
     match &def.behavior {
         CBehavior::Trigger { on_press, repeat, .. } => match edge {
-            Edge::Press | Edge::Repress => {
+            Edge::Press | Edge::Repress | Edge::Repeat => {
+                if edge == Edge::Repeat {
+                    fire(rt, def, cx, Slot::Release, ctx, false);
+                }
                 if let State::Trigger { last, .. } = &mut rt.state {
                     *last = ctx;
                 }
@@ -434,7 +591,8 @@ pub fn on_edge(
                     fire_direct(rt, def, cx, tap, ctx);
                 }
             }
-            Edge::Repress | Edge::Update => {}
+            // Held stays held.
+            Edge::Repress | Edge::Repeat | Edge::Update => {}
         },
 
         CBehavior::Toggle { target } => {
@@ -466,47 +624,14 @@ pub fn on_edge(
             fire(rt, def, cx, Slot::Cycle, ctx, false);
         }
 
-        CBehavior::TapHold { tap, hold_target, hold_ms, .. } => {
+        CBehavior::TapHold { tap, .. } => {
             let active = !rt.instances.is_empty();
             match edge {
-                Edge::Press if !was_active => {
-                    // A release always ends a hold before the next press; should that ever not
-                    // be the case, never leak the engaged target.
-                    if let State::TapHold { phase: TapPhase::Holding { engaged: true }, .. } =
-                        rt.state
-                        && let Some(target) = hold_target
-                    {
-                        cx.disengage(&rt.info, target, true);
-                    }
-                    let timer = cx.after(*hold_ms, TimerKind::TapHold(rt.key));
-                    if let State::TapHold { phase, press } = &mut rt.state {
-                        if let TapPhase::Pending(old) = *phase {
-                            cx.timers.cancel(old);
-                        }
-                        *phase = TapPhase::Pending(timer);
-                        *press = ctx;
-                    }
-                }
-                Edge::Release if !active => {
-                    let State::TapHold { phase, press } = &mut rt.state else {
-                        return;
-                    };
-                    let previous = std::mem::replace(phase, TapPhase::Idle);
-                    let press = *press;
-                    match previous {
-                        TapPhase::Pending(timer) => {
-                            cx.timers.cancel(timer);
-                            if let Some(tap) = tap {
-                                fire_direct(rt, def, cx, tap, press);
-                            }
-                        }
-                        TapPhase::Holding { engaged: true } => {
-                            if let Some(target) = hold_target {
-                                cx.disengage(&rt.info, target, false);
-                            }
-                        }
-                        _ => {}
-                    }
+                Edge::Press if !was_active => tap_hold_press(rt, def, cx, ctx),
+                Edge::Release if !active => tap_hold_release(rt, def, cx),
+                Edge::Repeat if only => {
+                    tap_hold_release(rt, def, cx);
+                    tap_hold_press(rt, def, cx, ctx);
                 }
                 Edge::Pulse | Edge::Ticks(_) => {
                     let idle = matches!(rt.state, State::TapHold { phase: TapPhase::Idle, .. });
@@ -521,52 +646,37 @@ pub fn on_edge(
             }
         }
 
-        CBehavior::MultiTap { highest, window_ms, .. } => {
-            let press = match edge {
-                Edge::Press => !was_active,
-                Edge::Repress | Edge::Pulse | Edge::Ticks(_) => true,
-                Edge::Update | Edge::Release => false,
-            };
-            if !press || *highest == 0 {
-                return;
-            }
-            let decide = {
-                let State::MultiTap { count, timer, last } = &mut rt.state else {
-                    return;
-                };
-                cx.timers.cancel_slot(timer);
-                *count = count.saturating_add(1);
-                *last = ctx;
-                if *count >= *highest {
-                    let n = *count;
-                    *count = 0;
-                    Some(n)
-                } else {
-                    *timer = Some(cx.after(*window_ms, TimerKind::MultiTap(rt.key)));
-                    None
+        CBehavior::MultiTap { .. } => match edge {
+            Edge::Press if !was_active => multi_tap_press(rt, def, cx, ctx),
+            Edge::Repress | Edge::Repeat => {
+                if only {
+                    multi_tap_release(rt, def, cx);
                 }
-            };
-            if let Some(n) = decide {
-                decide_multi_tap(rt, def, cx, n, ctx);
+                multi_tap_press(rt, def, cx, ctx);
             }
-        }
+            Edge::Release if rt.instances.is_empty() => multi_tap_release(rt, def, cx),
+            Edge::Pulse | Edge::Ticks(_) => {
+                multi_tap_press(rt, def, cx, ctx);
+                multi_tap_release(rt, def, cx);
+            }
+            _ => {}
+        },
 
         CBehavior::Change { .. } => {
-            if matches!(
-                edge,
-                Edge::Press | Edge::Repress | Edge::Update | Edge::Pulse | Edge::Ticks(_)
-            ) {
+            if edge != Edge::Release {
                 fire(rt, def, cx, Slot::Change, ctx, false);
             }
         }
 
-        CBehavior::Step { step, max_burst, invert, .. } => {
+        CBehavior::Step { up, down, step, max_burst, invert } => {
             let moved = match edge {
                 Edge::Press => {
                     rt.set_ref(inst, ctx.value);
                     0
                 }
-                Edge::Update | Edge::Repress | Edge::Pulse => rt.move_ref(inst, ctx.value, *step),
+                Edge::Update | Edge::Repress | Edge::Repeat | Edge::Pulse => {
+                    rt.move_ref(inst, ctx.value, *step)
+                }
                 Edge::Release => {
                     rt.drop_ref(inst);
                     0
@@ -576,19 +686,157 @@ pub fn on_edge(
             if moved == 0 {
                 return;
             }
-            let up = (moved > 0) != *invert;
+            let up_now = (moved > 0) != *invert;
             let mut count = moved.unsigned_abs();
             if *max_burst > 0 {
                 count = count.min(u32::from(*max_burst));
             }
             // "Unlimited" still has to end somewhere: a 14-bit jump with step 1 would otherwise
-            // queue thousands of firings for one message (the action queue keeps 64 anyway).
+            // queue thousands of firings for one message.
             count = count.min(MAX_STEPS_PER_MESSAGE);
-            let slot = if up { Slot::Up } else { Slot::Down };
+            let (slot, this, other) =
+                if up_now { (Slot::Up, up, down) } else { (Slot::Down, down, up) };
+            // Turning back cancels what is still queued for the other direction.
+            if let Some(other) = other {
+                cx.exec.drop_pending(rt.key, |action| Arc::ptr_eq(action, other));
+            }
             for _ in 0..count {
+                if let Some(action) = this
+                    && action.queues()
+                    && cx.exec.backlog_ms(rt.key, cx.now) > STEP_BACKLOG_MS
+                {
+                    note_rate_limited(rt, cx, action, &ctx, 500);
+                    break;
+                }
                 fire(rt, def, cx, slot, ctx, false);
             }
         }
+    }
+}
+
+// ----- tap-hold -----
+
+/// The mapping as a whole went down.
+fn tap_hold_press(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, ctx: Ctx) {
+    let CBehavior::TapHold { hold_target, hold_ms, .. } = &def.behavior else {
+        return;
+    };
+    // A release always ends a hold before the next press; should that ever not be the case,
+    // never leak the engaged target.
+    if let State::TapHold { phase: TapPhase::Holding { engaged: true }, .. } = rt.state
+        && let Some(target) = hold_target
+    {
+        cx.disengage(&rt.info, target, true);
+    }
+    let timer = cx.after(*hold_ms, TimerKind::TapHold(rt.key));
+    if let State::TapHold { phase, press } = &mut rt.state {
+        if let TapPhase::Pending(old) = *phase {
+            cx.timers.cancel(old);
+        }
+        *phase = TapPhase::Pending(timer);
+        *press = ctx;
+    }
+}
+
+/// The mapping as a whole went up.
+fn tap_hold_release(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
+    let CBehavior::TapHold { tap, hold_target, .. } = &def.behavior else {
+        return;
+    };
+    let State::TapHold { phase, press } = &mut rt.state else {
+        return;
+    };
+    let previous = std::mem::replace(phase, TapPhase::Idle);
+    let press = *press;
+    match previous {
+        TapPhase::Pending(timer) => {
+            cx.timers.cancel(timer);
+            if let Some(tap) = tap {
+                fire_direct(rt, def, cx, tap, press);
+            }
+        }
+        TapPhase::Holding { engaged: true } => {
+            if let Some(target) = hold_target {
+                cx.disengage(&rt.info, target, false);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ----- multi-tap -----
+
+/// A press of a multi-tap mapping. Without a long-press action it counts right away; with
+/// one, it counts on release (if released before `hold_ms`).
+fn multi_tap_press(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, ctx: Ctx) {
+    let CBehavior::MultiTap { highest, window_ms, hold, hold_ms, .. } = &def.behavior else {
+        return;
+    };
+    let key = rt.key;
+    let decide = {
+        let State::MultiTap { count, timer, last, long, held } = &mut rt.state else {
+            return;
+        };
+        *last = ctx;
+        if hold.is_some() {
+            // The window runs from the last release; wait for this press to end (or last).
+            cx.timers.cancel_slot(timer);
+            cx.timers.cancel_slot(long);
+            *long = Some(cx.after(*hold_ms, TimerKind::LongPress(key)));
+            *held = false;
+            None
+        } else if *highest == 0 {
+            None
+        } else {
+            cx.timers.cancel_slot(timer);
+            *count = count.saturating_add(1);
+            if *count >= *highest {
+                Some(std::mem::take(count))
+            } else {
+                *timer = Some(cx.after(*window_ms, TimerKind::MultiTap(key)));
+                None
+            }
+        }
+    };
+    if let Some(n) = decide {
+        decide_multi_tap(rt, def, cx, n, ctx);
+    }
+}
+
+/// A release of a multi-tap mapping (only matters with a long-press action).
+fn multi_tap_release(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
+    let CBehavior::MultiTap { highest, window_ms, hold: Some(_), .. } = &def.behavior else {
+        return;
+    };
+    let key = rt.key;
+    let decide = {
+        let State::MultiTap { count, timer, last, long, held } = &mut rt.state else {
+            return;
+        };
+        if std::mem::take(held) {
+            // The long press already fired.
+            return;
+        }
+        if long.is_none() {
+            // No press in progress.
+            return;
+        }
+        cx.timers.cancel_slot(long);
+        if *highest == 0 {
+            *count = 0;
+            return;
+        }
+        *count = count.saturating_add(1);
+        if *count >= *highest {
+            Some((std::mem::take(count), *last))
+        } else {
+            cx.timers.cancel_slot(timer);
+            *timer = Some(cx.after(*window_ms, TimerKind::MultiTap(key)));
+            None
+        }
+    };
+    if let Some((n, ctx)) = decide {
+        decide_multi_tap(rt, def, cx, n, ctx);
     }
 }
 
@@ -610,7 +858,7 @@ pub fn on_timer(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, kind: TimerKind
         TimerKind::TapHold(_) => on_tap_hold(rt, def, cx, id),
         TimerKind::MultiTap(_) => {
             let decide = match &mut rt.state {
-                State::MultiTap { count, timer, last } if *timer == Some(id) => {
+                State::MultiTap { count, timer, last, .. } if *timer == Some(id) => {
                     *timer = None;
                     let n = std::mem::take(count);
                     Some((n, *last))
@@ -624,7 +872,16 @@ pub fn on_timer(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, kind: TimerKind
                 decide_multi_tap(rt, def, cx, n, ctx);
             }
         }
+        TimerKind::LongPress(_) => on_long_press(rt, def, cx, id),
         TimerKind::Limiter(_, slot) => on_limiter(rt, def, cx, slot, id),
+        TimerKind::Debounce(_, inst) => {
+            let was_active = !rt.instances.is_empty();
+            if rt.live
+                && let Some((edge, ctx)) = rt.debounce_expired(def, cx, inst, id)
+            {
+                on_edge(rt, def, cx, inst, edge, ctx, was_active);
+            }
+        }
         _ => {}
     }
 }
@@ -691,6 +948,27 @@ fn on_tap_hold(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, id: TimerId) {
         && let State::TapHold { phase, .. } = &mut rt.state
     {
         *phase = TapPhase::Holding { engaged: true };
+    }
+}
+
+/// A multi-tap press lasted `hold_ms`: the long-press action fires once and the taps counted
+/// so far are dropped.
+fn on_long_press(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, id: TimerId) {
+    let ctx = match &mut rt.state {
+        State::MultiTap { count, timer, last, long, held } if *long == Some(id) => {
+            *long = None;
+            *held = true;
+            *count = 0;
+            cx.timers.cancel_slot(timer);
+            *last
+        }
+        _ => return,
+    };
+    if let CBehavior::MultiTap { hold: Some(action), .. } = &def.behavior
+        && rt.live
+        && !rt.instances.is_empty()
+    {
+        fire_direct(rt, def, cx, action, ctx);
     }
 }
 
@@ -770,9 +1048,11 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
             }
             *phase = TapPhase::Idle;
         }
-        State::MultiTap { count, timer, .. } => {
+        State::MultiTap { count, timer, long, held, .. } => {
             cx.timers.cancel_slot(timer);
+            cx.timers.cancel_slot(long);
             *count = 0;
+            *held = false;
         }
         _ => {}
     }
@@ -780,6 +1060,7 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
         cx.timers.cancel_slot(&mut limiter.timer);
         limiter.clear();
     }
+    rt.drop_windows(cx, None);
     rt.instances.clear();
     rt.step_refs.clear();
     rt.limit_reported = None;
@@ -798,6 +1079,7 @@ pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: Devi
     let before = rt.instances.len();
     rt.instances.retain(|i| i.key.device() != device);
     rt.step_refs.retain(|(k, _)| k.device() != device);
+    rt.drop_windows(cx, Some(device));
     let removed = rt.instances.len() != before;
     let idle = rt.instances.is_empty();
     match (&def.behavior, &mut rt.state) {
@@ -830,6 +1112,11 @@ pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: Devi
                 _ => {}
             }
             *phase = TapPhase::Idle;
+        }
+        (CBehavior::MultiTap { .. }, State::MultiTap { long, held, .. }) if removed && idle => {
+            // A press that was in progress ends without counting.
+            cx.timers.cancel_slot(long);
+            *held = false;
         }
         _ => {}
     }
