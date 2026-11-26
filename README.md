@@ -77,6 +77,13 @@ from the tray with no browser view loaded at all (about 30 MB).
 | macOS 11+ (universal) | yes (DMG) | not yet — compiled and reviewed only |
 | Linux (X11 / Wayland via uinput) | yes (deb, rpm, AppImage) | not yet — compiled and reviewed only |
 
+Not there yet:
+
+- Sending MIDI back to the controller (LED feedback for toggles, layers and profiles).
+- Output that scales with the value (knob position → pointer speed, jog / shuttle rates).
+- Per-application profiles on Wayland (there is no portable way to ask which window is in front).
+- Signed installers: Windows SmartScreen and macOS Gatekeeper warn about the downloads.
+
 ## Using it
 
 1. Start the app. Connected MIDI devices are opened automatically (bottom left).
