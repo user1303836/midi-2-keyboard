@@ -49,9 +49,9 @@ struct Running {
     ctx: Ctx,
     /// Next primitive step.
     pc: usize,
-    /// Text being typed one character at a time: (text, byte offset of the next character,
-    /// delay between characters).
-    typing: Option<(String, usize, u32)>,
+    /// Text being typed in pieces (one character at a time with `char_delay_ms`, or in chunks
+    /// for backends that cannot take long text at once).
+    typing: Option<Typing>,
     /// Keys and buttons this action holds, in press order.
     keys: Vec<Key>,
     buttons: Vec<MouseButton>,
@@ -66,6 +66,27 @@ struct HoldProc {
     engaged: bool,
     auto_repeat: bool,
     timer: Option<TimerId>,
+}
+
+struct Typing {
+    text: String,
+    /// Byte offset of the next piece.
+    offset: usize,
+    /// Characters per piece.
+    chars: usize,
+    /// Pause between pieces.
+    delay_ms: u32,
+}
+
+/// The Linux uinput backend loses events when one call queues too many (the kernel buffers
+/// about 128 events per reader): long text goes out in chunks of this many characters...
+const PACED_TEXT_CHARS: usize = 25;
+/// ...this far apart.
+const PACED_TEXT_GAP_MS: u32 = 10;
+
+/// Byte offset `chars` characters after `offset` (or the end of `text`).
+fn advance_chars(text: &str, offset: usize, chars: usize) -> usize {
+    text[offset..].char_indices().nth(chars).map_or(text.len(), |(i, _)| offset + i)
 }
 
 pub struct Typematic {
@@ -236,13 +257,13 @@ impl Cx {
 
     /// Executes primitive steps until the action has to wait or is done.
     fn step(&mut self, info: &OwnerInfo, run: &mut Running) -> Progress {
-        if let Some((text, offset, delay)) = run.typing.take()
-            && let Some(c) = text[offset..].chars().next()
-        {
-            let end = offset + c.len_utf8();
-            self.type_text(info, &text[offset..end]);
-            if end < text.len() {
-                run.typing = Some((text, end, delay));
+        if let Some(mut typing) = run.typing.take() {
+            let end = advance_chars(&typing.text, typing.offset, typing.chars);
+            self.type_text(info, &typing.text[typing.offset..end]);
+            if end < typing.text.len() {
+                typing.offset = end;
+                let delay = typing.delay_ms;
+                run.typing = Some(typing);
                 return Progress::Wait(delay);
             }
         }
@@ -268,15 +289,19 @@ impl Cx {
                 }
                 Prim::Text { text, char_delay_ms } => {
                     let rendered = text.render(&run.ctx, self.settings.middle_c_octave);
-                    if *char_delay_ms == 0 {
-                        self.type_text(info, &rendered);
-                    } else if let Some(c) = rendered.chars().next() {
-                        let end = c.len_utf8();
-                        self.type_text(info, &rendered[..end]);
-                        if end < rendered.len() {
-                            run.typing = Some((rendered.into_owned(), end, *char_delay_ms));
-                            return Progress::Wait(*char_delay_ms);
-                        }
+                    let (chars, delay_ms) = if *char_delay_ms > 0 {
+                        (1, *char_delay_ms)
+                    } else if self.out.paces_text() {
+                        (PACED_TEXT_CHARS, PACED_TEXT_GAP_MS)
+                    } else {
+                        (usize::MAX, 0)
+                    };
+                    let end = advance_chars(&rendered, 0, chars);
+                    self.type_text(info, &rendered[..end]);
+                    if end < rendered.len() {
+                        let text = rendered.into_owned();
+                        run.typing = Some(Typing { text, offset: end, chars, delay_ms });
+                        return Progress::Wait(delay_ms);
                     }
                 }
                 Prim::ButtonDown(button) => {

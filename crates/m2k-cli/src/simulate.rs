@@ -44,6 +44,7 @@ options:
   --fail <Key>      the backend rejects this key (repeatable), e.g. --fail F13
   --panic <Key>     the backend panics when this key goes down (tests recovery)
   --fail-up <Key>[:N]  the backend refuses the first N (default 1) releases of this key
+  --as-backend <name>  report this backend name (e.g. linux-uinput, to see its text pacing)
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
   --quiet-status    do not print status events";
@@ -563,6 +564,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut fail = Vec::new();
     let mut panic_key = None;
     let mut fail_up: HashMap<Key, u32> = HashMap::new();
+    let mut backend_name: &'static str = "simulate";
     let mut settle_ms = 1000u64;
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
@@ -594,6 +596,13 @@ pub fn run(args: &[String]) -> i32 {
                     }
                 }
             }
+            "--as-backend" => match iter.next() {
+                Some(name) => backend_name = Box::leak(name.clone().into_boxed_str()),
+                None => {
+                    eprintln!("--as-backend needs a backend name");
+                    return 2;
+                }
+            },
             "--settle" => match iter.next().and_then(|v| v.parse().ok()) {
                 Some(ms) => settle_ms = ms,
                 None => {
@@ -666,7 +675,7 @@ pub fn run(args: &[String]) -> i32 {
         panic: panic_key,
         fail_up: fail_up.clone(),
     };
-    let injector = backend("simulate");
+    let injector = backend(backend_name);
     let engine = {
         let clock = clock.clone();
         let tally = tally.clone();

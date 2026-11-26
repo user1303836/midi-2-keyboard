@@ -89,6 +89,11 @@ impl Output {
         self.injector.repeats_held_keys()
     }
 
+    /// Long text has to be sent in small pieces (the uinput backend drops events otherwise).
+    pub fn paces_text(&self) -> bool {
+        self.injector.name() == "linux-uinput"
+    }
+
     pub fn key_count(&self, key: Key) -> u32 {
         self.keys.get(&key).map_or(0, |h| h.total)
     }
