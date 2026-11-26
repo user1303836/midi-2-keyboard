@@ -202,6 +202,17 @@ export const useApp = create<State>((set, get) => {
             }
             continue;
           }
+          if (e.type === "fired" && e.outcome.type === "failed") {
+            // The system refused something (an elevated window, a missing permission, a key this
+            // platform lacks): worth saying out loud, but not for every repeat.
+            const message = `Could not send ${e.description}: ${e.outcome.error}`;
+            const now = Date.now();
+            if (now - (recentErrors.get(e.outcome.error) ?? 0) > 30_000) {
+              recentErrors.set(e.outcome.error, now);
+              get().toast(message, { kind: "warning" });
+            }
+            continue;
+          }
           if (e.type !== "status") continue;
           const { type: _type, ...engine } = e;
           const state = get();

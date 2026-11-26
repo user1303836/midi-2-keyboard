@@ -149,7 +149,9 @@ function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: 
           className="h-[22px] min-w-0 flex-1 rounded border border-accent bg-app px-1 text-fg outline-hidden"
         />
       ) : (
-        <span className="min-w-0 flex-1 truncate">{profile.name}</span>
+        <span className="min-w-0 flex-1 truncate" title={profile.name}>
+          {profile.name}
+        </span>
       )}
       {profile.apps.length > 0 && !renaming && (
         <Tooltip content={`Auto-activates for: ${profile.apps.map((a) => a.process || a.title).join(", ")}`} side="right">
@@ -302,7 +304,7 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
   };
 
   return (
-    <nav aria-label="Profiles and devices" className="flex w-[214px] shrink-0 flex-col border-r bg-surface">
+    <nav aria-label="Profiles and devices" className="flex w-[236px] shrink-0 flex-col border-r bg-surface">
       <div className="flex h-[34px] shrink-0 items-center pr-1.5 pl-3">
         <span className="flex-1 text-xs font-semibold tracking-wider text-fg-faint uppercase">Profiles</span>
         <Menu>
