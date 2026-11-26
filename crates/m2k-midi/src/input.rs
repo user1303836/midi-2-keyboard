@@ -32,10 +32,13 @@
 //!
 //! # Port names
 //!
-//! - **Windows (WinMM):** names are used as the OS reports them. WinMM truncates them to 31
-//!   characters and already disambiguates identical devices (`2- Launchkey`), so the ` #n` suffix
-//!   is only needed when truncation makes two names identical. Ports whose driver does not
-//!   answer the device-interface query are not listed by midir at all.
+//! - **Windows (WinMM):** WinMM truncates names to 31 characters. A USB device without a serial
+//!   number gets a new device instance, and with it a `2- `, `3- `, ... name prefix, for every
+//!   USB port it is ever plugged into (`2- Launchkey`, `MIDIIN2 (2- Launchkey)`). That prefix is
+//!   stripped: otherwise moving a controller to another port would turn it into a different
+//!   device and orphan its alias and every mapping pinned to it. Two identical devices connected
+//!   at the same time are told apart by the ` #n` suffix like everywhere else. Ports whose
+//!   driver does not answer the device-interface query are not listed by midir at all.
 //! - **Linux (ALSA):** midir reports `client:port 20:0`; the trailing sequencer address changes
 //!   whenever a device is re-plugged, so it is stripped (`Launchkey MK3 25:Launchkey MK3 25 MIDI 1`).
 //! - **macOS (CoreMIDI):** the endpoint display name, as shown in Audio MIDI Setup.
@@ -778,7 +781,28 @@ fn normalize_port_name(raw: &str) -> String {
     if cfg!(target_os = "linux") {
         name = strip_alsa_address(name);
     }
-    if name.is_empty() { "Unnamed MIDI input".to_owned() } else { name.to_owned() }
+    let name = if cfg!(windows) { strip_winmm_instance(name) } else { name.to_owned() };
+    if name.is_empty() { "Unnamed MIDI input".to_owned() } else { name }
+}
+
+/// `"2- Launchkey Mini"` -> `"Launchkey Mini"`, `"MIDIIN2 (3- Launchkey)"` -> `"MIDIIN2 (Launchkey)"`
+/// (see the module docs: the number only says which USB port the device was first seen on).
+fn strip_winmm_instance(name: &str) -> String {
+    // Length of a leading "<digits>- ", if there is one with something after it.
+    let prefix = |s: &str| {
+        let digits = s.bytes().take_while(u8::is_ascii_digit).count();
+        let rest = s[digits..].strip_prefix("- ")?;
+        (digits > 0 && !rest.trim().is_empty()).then_some(s.len() - rest.trim_start().len())
+    };
+    if let Some(skip) = prefix(name) {
+        return name[skip..].to_owned();
+    }
+    if let Some(open) = name.find('(')
+        && let Some(skip) = prefix(&name[open + 1..])
+    {
+        return format!("{}{}", &name[..=open], &name[open + 1 + skip..]);
+    }
+    name.to_owned()
 }
 
 /// `"Launchkey:Launchkey MIDI 1 20:0"` -> `"Launchkey:Launchkey MIDI 1"`.
