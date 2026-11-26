@@ -31,7 +31,10 @@ const SKIP_TEXT: Record<string, string> = {
 export function outcomeText(outcome: Outcome): string | null {
   if (outcome.type === "sent") return null;
   if (outcome.type === "failed") return `failed: ${outcome.error}`;
-  return SKIP_TEXT[outcome.reason] ?? outcome.reason;
+  const base = SKIP_TEXT[outcome.reason] ?? outcome.reason;
+  // The engine may say exactly which condition was not met / how long the rate limit still runs.
+  const detail = (outcome as { detail?: string }).detail;
+  return detail ? `${base}: ${detail}` : base;
 }
 
 function mappingLabel(id: string): string {
