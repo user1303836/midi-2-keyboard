@@ -44,9 +44,16 @@ export function KeyComboInput({
   const latest = useRef({ onChange, onCaptured });
   latest.current = { onChange, onCaptured };
 
+  // Armed by the quick-add flow rather than by the user: there, Esc means "not now" instead of
+  // "bind the Escape key" (click the field and press Esc to bind it).
+  const autoArmed = useRef(autoCapture);
+
   // The quick-add flow arms fields one after another.
   useEffect(() => {
-    if (autoCapture) setCapturing(true);
+    if (autoCapture) {
+      autoArmed.current = true;
+      setCapturing(true);
+    }
   }, [autoCapture]);
 
   const finish = useCallback((combo: Key[]) => {
@@ -68,6 +75,11 @@ export function KeyComboInput({
     const down = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
+      if (autoArmed.current && event.key === "Escape" && combo.length === 0) {
+        autoArmed.current = false;
+        setCapturing(false);
+        return;
+      }
       const key = keyFromEvent(event);
       if (!key) {
         setUnknown(true);
@@ -120,11 +132,15 @@ export function KeyComboInput({
         role="button"
         tabIndex={0}
         aria-label={capturing ? "Press a key or shortcut" : "Shortcut. Press Enter to change"}
-        onClick={() => setCapturing(true)}
+        onClick={() => {
+          autoArmed.current = false;
+          setCapturing(true);
+        }}
         onKeyDown={(event) => {
           if (capturing) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
+            autoArmed.current = false;
             setCapturing(true);
           } else if (event.key === "Backspace" || event.key === "Delete") {
             event.preventDefault();
@@ -142,7 +158,7 @@ export function KeyComboInput({
           <KeyCombo keys={shown} />
         ) : (
           <span className={cn("text-fg-faint", capturing && "text-key")}>
-            {capturing ? "Press a key or shortcut…" : placeholder}
+            {capturing ? (autoArmed.current ? "Press a key or shortcut…  (Esc: not now)" : "Press a key or shortcut…") : placeholder}
           </span>
         )}
         {capturing && shown.length > 0 && live.length === 0 && (
