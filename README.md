@@ -121,6 +121,7 @@ Settings; *Launch at login* is there too.
 | `Esc` | Cancel a key capture; close the quick add, the editor, a menu or a dialog |
 | `↑` / `↓` | Previous / next mapping |
 | `Alt+↑` / `Alt+↓` | Move the mapping up / down |
+| `Ctrl`+click, `Shift`+click, `Shift+↑` / `↓`, `Ctrl+A` | Pick several mappings: enable, disable, duplicate, copy, move or delete them together |
 | `Del` | Delete the focused mapping (the message that follows has *Undo*) |
 | `Ctrl+D` | Duplicate the focused mapping |
 | `Ctrl+C` / `Ctrl+V` | Copy the focused mapping / paste mappings into the profile in view. They travel as plain JSON text, so they can be pasted into a chat or a text editor and back |

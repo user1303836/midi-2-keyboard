@@ -51,6 +51,7 @@ import { onMappingActivity, onMidi, type ActivityKind } from "@/lib/monitor";
 import { api, mappingsToText, useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
 
+import { bulk, pickedMappings } from "./BulkPanel";
 import { NoteRunDialog } from "./NoteRunDialog";
 import { BehaviorSummary, SourceIcon } from "./tokens";
 
@@ -88,6 +89,11 @@ function ActivityLed({ mappingId }: { mappingId: string }) {
   );
 }
 
+/** The ids of the rows as they are shown right now (a search may hide some). */
+function shownOrder(): string[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="row"][data-mapping-id]'), (row) => row.dataset.mappingId!);
+}
+
 /**
  * One mapping. Memoized on purpose: with hundreds of mappings and an engine that reports status
  * many times a second, a row must only re-render when *its* mapping (or its own flags) changed.
@@ -108,10 +114,13 @@ const MappingRow = memo(function MappingRow({
   draggable,
   conflicts,
   menuTarget,
+  picked,
 }: {
   mapping: Mapping;
   index: number;
   selected: boolean;
+  /** Part of a selection of several mappings (Ctrl / Shift click). */
+  picked: boolean;
   /** The right-click menu is open for this row. */
   menuTarget: boolean;
   engaged: boolean;
@@ -151,7 +160,16 @@ const MappingRow = memo(function MappingRow({
       onDragOver={(e) => onDragOver(index, e)}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      onClick={() => selectMapping(selected ? null : mapping.id)}
+      onMouseDown={(e) => {
+        // Shift+click picks a range; it must not select the text in between.
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        const state = useApp.getState();
+        if (e.shiftKey) state.selectRange(mapping.id, shownOrder());
+        else if (e.ctrlKey || e.metaKey) state.toggleSelect(mapping.id);
+        else selectMapping(selected && !picked ? null : mapping.id);
+      }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
@@ -285,6 +303,7 @@ function matchesSearch(mapping: Mapping, query: string, sentence: string): boole
 
 export function MappingList({ profile }: { profile: Profile }) {
   const selectedId = useApp((state) => state.selectedMappingId);
+  const multi = useApp((state) => state.multi);
   const engaged = useApp((state) => state.engine.engaged_mappings);
   const search = useApp((state) => state.search);
   const setSearch = useApp((state) => state.setSearch);
@@ -420,7 +439,11 @@ export function MappingList({ profile }: { profile: Profile }) {
           </button>
         </Tooltip>
         <span className="shrink-0 text-sm whitespace-nowrap text-fg-faint max-[1000px]:hidden">
-          {search ? `${visible.length} of ${profile.mappings.length}` : plural(profile.mappings.length, "mapping")}
+          {multi.length > 1
+            ? `${multi.length} selected`
+            : search
+              ? `${visible.length} of ${profile.mappings.length}`
+              : plural(profile.mappings.length, "mapping")}
         </span>
         <div className="flex-1" />
         <div className="flex shrink-0">
@@ -464,6 +487,7 @@ export function MappingList({ profile }: { profile: Profile }) {
         <div
           role="grid"
           aria-label="Mappings"
+          aria-multiselectable
           className="@container min-h-0 flex-1 overflow-y-auto px-2 py-2"
           onContextMenu={(e) => {
             const row = (e.target as HTMLElement).closest<HTMLElement>("[data-mapping-id]");
@@ -481,7 +505,8 @@ export function MappingList({ profile }: { profile: Profile }) {
               key={mapping.id}
               mapping={mapping}
               index={index}
-              selected={mapping.id === selectedId}
+              selected={mapping.id === selectedId || multi.includes(mapping.id)}
+              picked={multi.includes(mapping.id)}
               menuTarget={menu.open && menu.id === mapping.id}
               engaged={engaged.includes(mapping.id)}
               conflicts={conflicts.get(mapping.id)}
@@ -504,7 +529,9 @@ export function MappingList({ profile }: { profile: Profile }) {
               document.querySelector<HTMLElement>(`[data-mapping-id="${CSS.escape(menu.id)}"]`)?.focus();
             }}
           >
-            {menuMapping ? (
+            {menuMapping && multi.length > 1 && multi.includes(menuMapping.id) ? (
+              <BulkMenu ids={multi} otherProfiles={otherProfiles} />
+            ) : menuMapping ? (
               <RowMenu mapping={menuMapping} otherProfiles={otherProfiles} />
             ) : (
               <>
@@ -520,6 +547,56 @@ export function MappingList({ profile }: { profile: Profile }) {
         </ContextMenu>
       )}
     </div>
+  );
+}
+
+/** What a right click offers while several mappings are picked. */
+function BulkMenu({ ids, otherProfiles }: { ids: string[]; otherProfiles: Profile[] }) {
+  const mappings = pickedMappings(ids);
+  return (
+    <>
+      <ContextMenuItem icon={<Power size={14} />} disabled={mappings.every((m) => m.enabled)} onSelect={() => bulk.setEnabled(ids, true)}>
+        Enable {plural(ids.length, "mapping")}
+      </ContextMenuItem>
+      <ContextMenuItem icon={<Power size={14} />} disabled={mappings.every((m) => !m.enabled)} onSelect={() => bulk.setEnabled(ids, false)}>
+        Disable {plural(ids.length, "mapping")}
+      </ContextMenuItem>
+      <ContextMenuItem icon={<Copy size={14} />} shortcut="Ctrl+D" onSelect={() => bulk.duplicate(ids)}>
+        Duplicate
+      </ContextMenuItem>
+      <ContextMenuItem icon={<ClipboardCopy size={14} />} shortcut="Ctrl+C" onSelect={() => bulk.copy(ids)}>
+        Copy
+      </ContextMenuItem>
+      {otherProfiles.length > 0 && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuSub>
+            <ContextMenuSubTrigger icon={<FolderInput size={14} />}>Move to profile</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {otherProfiles.map((p) => (
+                <ContextMenuItem key={p.id} onSelect={() => bulk.moveTo(ids, p)}>
+                  {p.name}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger icon={<FolderPlus size={14} />}>Copy to profile</ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {otherProfiles.map((p) => (
+                <ContextMenuItem key={p.id} onSelect={() => bulk.copyTo(ids, p)}>
+                  {p.name}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        </>
+      )}
+      <ContextMenuSeparator />
+      <ContextMenuItem tone="danger" icon={<Trash2 size={14} />} shortcut="Del" onSelect={() => bulk.remove(ids)}>
+        Delete {plural(ids.length, "mapping")}
+      </ContextMenuItem>
+    </>
   );
 }
 

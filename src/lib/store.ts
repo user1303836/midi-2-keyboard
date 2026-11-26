@@ -63,6 +63,13 @@ interface State {
   viewProfileId: string | null;
   /** The mapping open in the editor. */
   selectedMappingId: string | null;
+  /**
+   * Mappings picked together (Ctrl / Shift click, Ctrl+A) for an action on all of them. Always
+   * two or more, or empty: a single picked row is simply `selectedMappingId`.
+   */
+  multi: string[];
+  /** Where a Shift selection starts from. */
+  anchorId: string | null;
   /** The mapping currently going through the quick-add flow. */
   wizardMappingId: string | null;
   /** A quick-add mapping that is not part of the config yet (nothing learned so far). */
@@ -103,6 +110,18 @@ interface State {
   /** Puts a copy of the mapping at the end of another profile (the original stays). */
   copyMappingToProfile(id: string, profileId: string): void;
   selectMapping(id: string | null): void;
+  /** Ctrl+click: adds the mapping to the picked ones, or takes it out. */
+  toggleSelect(id: string): void;
+  /** Shift+click: picks everything from the anchor to this mapping, in the given (shown) order. */
+  selectRange(toId: string, order: string[]): void;
+  selectAll(ids: string[]): void;
+  clearMulti(): void;
+  /** The following act on several mappings as one undoable step. */
+  removeMappings(ids: string[]): void;
+  setMappingsEnabled(ids: string[], enabled: boolean): void;
+  cloneMappings(ids: string[]): void;
+  moveMappingsToProfile(ids: string[], profileId: string): void;
+  copyMappingsToProfile(ids: string[], profileId: string): void;
   /** Opens the quick-add flow with a fresh draft mapping. */
   startWizard(): void;
   /** Moves the draft into the viewed profile (it becomes a real, saved mapping). */
@@ -342,6 +361,8 @@ export const useApp = create<State>((set, get) => {
     saving: false,
     viewProfileId: null,
     selectedMappingId: null,
+    multi: [],
+    anchorId: null,
     wizardMappingId: null,
     draft: null,
     panel: "none",
@@ -418,7 +439,7 @@ export const useApp = create<State>((set, get) => {
       const profile = get().config.profiles.find((p) => p.id === id);
       if (!profile) return;
       discardUnfinishedWizard();
-      set({ viewProfileId: id, selectedMappingId: null, wizardMappingId: null, draft: null, search: "" });
+      set({ viewProfileId: id, selectedMappingId: null, multi: [], anchorId: null, wizardMappingId: null, draft: null, search: "" });
       if (!profile.always_on && get().config.selected_profile !== id) {
         // Selecting is not an undoable edit.
         set((state) => ({ config: { ...state.config, selected_profile: id } }));
@@ -616,10 +637,132 @@ export const useApp = create<State>((set, get) => {
       const exists = id !== null && profileOfMapping(get().config, id) !== null;
       set((state) => ({
         selectedMappingId: exists ? id : null,
+        multi: [],
+        anchorId: exists ? id : state.anchorId,
         wizardMappingId: exists && state.wizardMappingId === id ? id : null,
         // Moving on abandons a quick-add that never got as far as learning a control.
         draft: null,
       }));
+    },
+
+    toggleSelect(id) {
+      const { multi, selectedMappingId, draft } = get();
+      const current = multi.length > 0 ? multi : selectedMappingId && draft?.id !== selectedMappingId ? [selectedMappingId] : [];
+      const next = current.includes(id) ? current.filter((other) => other !== id) : [...current, id];
+      if (next.length <= 1) {
+        get().selectMapping(next[0] ?? null);
+        return;
+      }
+      discardUnfinishedWizard();
+      set({ multi: next, anchorId: id, selectedMappingId: null, wizardMappingId: null, draft: null });
+    },
+
+    selectRange(toId, order) {
+      const { anchorId, selectedMappingId } = get();
+      const from = anchorId ?? selectedMappingId ?? toId;
+      const a = order.indexOf(from);
+      const b = order.indexOf(toId);
+      const range = a < 0 || b < 0 ? [toId] : order.slice(Math.min(a, b), Math.max(a, b) + 1);
+      if (range.length <= 1) {
+        get().selectMapping(toId);
+        return;
+      }
+      discardUnfinishedWizard();
+      set({ multi: range, anchorId: from, selectedMappingId: null, wizardMappingId: null, draft: null });
+    },
+
+    selectAll(ids) {
+      if (ids.length <= 1) {
+        get().selectMapping(ids[0] ?? null);
+        return;
+      }
+      discardUnfinishedWizard();
+      set({ multi: ids, selectedMappingId: null, wizardMappingId: null, draft: null });
+    },
+
+    clearMulti() {
+      set({ multi: [] });
+    },
+
+    removeMappings(ids) {
+      const drop = new Set(ids);
+      get().edit((config) => ({
+        ...config,
+        profiles: config.profiles.map((profile) =>
+          profile.mappings.some((m) => drop.has(m.id))
+            ? { ...profile, mappings: profile.mappings.filter((m) => !drop.has(m.id)) }
+            : profile,
+        ),
+      }));
+      set((state) => ({
+        multi: [],
+        selectedMappingId: state.selectedMappingId && drop.has(state.selectedMappingId) ? null : state.selectedMappingId,
+      }));
+    },
+
+    setMappingsEnabled(ids, enabled) {
+      const pick = new Set(ids);
+      get().edit((config) => ({
+        ...config,
+        profiles: config.profiles.map((profile) =>
+          profile.mappings.some((m) => pick.has(m.id) && m.enabled !== enabled)
+            ? { ...profile, mappings: profile.mappings.map((m) => (pick.has(m.id) ? { ...m, enabled } : m)) }
+            : profile,
+        ),
+      }));
+    },
+
+    cloneMappings(ids) {
+      const pick = new Set(ids);
+      const copies: string[] = [];
+      get().edit((config) => ({
+        ...config,
+        profiles: config.profiles.map((profile) => {
+          const picked = profile.mappings.filter((m) => pick.has(m.id));
+          if (picked.length === 0) return profile;
+          // The copies go together, right after the last of the originals.
+          const last = profile.mappings.findIndex((m) => m.id === picked[picked.length - 1].id);
+          const duplicates = picked.map(duplicateMapping);
+          duplicates.forEach((copy) => copies.push(copy.id));
+          return {
+            ...profile,
+            mappings: [...profile.mappings.slice(0, last + 1), ...duplicates, ...profile.mappings.slice(last + 1)],
+          };
+        }),
+      }));
+      if (copies.length > 1) set({ multi: copies, selectedMappingId: null, wizardMappingId: null });
+      else if (copies.length === 1) get().selectMapping(copies[0]);
+    },
+
+    moveMappingsToProfile(ids, profileId) {
+      const pick = new Set(ids);
+      const config = get().config;
+      const moving = config.profiles
+        .filter((profile) => profile.id !== profileId)
+        .flatMap((profile) => profile.mappings.filter((m) => pick.has(m.id)));
+      if (moving.length === 0) return;
+      const gone = new Set(moving.map((m) => m.id));
+      get().edit((current) => ({
+        ...current,
+        profiles: current.profiles.map((profile) => {
+          if (profile.id === profileId) return { ...profile, mappings: [...profile.mappings, ...moving] };
+          return profile.mappings.some((m) => gone.has(m.id))
+            ? { ...profile, mappings: profile.mappings.filter((m) => !gone.has(m.id)) }
+            : profile;
+        }),
+      }));
+      set({ multi: [], selectedMappingId: null });
+    },
+
+    copyMappingsToProfile(ids, profileId) {
+      const pick = new Set(ids);
+      const copies = get()
+        .config.profiles.flatMap((profile) => profile.mappings.filter((m) => pick.has(m.id)))
+        .map(duplicateMapping);
+      if (copies.length === 0) return;
+      get().edit((config) =>
+        mapProfile(config, profileId, (profile) => ({ ...profile, mappings: [...profile.mappings, ...copies] })),
+      );
     },
 
     startWizard() {

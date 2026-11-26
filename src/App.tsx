@@ -4,6 +4,7 @@ import type { Profile } from "@/bindings/Profile";
 import { Toasts } from "@/components/ui/misc";
 import { TooltipProvider } from "@/components/ui/overlays";
 import { MappingEditor } from "@/features/editor/MappingEditor";
+import { bulk, BulkPanel, pickedMappings } from "@/features/mappings/BulkPanel";
 import { MappingList } from "@/features/mappings/MappingList";
 import { MonitorPanel } from "@/features/monitor/Monitor";
 import { StatusBar, TopBar } from "@/features/shell/Bars";
@@ -65,6 +66,15 @@ function useShortcuts() {
         }
       }
 
+      const overlayOpen = () =>
+        document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]') !== null;
+
+      // Escape lets go of a selection of several mappings...
+      if (key === "escape" && !event.defaultPrevented && state.multi.length > 0 && state.panel === "none" && !typing) {
+        if (!overlayOpen()) state.clearMulti();
+        return;
+      }
+
       // Escape closes the editor from anywhere, unless something on top of it wants the key.
       if (key === "escape" && !event.defaultPrevented && state.selectedMappingId && state.panel === "none") {
         const overlay = document.querySelector(
@@ -93,6 +103,18 @@ function useShortcuts() {
       } else if (mod && key === "f") {
         event.preventDefault();
         document.querySelector<HTMLInputElement>('input[aria-label="Search mappings"]')?.focus();
+      } else if (mod && key === "a" && !typing && state.panel === "none" && !overlayOpen()) {
+        // Ctrl+A picks every mapping that is shown.
+        const shown = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="row"][data-mapping-id]'),
+          (row) => row.dataset.mappingId!,
+        );
+        if (shown.length === 0) return;
+        event.preventDefault();
+        state.selectAll(shown);
+      } else if (mod && key === "d" && state.multi.length > 1 && !typing) {
+        event.preventDefault();
+        bulk.duplicate(state.multi);
       } else if (mod && key === "d" && (focusedMappingId() ?? state.selectedMappingId) && !typing) {
         event.preventDefault();
         state.cloneMapping((focusedMappingId() ?? state.selectedMappingId)!);
@@ -112,6 +134,11 @@ function useShortcuts() {
         const onRow = focusedMappingId();
         const nowhere = !target || target === document.body || target === document.documentElement;
         if (!onRow && !nowhere) return;
+        if (state.multi.length > 1) {
+          event.preventDefault();
+          bulk.remove(state.multi);
+          return;
+        }
         // The row with the focus ring is the one that goes; the focus moves on to its neighbor.
         const id = onRow ?? state.selectedMappingId;
         if (!id) return;
@@ -147,7 +174,9 @@ function useShortcuts() {
         if (shown.length === 0) return;
         const at = shown.indexOf(from ?? "");
         const next = shown[at < 0 ? 0 : Math.min(shown.length - 1, Math.max(0, at + step))];
-        state.selectMapping(next);
+        // Shift+arrows grow or shrink a selection of several, from where it started.
+        if (event.shiftKey) state.selectRange(next, shown);
+        else state.selectMapping(next);
         focusMappingRow(next);
       }
     };
@@ -160,10 +189,15 @@ function useShortcuts() {
       if (isTyping(event.target) || window.getSelection()?.toString() || state.panel !== "none") return;
       const id = focusedMappingId() ?? state.selectedMappingId;
       const mapping = id ? profileOfMapping(state.config, id)?.mappings.find((m) => m.id === id) : null;
-      if (!mapping || !event.clipboardData) return;
-      event.clipboardData.setData("text/plain", mappingsToText([mapping]));
+      const copied = state.multi.length > 1 ? pickedMappings(state.multi) : mapping ? [mapping] : [];
+      if (copied.length === 0 || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", mappingsToText(copied));
       event.preventDefault();
-      state.toast("Mapping copied. Paste it into another profile — or anywhere, it is plain text.");
+      state.toast(
+        copied.length === 1
+          ? "Mapping copied. Paste it into another profile — or anywhere, it is plain text."
+          : `${copied.length} mappings copied. Paste them into another profile — or anywhere, they are plain text.`,
+      );
     };
     const onPaste = (event: ClipboardEvent) => {
       const state = useApp.getState();
@@ -212,6 +246,7 @@ export function App() {
   const monitorOpen = useApp((state) => state.monitorOpen);
   const profile = useViewedProfile();
   const mapping = useSelectedMapping();
+  const multi = useApp((state) => state.multi);
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
@@ -245,7 +280,7 @@ export function App() {
             ) : (
               <div className="flex flex-1 items-center justify-center text-fg-faint">Select or create a profile.</div>
             )}
-            {mapping && <MappingEditor key={mapping.id} mapping={mapping} />}
+            {multi.length > 1 ? <BulkPanel ids={multi} /> : mapping && <MappingEditor key={mapping.id} mapping={mapping} />}
           </div>
           {monitorOpen && <MonitorPanel />}
           <StatusBar />
