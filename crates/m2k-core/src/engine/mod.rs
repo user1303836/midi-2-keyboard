@@ -113,8 +113,14 @@ impl Engine {
         todo!("m2k-core: Engine::status")
     }
 
-    /// Releases everything and stops the engine thread, waiting for it to finish.
+    /// Releases everything and stops the engine thread, waiting for it to finish. Idempotent;
+    /// after this every other method is a no-op. Also runs when the handle is dropped.
+    pub fn stop(&self) {
+        todo!("m2k-core: Engine::stop")
+    }
+
+    /// Same as [`Engine::stop`], consuming the handle.
     pub fn shutdown(self) {
-        todo!("m2k-core: Engine::shutdown")
+        self.stop();
     }
 }
