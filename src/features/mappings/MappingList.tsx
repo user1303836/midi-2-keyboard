@@ -1,6 +1,7 @@
 import { ArrowRight, Copy, CopyPlus, Filter, GripVertical, MoreHorizontal, Plus, Search, Timer, Trash2, X } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { Config } from "@/bindings/Config";
 import type { Mapping } from "@/bindings/Mapping";
 import type { Profile } from "@/bindings/Profile";
 import { Button, IconButton } from "@/components/ui/button";
@@ -41,8 +42,15 @@ function ActivityLed({ mappingId }: { mappingId: string }) {
   );
 }
 
+/**
+ * One mapping. Memoized on purpose: with hundreds of mappings and an engine that reports status
+ * many times a second, a row must only re-render when *its* mapping (or its own flags) changed.
+ * That is why every callback is a stable function taking the id / index, and why the row does
+ * not subscribe to the whole config.
+ */
 const MappingRow = memo(function MappingRow({
   mapping,
+  index,
   selected,
   engaged,
   dragging,
@@ -55,13 +63,14 @@ const MappingRow = memo(function MappingRow({
   conflicts,
 }: {
   mapping: Mapping;
+  index: number;
   selected: boolean;
   engaged: boolean;
   conflicts: Conflict[] | undefined;
   dragging: boolean;
   dropBefore: boolean;
-  onDragStart: () => void;
-  onDragOver: (event: React.DragEvent) => void;
+  onDragStart: (id: string) => void;
+  onDragOver: (index: number, event: React.DragEvent) => void;
   onDrop: () => void;
   onDragEnd: () => void;
   draggable: boolean;
@@ -70,13 +79,14 @@ const MappingRow = memo(function MappingRow({
   const updateMapping = useApp((state) => state.updateMapping);
   const removeMapping = useApp((state) => state.removeMapping);
   const cloneMapping = useApp((state) => state.cloneMapping);
-  const config = useApp((state) => state.config);
+  // Only the device list (for friendly names), not the whole config.
+  const devices = useApp((state) => state.config.devices);
   const octave = useOctave();
   const toast = useApp((state) => state.toast);
   const undo = useApp((state) => state.undo);
 
   const event = mapping.source.event;
-  const qualifiers = sourceQualifiers(mapping.source, config);
+  const qualifiers = sourceQualifiers(mapping.source, { devices } as Config);
   const nickname = sourceNickname(event);
 
   return (
@@ -88,9 +98,9 @@ const MappingRow = memo(function MappingRow({
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", mapping.id);
-        onDragStart();
+        onDragStart(mapping.id);
       }}
-      onDragOver={onDragOver}
+      onDragOver={(e) => onDragOver(index, e)}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       onClick={() => selectMapping(selected ? null : mapping.id)}
@@ -101,7 +111,10 @@ const MappingRow = memo(function MappingRow({
           selectMapping(mapping.id);
         }
       }}
-      title={mappingSentence(mapping, config, octave)}
+      onMouseEnter={(e) => {
+        // The full sentence is only worked out when somebody actually hovers.
+        e.currentTarget.title = mappingSentence(mapping, useApp.getState().config, octave);
+      }}
       className={cn(
         "group relative flex min-h-[46px] cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 outline-hidden transition-colors",
         selected ? "border-accent-line bg-accent-soft" : "border-transparent hover:bg-hover focus-visible:border-accent-line",
@@ -169,10 +182,10 @@ const MappingRow = memo(function MappingRow({
           </Badge>
         )}
         {mapping.conditions.length > 0 && (
-          <Badge tone="neutral" title={mapping.conditions.map((c) => conditionText(c, config, octave)).join("\n")}>
+          <Badge tone="neutral" title={mapping.conditions.map((c) => conditionText(c, null, octave)).join("\n")}>
             <Filter size={11} />
             <span className="hidden @min-[700px]:inline">
-              {mapping.conditions.length === 1 ? conditionText(mapping.conditions[0], config, octave) : `${mapping.conditions.length} conditions`}
+              {mapping.conditions.length === 1 ? conditionText(mapping.conditions[0], null, octave) : `${mapping.conditions.length} conditions`}
             </span>
           </Badge>
         )}
@@ -237,6 +250,31 @@ export function MappingList({ profile }: { profile: Profile }) {
   const octave = useOctave();
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // Latest drag state for the stable row callbacks below.
+  const drag = useRef({ dragId, dropIndex, mappings: profile.mappings });
+  drag.current = { dragId, dropIndex, mappings: profile.mappings };
+
+  const handleDragStart = useCallback((id: string) => setDragId(id), []);
+  const handleDragOver = useCallback((index: number, e: React.DragEvent) => {
+    if (!drag.current.dragId) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    setDropIndex(after ? index + 1 : index);
+  }, []);
+  const handleDragEnd = useCallback(() => {
+    setDragId(null);
+    setDropIndex(null);
+  }, []);
+  const handleDrop = useCallback(() => {
+    const { dragId: id, dropIndex: target, mappings } = drag.current;
+    if (id && target !== null) {
+      const from = mappings.findIndex((m) => m.id === id);
+      moveMapping(id, target > from ? target - 1 : target);
+    }
+    setDragId(null);
+    setDropIndex(null);
+  }, [moveMapping]);
 
   const visible = useMemo(
     () =>
@@ -300,32 +338,17 @@ export function MappingList({ profile }: { profile: Profile }) {
             <MappingRow
               key={mapping.id}
               mapping={mapping}
+              index={index}
               selected={mapping.id === selectedId}
               engaged={engaged.includes(mapping.id)}
               conflicts={conflicts.get(mapping.id)}
               draggable={reorderable}
               dragging={dragId === mapping.id}
               dropBefore={dropIndex === index && dragId !== null && dragId !== mapping.id}
-              onDragStart={() => setDragId(mapping.id)}
-              onDragOver={(e) => {
-                if (!dragId) return;
-                e.preventDefault();
-                const rect = e.currentTarget.getBoundingClientRect();
-                const after = e.clientY > rect.top + rect.height / 2;
-                setDropIndex(after ? index + 1 : index);
-              }}
-              onDrop={() => {
-                if (dragId && dropIndex !== null) {
-                  const from = profile.mappings.findIndex((m) => m.id === dragId);
-                  moveMapping(dragId, dropIndex > from ? dropIndex - 1 : dropIndex);
-                }
-                setDragId(null);
-                setDropIndex(null);
-              }}
-              onDragEnd={() => {
-                setDragId(null);
-                setDropIndex(null);
-              }}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
             />
           ))}
           {dropIndex === visible.length && dragId && <div className="mx-2 h-[2px] rounded-full bg-accent" />}

@@ -1,6 +1,7 @@
 import { ArrowRight, Ban, CornerDownRight, Eraser, Pause, Play, TriangleAlert, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import type { Config } from "@/bindings/Config";
 import type { MidiLog } from "@/bindings/MidiLog";
 import type { Outcome } from "@/bindings/Outcome";
 import { IconButton } from "@/components/ui/button";
@@ -54,7 +55,8 @@ const KIND_COLOR: Record<string, string> = {
 
 const LogRow = memo(function LogRow({ entry, octave }: { entry: LogEntry; octave: number }) {
   const selectMapping = useApp((state) => state.selectMapping);
-  const config = useApp((state) => state.config);
+  const devices = useApp((state) => state.config.devices);
+  const config = { devices } as Config;
 
   if (entry.kind === "error") {
     return (
@@ -123,6 +125,9 @@ const LogRow = memo(function LogRow({ entry, octave }: { entry: LogEntry; octave
 
 type LogFilter = "all" | "matched" | "actions";
 
+/** Every log row is exactly this tall, which is what makes windowing trivial. */
+const LOG_ROW_HEIGHT = 22;
+
 function LogView() {
   const entries = useLog();
   const frozen = useLogFrozen();
@@ -131,6 +136,8 @@ function LogView() {
   const [showNoise, setShowNoise] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewHeight, setViewHeight] = useState(200);
 
   const visible = useMemo(
     () =>
@@ -147,8 +154,25 @@ function LogView() {
 
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (element && pinned.current) element.scrollTop = element.scrollHeight;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setViewHeight(element.clientHeight));
+    observer.observe(element);
+    setViewHeight(element.clientHeight);
+    return () => observer.disconnect();
+  }, []);
+
+  // Stay glued to the newest entry unless the user scrolled up to read.
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (element && pinned.current) {
+      element.scrollTop = element.scrollHeight;
+      setScrollTop(element.scrollTop);
+    }
   }, [visible]);
+
+  // Only the rows in view are rendered: a busy controller can add hundreds of entries a second.
+  const first = Math.max(0, Math.floor(scrollTop / LOG_ROW_HEIGHT) - 6);
+  const last = Math.min(visible.length, Math.ceil((scrollTop + viewHeight) / LOG_ROW_HEIGHT) + 6);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -180,8 +204,9 @@ function LogView() {
         onScroll={(e) => {
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+          setScrollTop(el.scrollTop);
         }}
-        className="min-h-0 flex-1 overflow-y-auto py-1"
+        className="min-h-0 flex-1 overflow-y-auto"
       >
         {visible.length === 0 ? (
           <div className="flex h-full items-center justify-center text-fg-faint">
@@ -190,7 +215,17 @@ function LogView() {
               : "Nothing matches this filter."}
           </div>
         ) : (
-          visible.map((entry) => <LogRow key={entry.id} entry={entry} octave={octave} />)
+          <div className="relative" style={{ height: visible.length * LOG_ROW_HEIGHT + 8 }}>
+            {visible.slice(first, last).map((entry, index) => (
+              <div
+                key={entry.id}
+                className="absolute right-0 left-0"
+                style={{ top: 4 + (first + index) * LOG_ROW_HEIGHT, height: LOG_ROW_HEIGHT }}
+              >
+                <LogRow entry={entry} octave={octave} />
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

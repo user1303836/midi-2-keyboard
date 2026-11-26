@@ -93,7 +93,8 @@ function Token({ icon, children, muted }: { icon: ReactNode; children: ReactNode
 
 /** An action drawn as keycaps or an icon chip. */
 export function ActionView({ action, small = true }: { action: Action | null; small?: boolean }) {
-  const config = useApp((state) => state.config);
+  // Only profile switches need to look anything up; everything else must not re-render on edits.
+  const config = useApp((state) => (action?.type === "switch_profile" ? state.config : null));
   if (!action) return <span className="text-fg-faint">—</span>;
   const text = actionText(action, config);
   switch (action.type) {
