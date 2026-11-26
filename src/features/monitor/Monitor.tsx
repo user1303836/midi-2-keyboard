@@ -11,6 +11,7 @@ import { silentReason } from "@/lib/conflicts";
 import { deviceLabel, mappingBrief, sourceTitle } from "@/lib/describe";
 import { bytesToHex, encodeMessage, isBlackKey, noteName, viewMessage } from "@/lib/midi";
 import { clearLog, onFired, onMidi, setLogFrozen, useLog, useLogFrozen, type LogEntry } from "@/lib/monitor";
+import { sourceForMessage } from "@/lib/model";
 import { api, profileOfMapping, useApp, useOctave } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +51,24 @@ function mappingEffect(id: string): string {
   const config = useApp.getState().config;
   const mapping = profileOfMapping(config, id)?.mappings.find((m) => m.id === id);
   return mapping ? mappingBrief(mapping, config) : "a deleted mapping";
+}
+
+/** Starts the quick add for the control a message came from (the device is named when there are several). */
+function mapMessage(log: MidiLog) {
+  const state = useApp.getState();
+  const several = state.ports.filter((port) => port.state === "connected").length > 1;
+  const source = sourceForMessage(log.message, several ? log.device : null);
+  if (source) state.startWizardWith(source);
+}
+
+/** Whether "map it" makes sense for a message: nothing anywhere listens to its control. */
+function mappable(log: MidiLog): boolean {
+  const { config, engine } = useApp.getState();
+  return (
+    log.mappings.length === 0 &&
+    silentReason(config, engine.effective_profile, log.device, log.message) === null &&
+    sourceForMessage(log.message, null) !== null
+  );
 }
 
 /** Why nothing reacted to a message, in a few words. */
@@ -144,7 +163,18 @@ const LogRow = memo(function LogRow({ entry, octave }: { entry: LogEntry; octave
           {entry.mappings.length > 1 ? ` +${entry.mappings.length - 1}` : ""}
         </button>
       ) : (
-        <span className="min-w-0 truncate text-sm text-fg-faint italic">{whyNothing(entry)}</span>
+        <>
+          <span className="min-w-0 truncate text-sm text-fg-faint italic">{whyNothing(entry)}</span>
+          {mappable(entry) && (
+            <button
+              type="button"
+              className="shrink-0 text-sm text-accent underline-offset-2 hover:underline"
+              onClick={() => mapMessage(entry)}
+            >
+              map it
+            </button>
+          )}
+        </>
       )}
       <span className="selectable ml-auto shrink-0 pl-3 font-mono text-sm text-fg-faint">
         {bytesToHex(encodeMessage(entry.message).slice(0, 8))}
@@ -592,6 +622,16 @@ export function LastEvent() {
         <>
           <ArrowRight size={12} className="shrink-0 text-fg-faint" />
           <span className="truncate text-fg-faint">{silent ?? "no mapping"}</span>
+          {silent === null && sourceForMessage(midi.message, null) !== null && (
+            <button
+              type="button"
+              className="shrink-0 text-accent underline-offset-2 hover:underline"
+              title="Add a mapping for this control: it only needs the key to send"
+              onClick={() => mapMessage(midi)}
+            >
+              map it
+            </button>
+          )}
         </>
       )}
     </span>

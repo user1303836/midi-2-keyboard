@@ -125,6 +125,13 @@ interface State {
   copyMappingsToProfile(ids: string[], profileId: string): void;
   /** Opens the quick-add flow with a fresh draft mapping. */
   startWizard(): void;
+  /**
+   * Opens the quick-add flow for a control that is already known ("map it" on a message
+   * nothing reacts to): the mapping exists right away and only waits for its action.
+   */
+  startWizardWith(source: Source): void;
+  /** Where the quick add that is open began: listening for a control, or with one in hand. */
+  wizardStage: "learn" | "action";
   /** Moves the draft into the viewed profile (it becomes a real, saved mapping). */
   commitDraft(): void;
   finishWizard(): void;
@@ -370,6 +377,7 @@ export const useApp = create<State>((set, get) => {
     selectedMappingId: null,
     multi: [],
     anchorId: null,
+    wizardStage: "learn",
     wizardMappingId: null,
     draft: null,
     panel: "none",
@@ -780,7 +788,25 @@ export const useApp = create<State>((set, get) => {
       if (!get().viewProfileId) return;
       discardUnfinishedWizard();
       const draft = newMapping();
-      set({ draft, selectedMappingId: draft.id, wizardMappingId: draft.id, search: "" });
+      set({ draft, selectedMappingId: draft.id, wizardMappingId: draft.id, wizardStage: "learn", multi: [], search: "" });
+    },
+
+    startWizardWith(source) {
+      const profileId = get().viewProfileId;
+      if (!profileId) return;
+      discardUnfinishedWizard();
+      const mapping = newMapping(source);
+      get().edit((config) =>
+        mapProfile(config, profileId, (profile) => ({ ...profile, mappings: [...profile.mappings, mapping] })),
+      );
+      set({
+        draft: null,
+        selectedMappingId: mapping.id,
+        wizardMappingId: mapping.id,
+        wizardStage: "action",
+        multi: [],
+        search: "",
+      });
     },
 
     commitDraft() {

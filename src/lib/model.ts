@@ -8,6 +8,7 @@ import type { Config } from "@/bindings/Config";
 import type { Feedback } from "@/bindings/Feedback";
 import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { Mapping } from "@/bindings/Mapping";
+import type { MidiMessage } from "@/bindings/MidiMessage";
 import type { MidiSend } from "@/bindings/MidiSend";
 import type { Profile } from "@/bindings/Profile";
 import type { RateLimit } from "@/bindings/RateLimit";
@@ -419,6 +420,38 @@ export function defaultMidiSend(type: MidiSendType, previous?: MidiSend): MidiSe
       return { type, channel, program: { type: "fixed", value: 0 } };
     case "raw":
       return { type, bytes: "" };
+  }
+}
+
+/**
+ * The source that listens to the control a message came from, for "map it" on a message that
+ * nothing reacts to yet. A control change starts out as a knob (the quick add's "It is a"
+ * switch turns it into a button or an encoder). `null` for messages that make no sense to map.
+ */
+export function sourceForMessage(message: MidiMessage, device: string | null): Source | null {
+  const on = (event: SourceEvent, channel: number | null): Source => ({ ...newSource(event), device, channel });
+  switch (message.type) {
+    case "note_on":
+    case "note_off":
+      return on({ type: "note", notes: { min: message.note, max: message.note }, velocity: { min: 1, max: 127 } }, message.channel);
+    case "control_change":
+      return on({ type: "control_change", controller: message.controller, range: { ...FULL7 }, encoding: "absolute" }, message.channel);
+    case "program_change":
+      return on({ type: "program_change", programs: { min: message.program, max: message.program } }, message.channel);
+    case "pitch_bend":
+      return on({ type: "pitch_bend", range: { ...FULL14 } }, message.channel);
+    case "channel_pressure":
+      return on({ type: "channel_pressure", range: { ...FULL7 } }, message.channel);
+    case "poly_pressure":
+      return on({ type: "poly_pressure", notes: { min: message.note, max: message.note }, range: { ...FULL7 } }, message.channel);
+    case "song_select":
+      return on({ type: "song_select", songs: { min: message.song, max: message.song } }, null);
+    case "start":
+    case "continue":
+    case "stop":
+      return on({ type: "system", message: message.type }, null);
+    default:
+      return null;
   }
 }
 

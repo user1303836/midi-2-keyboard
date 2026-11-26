@@ -609,7 +609,8 @@ function Wizard({
   onUpdate: (change: (mapping: Mapping) => Mapping) => void;
   onDone: () => void;
 }) {
-  const [stage, setStage] = useState<"learn" | "action">("learn");
+  // "Map it" on a message starts with the control already in hand.
+  const [stage, setStage] = useState<"learn" | "action">(() => useApp.getState().wizardStage);
   const [learned, setLearned] = useState<LearnResult | null>(null);
   // Which action slot is listening for keys: the first one, then the next empty one.
   const [armedSlot, setArmedSlot] = useState<number | null>(0);

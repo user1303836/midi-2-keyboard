@@ -102,7 +102,8 @@ Keys are not sent while the app's own window is in front (so a mapping cannot ty
 editor) — switch to the application you want to control to try a mapping. If nothing happens,
 look at the status bar at the bottom: it shows the last message that came in and, when nothing
 was sent, why (no mapping, its mapping is switched off, only mapped in another profile, held
-back by a rate limit, …).
+back by a rate limit, …). For a control that has no mapping yet, *map it* next to that
+message starts one with the control already filled in.
 
 To stop all output, click **Active** at the top right (it turns into **Paused**). If a key ever
 seems stuck, the *release* link next to "holding …" in the status bar lets go of everything.
