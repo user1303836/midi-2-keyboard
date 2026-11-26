@@ -1,0 +1,18 @@
+[package]
+name = "m2k-cli"
+description = "Headless tools for midi-2-keyboard: list devices, monitor MIDI, run a config, simulate input."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "m2k"
+path = "src/main.rs"
+
+[dependencies]
+m2k-midi.workspace = true
+m2k-output.workspace = true
+m2k-core.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true

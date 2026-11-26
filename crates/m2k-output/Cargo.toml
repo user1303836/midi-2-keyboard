@@ -1,0 +1,13 @@
+[package]
+name = "m2k-output"
+description = "Key model and OS input injection (keyboard, mouse, text) for midi-2-keyboard."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+ts-rs.workspace = true
+log.workspace = true
+thiserror.workspace = true
