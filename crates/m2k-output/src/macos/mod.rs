@@ -12,9 +12,16 @@
 //! - Mouse: clicks get a click count (double-clicks work), moves while a button is held are
 //!   drag events, relative moves carry their deltas for games. Coordinates are global display
 //!   points (the space macOS positions the pointer in), clamped to the attached displays.
+//! - Caps Lock is toggled through IOKit (the HID system owns the lock state, a posted key event
+//!   would not change it); the posted key event is only the fallback.
+//! - Modifiers held through the injector apply to the events it posts, not to the user's own
+//!   keyboard and mouse: "pad holds Cmd, click with the real mouse" is a plain click on macOS
+//!   (unlike Windows and Linux, where held keys are seat-wide).
 //! - Every event carries [`crate::INJECTION_TAG`] in `kCGEventSourceUserData`.
-//! - Without the Accessibility permission macOS silently drops posted events; the calls then
-//!   report [`OutputError::Permission`].
+//! - macOS silently drops posted events without the Accessibility permission, and keystrokes
+//!   while Secure Event Input is on (a password field or a terminal's Secure Keyboard Entry has
+//!   focus). Presses, text and pointer moves then report [`OutputError::Permission`]; releases
+//!   never do, since the matching press did not arrive either.
 
 pub(crate) mod platform;
 
@@ -91,6 +98,7 @@ pub(crate) fn create(_options: &InjectorOptions) -> Result<Box<dyn Injector>> {
         buttons: 0,
         click: None,
         trusted: None,
+        caps_via_iokit: false,
     }))
 }
 
@@ -111,6 +119,8 @@ pub(crate) struct CgInjector {
     click: Option<Click>,
     /// Cached `AXIsProcessTrusted` result.
     trusted: Option<(Instant, bool)>,
+    /// The last Caps Lock press was applied through IOKit (so its release posts nothing).
+    caps_via_iokit: bool,
 }
 
 impl CgInjector {
@@ -128,9 +138,9 @@ impl CgInjector {
         CGEvent::post(CGEventTapLocation::HIDEventTap, Some(event));
     }
 
-    /// `Permission` when macOS will drop what we post. Events are posted regardless, so a
-    /// wrong negative answer never costs functionality.
-    fn check_trusted(&mut self) -> Result<()> {
+    /// `Permission` when macOS drops what we just posted (`keyboard`: also Secure Event
+    /// Input). Events are posted regardless, so a wrong answer never costs functionality.
+    fn check_delivery(&mut self, keyboard: bool) -> Result<()> {
         let now = Instant::now();
         let trusted = match self.trusted {
             Some((at, value)) if now.duration_since(at) < TRUST_TTL => value,
@@ -140,11 +150,14 @@ impl CgInjector {
                 value
             }
         };
-        if trusted {
-            Ok(())
-        } else {
-            Err(OutputError::Permission(platform::ACCESSIBILITY_HINT.into()))
+        if !trusted {
+            return Err(OutputError::Permission(platform::ACCESSIBILITY_HINT.into()));
         }
+        // SAFETY: plain query without arguments.
+        if keyboard && unsafe { IsSecureEventInputEnabled() } != 0 {
+            return Err(OutputError::Permission(platform::SECURE_INPUT_HINT.into()));
+        }
+        Ok(())
     }
 
     /// Flags of the modifier keys currently held.
@@ -210,11 +223,19 @@ impl CgInjector {
         } else {
             self.down.remove(&key);
         }
+        if key == Key::CapsLock {
+            if down && !repeat {
+                self.caps_via_iokit = iokit::toggle_caps_lock();
+            }
+            if self.caps_via_iokit {
+                return if down { self.check_delivery(false) } else { Ok(()) };
+            }
+        }
         match mac {
             MacKey::Code(code) => self.post_keycode(key, code, down, repeat)?,
             MacKey::System(kind) => self.post_system_key(kind, down, repeat)?,
         }
-        self.check_trusted()
+        if down { self.check_delivery(true) } else { Ok(()) }
     }
 
     /// Posts a chunk of text and clears it.
@@ -244,18 +265,29 @@ impl CgInjector {
     }
 
     fn post_move(&self, target: CGPoint, dx: i64, dy: i64) -> Result<()> {
+        let other = [MouseButton::Middle, MouseButton::Back, MouseButton::Forward]
+            .into_iter()
+            .position(|b| self.buttons & button_bit(b) != 0)
+            .map(|index| index as u32 + 2); // button numbers 2, 3, 4
         let (kind, button) = if self.buttons & button_bit(MouseButton::Left) != 0 {
             (CGEventType::LeftMouseDragged, CGMouseButton::Left)
         } else if self.buttons & button_bit(MouseButton::Right) != 0 {
             (CGEventType::RightMouseDragged, CGMouseButton::Right)
-        } else if self.buttons != 0 {
-            (CGEventType::OtherMouseDragged, CGMouseButton::Center)
+        } else if let Some(number) = other {
+            (CGEventType::OtherMouseDragged, CGMouseButton(number))
         } else {
             (CGEventType::MouseMoved, CGMouseButton::Left)
         };
         let event = CGEvent::new_mouse_event(self.src(), kind, target, button)
             .ok_or_else(|| failed("create a mouse event"))?;
         let ev = Some(&*event);
+        if let (CGEventType::OtherMouseDragged, Some(number)) = (kind, other) {
+            CGEvent::set_integer_value_field(
+                ev,
+                CGEventField::MouseEventButtonNumber,
+                i64::from(number),
+            );
+        }
         CGEvent::set_integer_value_field(ev, CGEventField::MouseEventDeltaX, dx);
         CGEvent::set_integer_value_field(ev, CGEventField::MouseEventDeltaY, dy);
         CGEvent::set_flags(ev, CGEventFlags(self.modifier_flags()));
@@ -333,7 +365,7 @@ impl Injector for CgInjector {
             chunk.extend_from_slice(units);
         }
         self.flush_text(&mut chunk)?;
-        self.check_trusted()
+        self.check_delivery(true)
     }
 
     fn mouse_button(&mut self, button: MouseButton, down: bool) -> Result<()> {
@@ -371,7 +403,7 @@ impl Injector for CgInjector {
         CGEvent::set_integer_value_field(ev, CGEventField::MouseEventClickState, clicks);
         CGEvent::set_flags(ev, CGEventFlags(self.modifier_flags()));
         self.post(&event);
-        self.check_trusted()
+        if down { self.check_delivery(false) } else { Ok(()) }
     }
 
     fn mouse_move_relative(&mut self, dx: i32, dy: i32) -> Result<()> {
@@ -382,14 +414,14 @@ impl Injector for CgInjector {
         let target =
             clamp_to_displays(CGPoint::new(from.x + f64::from(dx), from.y + f64::from(dy)));
         self.post_move(target, i64::from(dx), i64::from(dy))?;
-        self.check_trusted()
+        self.check_delivery(false)
     }
 
     fn mouse_move_absolute(&mut self, x: i32, y: i32) -> Result<()> {
         let from = self.cursor();
         let target = clamp_to_displays(CGPoint::new(f64::from(x), f64::from(y)));
         self.post_move(target, (target.x - from.x) as i64, (target.y - from.y) as i64)?;
-        self.check_trusted()
+        self.check_delivery(false)
     }
 
     fn scroll(&mut self, dx: i32, dy: i32) -> Result<()> {
@@ -409,7 +441,7 @@ impl Injector for CgInjector {
         .ok_or_else(|| failed("create a scroll event"))?;
         CGEvent::set_flags(Some(&event), CGEventFlags(self.modifier_flags()));
         self.post(&event);
-        self.check_trusted()
+        self.check_delivery(false)
     }
 }
 
@@ -564,4 +596,71 @@ fn unsupported(key: Key) -> OutputError {
 
 fn failed(what: &str) -> OutputError {
     OutputError::Other(format!("macOS could not {what}"))
+}
+
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    /// HIToolbox: whether some application holds Secure Event Input (password fields, Secure
+    /// Keyboard Entry), during which macOS drops posted keystrokes.
+    fn IsSecureEventInputEnabled() -> u8;
+}
+
+/// The Caps Lock state lives in the HID system (`IOHIDSystem`); this is how utilities flip it.
+mod iokit {
+    use std::ffi::{c_char, c_int, c_void};
+
+    type MachPort = u32;
+
+    /// `kIOHIDParamConnectType`
+    const PARAM_CONNECT_TYPE: u32 = 1;
+    /// `kIOHIDCapsLockState`
+    const CAPS_LOCK_STATE: c_int = 1;
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
+        /// Consumes `matching`.
+        fn IOServiceGetMatchingService(main_port: MachPort, matching: *mut c_void) -> MachPort;
+        fn IOServiceOpen(
+            service: MachPort,
+            owning_task: MachPort,
+            kind: u32,
+            connect: *mut MachPort,
+        ) -> c_int;
+        fn IOServiceClose(connect: MachPort) -> c_int;
+        fn IOObjectRelease(object: MachPort) -> c_int;
+        fn IOHIDGetModifierLockState(handle: MachPort, selector: c_int, state: *mut bool) -> c_int;
+        fn IOHIDSetModifierLockState(handle: MachPort, selector: c_int, state: bool) -> c_int;
+    }
+
+    unsafe extern "C" {
+        /// What the `mach_task_self()` macro reads.
+        static mach_task_self_: MachPort;
+    }
+
+    /// Flips Caps Lock (lock state and LED). `false` when IOKit refuses.
+    pub(super) fn toggle_caps_lock() -> bool {
+        // SAFETY: plain IOKit calls; every object obtained is released below.
+        unsafe {
+            let matching = IOServiceMatching(c"IOHIDSystem".as_ptr());
+            if matching.is_null() {
+                return false;
+            }
+            let service = IOServiceGetMatchingService(0, matching);
+            if service == 0 {
+                return false;
+            }
+            let mut connect: MachPort = 0;
+            let opened = IOServiceOpen(service, mach_task_self_, PARAM_CONNECT_TYPE, &mut connect);
+            IOObjectRelease(service);
+            if opened != 0 {
+                return false;
+            }
+            let mut on = false;
+            let toggled = IOHIDGetModifierLockState(connect, CAPS_LOCK_STATE, &mut on) == 0
+                && IOHIDSetModifierLockState(connect, CAPS_LOCK_STATE, !on) == 0;
+            IOServiceClose(connect);
+            toggled
+        }
+    }
 }

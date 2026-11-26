@@ -23,6 +23,10 @@ pub(crate) const ACCESSIBILITY_HINT: &str = "midi-2-keyboard needs the Accessibi
      Accessibility and switch on midi-2-keyboard. If it is already on but input still does not \
      arrive (for example after an update), remove it with the minus button and add it again.";
 
+pub(crate) const SECURE_INPUT_HINT: &str = "macOS is in secure input mode: a password field, \
+     or a terminal with Secure Keyboard Entry turned on, has focus. macOS ignores keystrokes from \
+     other programs until that field loses focus.";
+
 /// Seconds an Accessibility request to another application may take.
 const AX_TIMEOUT: f32 = 0.15;
 

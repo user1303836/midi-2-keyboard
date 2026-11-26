@@ -6,8 +6,7 @@
 //!   exposes no global coordinate space to clients.
 //! - `text()` is best effort: it presses the keys that produce each ASCII character on a US
 //!   layout (Shift handled), other characters are skipped and reported. The kernel queues only
-//!   about 128 events per reader, so long texts should be paced by the caller
-//!   (~25 characters per call).
+//!   about 128 events per reader, so callers split long texts (`max_text_chunk`).
 
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -27,6 +26,11 @@ const UINPUT_PATH: &str = "/dev/uinput";
 /// Time the compositor / X server needs to notice a new input device and open it. Events
 /// written before that are lost, so creation waits once.
 const SETTLE: Duration = Duration::from_millis(250);
+
+/// Characters per `text()` call: the kernel keeps 128 events per reader for this device
+/// (12 per packet estimate x 8 packets, rounded to a power of two) and a character costs 4
+/// events, 8 when Shift changes. Eight is safe even with the 64-event minimum buffer.
+const TEXT_CHUNK: usize = 8;
 
 /// Highest `KEY_*` code declared (`KEY_MICMUTE`); codes from 0x100 on are buttons, which would
 /// change how the device is classified.
@@ -55,28 +59,47 @@ pub(crate) fn access() -> Access {
     }
 }
 
+/// The udev rule the .deb / .rpm packages install (src-tauri/linux).
+const PACKAGED_RULE: &str = "/usr/lib/udev/rules.d/60-midi-2-keyboard-uinput.rules";
+
 /// Exact instructions for making `/dev/uinput` usable, empty when it already is.
 pub(crate) fn access_hint(access: &Access) -> String {
     const RULE: &str = "KERNEL==\"uinput\", SUBSYSTEM==\"misc\", MODE=\"0660\", \
          GROUP=\"input\", OPTIONS+=\"static_node=uinput\", TAG+=\"uaccess\"";
-    let setup = format!(
-        "Run once in a terminal:\n\
-         \n  echo '{RULE}' | sudo tee /etc/udev/rules.d/60-midi-2-keyboard-uinput.rules\n  \
-         echo uinput | sudo tee /etc/modules-load.d/midi-2-keyboard-uinput.conf\n  \
+    let problem = match access {
+        Access::Ok => return String::new(),
+        Access::Missing => {
+            return "/dev/uinput does not exist: the uinput kernel module is not loaded. Load it \
+                 now and at every start:\n\n  sudo modprobe uinput\n  \
+                 echo uinput | sudo tee /etc/modules-load.d/midi-2-keyboard-uinput.conf\n\n\
+                 then restart midi-2-keyboard."
+                .to_string();
+        }
+        Access::Denied => "midi-2-keyboard may not write to /dev/uinput.".to_string(),
+        Access::Failed(error) => format!("/dev/uinput cannot be opened ({error})."),
+    };
+    if std::path::Path::new(PACKAGED_RULE).exists() {
+        return format!(
+            "{problem} The udev rule that grants access is installed ({PACKAGED_RULE}) but does \
+             not apply to this session yet: log out and back in (or restart the computer)."
+        );
+    }
+    let origin = if std::env::var_os("APPIMAGE").is_some() {
+        "The AppImage cannot install the udev rule that grants access (the .deb and .rpm \
+         packages do). "
+    } else {
+        ""
+    };
+    format!(
+        "{problem} {origin}Run once in a terminal:\n\n  \
+         echo '{RULE}' | sudo tee /etc/udev/rules.d/60-midi-2-keyboard-uinput.rules\n  \
          sudo modprobe uinput\n  \
-         sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=misc --action=change\n\
-         \nthen restart midi-2-keyboard. The rule gives the logged-in desktop user access \
+         sudo udevadm control --reload-rules && \
+         sudo udevadm trigger --subsystem-match=misc --action=change\n\n\
+         then restart midi-2-keyboard. The rule gives the logged-in desktop user access \
          (\"uaccess\"); on systems without systemd-logind also run \
          `sudo usermod -aG input $USER` and log out and back in."
-    );
-    match access {
-        Access::Ok => String::new(),
-        Access::Missing => {
-            format!("/dev/uinput does not exist: the uinput kernel module is not loaded. {setup}")
-        }
-        Access::Denied => format!("midi-2-keyboard may not write to /dev/uinput. {setup}"),
-        Access::Failed(error) => format!("/dev/uinput cannot be opened ({error}). {setup}"),
-    }
+    )
 }
 
 pub(crate) struct UinputInjector {
@@ -111,6 +134,42 @@ impl UinputInjector {
     fn tap(&mut self, code: u16) -> Result<()> {
         self.key_event(code, 1)?;
         self.key_event(code, 0)
+    }
+
+    /// Types `text` (US-layout ASCII), keeping `shift` (left, right) equal to what is down.
+    /// Returns how many characters had to be skipped.
+    fn type_us_layout(&mut self, text: &str, shift: &mut (bool, bool)) -> Result<usize> {
+        let mut skipped = 0usize;
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\r' && chars.peek() == Some(&'\n') {
+                continue; // "\r\n" is one Enter
+            }
+            let Some((key, needs_shift)) = us_layout(c) else {
+                skipped += 1;
+                continue;
+            };
+            let shifted = shift.0 || shift.1;
+            if needs_shift && !shifted {
+                self.set_shift(*shift, (true, shift.1))?;
+                shift.0 = true;
+            } else if !needs_shift && shifted {
+                self.set_shift(*shift, (false, false))?;
+                *shift = (false, false);
+            }
+            self.tap(evdev_code(key)?)?;
+        }
+        Ok(skipped)
+    }
+
+    /// Presses / releases the Shift keys that differ between `from` and `to` (left, right).
+    fn set_shift(&mut self, from: (bool, bool), to: (bool, bool)) -> Result<()> {
+        for (was, want, key) in [(from.0, to.0, Key::ShiftLeft), (from.1, to.1, Key::ShiftRight)] {
+            if was != want {
+                self.key_event(evdev_code(key)?, i32::from(want))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -152,6 +211,10 @@ impl Injector for UinputInjector {
         true
     }
 
+    fn max_text_chunk(&self) -> Option<usize> {
+        Some(TEXT_CHUNK)
+    }
+
     fn key_down(&mut self, key: Key) -> Result<()> {
         let code = evdev_code(key)?;
         // evdev value 2 is an auto-repeat.
@@ -166,43 +229,14 @@ impl Injector for UinputInjector {
     }
 
     fn text(&mut self, text: &str) -> Result<()> {
-        let shift = |key: Key| keymap::evdev(key).unwrap_or_default();
-        let (lshift, rshift) = (shift(Key::ShiftLeft), shift(Key::ShiftRight));
         // Shift keys as the caller holds them, and as they currently are.
         let held = (self.down.contains(&Key::ShiftLeft), self.down.contains(&Key::ShiftRight));
         let mut now = held;
-        let mut skipped = 0usize;
-        let mut chars = text.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\r' && chars.peek() == Some(&'\n') {
-                continue; // "\r\n" is one Enter
-            }
-            let Some((key, needs_shift)) = us_layout(c) else {
-                skipped += 1;
-                continue;
-            };
-            let shifted = now.0 || now.1;
-            if needs_shift && !shifted {
-                self.key_event(lshift, 1)?;
-                now.0 = true;
-            } else if !needs_shift && shifted {
-                if now.0 {
-                    self.key_event(lshift, 0)?;
-                }
-                if now.1 {
-                    self.key_event(rshift, 0)?;
-                }
-                now = (false, false);
-            }
-            self.tap(evdev_code(key)?)?;
-        }
-        // Put Shift back the way the caller holds it.
-        if now.0 != held.0 {
-            self.key_event(lshift, i32::from(held.0))?;
-        }
-        if now.1 != held.1 {
-            self.key_event(rshift, i32::from(held.1))?;
-        }
+        let typed = self.type_us_layout(text, &mut now);
+        // Put Shift back the way the caller holds it, also when typing failed halfway.
+        let restored = self.set_shift(now, held);
+        let skipped = typed?;
+        restored?;
         if skipped > 0 {
             return Err(OutputError::Unsupported(
                 format!("typing {skipped} character(s) outside US-layout ASCII"),

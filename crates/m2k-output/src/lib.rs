@@ -119,6 +119,15 @@ pub trait Injector: Send {
         false
     }
 
+    /// The most characters one [`Injector::text`] call should carry, when the backend has a
+    /// limit (`None`: any length). Longer texts must be split by the caller, with a few
+    /// milliseconds between the pieces (one frame, ~16 ms, is always enough); sending more at
+    /// once can lose characters. Only `linux-uinput` has a limit: the kernel queues about 128
+    /// events for the compositor, and each character costs 4 to 8.
+    fn max_text_chunk(&self) -> Option<usize> {
+        None
+    }
+
     /// Presses a key. Calling this for a key that is already down sends another key-down
     /// (an auto-repeat event where the platform distinguishes them).
     fn key_down(&mut self, key: Key) -> Result<()>;

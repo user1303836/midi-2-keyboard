@@ -92,8 +92,11 @@ impl XTestInjector {
         for (index, row) in reply.keysyms.chunks(per).enumerate() {
             let Some(keycode) = self.min_keycode.checked_add(index as u8) else { break };
             let mine = self.mapped.iter().find(|&&(k, _)| k == keycode).map(|&(_, sym)| sym);
+            // XKB servers store our `[sym; n]` as a one-level key and report it back with
+            // NoSymbol in some columns, so "ours" means: only our symbol, and at least once.
             if let Some(sym) = mine
-                && row.iter().all(|&s| s == sym)
+                && row.contains(&sym)
+                && row.iter().all(|&s| s == sym || s == 0)
             {
                 ours.push(keycode);
                 spare.push(keycode);
