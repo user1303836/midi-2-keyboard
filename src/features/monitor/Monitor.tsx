@@ -382,7 +382,8 @@ function VirtualController() {
 
 export function MonitorPanel() {
   const setMonitorOpen = useApp((state) => state.setMonitorOpen);
-  const [tab, setTab] = useState<"log" | "virtual">("log");
+  const tab = useApp((state) => state.monitorTab);
+  const setTab = useApp((state) => state.setMonitorTab);
   return (
     <section aria-label="Monitor" className="flex h-[250px] shrink-0 flex-col border-t bg-surface">
       <div className="flex h-[34px] shrink-0 items-center gap-2 border-b pr-2 pl-3">

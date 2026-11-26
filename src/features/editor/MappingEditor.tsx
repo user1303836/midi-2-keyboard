@@ -449,15 +449,45 @@ function Wizard({
           )}
         </span>
         <Button onClick={onDone}>All options</Button>
-        <Button variant="primary" icon={<Check size={14} />} disabled={!done} onClick={() => {
-          onDone();
-          useApp.getState().selectMapping(null);
-        }}>
+        <Button
+          variant="primary"
+          icon={<Check size={14} />}
+          disabled={!done}
+          onClick={() => {
+            onDone();
+            useApp.getState().selectMapping(null);
+            hintAfterAdding();
+          }}
+        >
           Done
         </Button>
       </div>
     </div>
   );
+}
+
+/**
+ * The first few times a mapping is added, say where to try it: with the default settings nothing
+ * is sent while this window has focus, which would otherwise look like "it does not work".
+ */
+function hintAfterAdding(): void {
+  const state = useApp.getState();
+  if (!state.config.settings.suspend_while_focused) {
+    return;
+  }
+  let shown = 0;
+  try {
+    shown = Number(localStorage.getItem("m2k.hint.try-it") ?? "0");
+    localStorage.setItem("m2k.hint.try-it", String(shown + 1));
+  } catch {
+    // Storage unavailable: just show the hint.
+  }
+  if (shown < 3) {
+    state.toast(
+      "Mapping added. Switch to the app you want to control and try it — keys are held back while this window is in front.",
+      { kind: "success" },
+    );
+  }
 }
 
 function StepDot({ n, done, tone }: { n: number; done: boolean; tone: "midi" | "key" }) {

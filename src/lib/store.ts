@@ -53,6 +53,7 @@ interface State {
   draft: Mapping | null;
   panel: Panel;
   monitorOpen: boolean;
+  monitorTab: "log" | "virtual";
   search: string;
   toasts: Toast[];
 
@@ -89,6 +90,9 @@ interface State {
   setPaused(paused: boolean): void;
   setPanel(panel: Panel): void;
   setMonitorOpen(open: boolean): void;
+  setMonitorTab(tab: "log" | "virtual"): void;
+  /** Opens the monitor on the on-screen controller. */
+  openVirtualController(): void;
   setSearch(search: string): void;
   toast(message: string, options?: Partial<Omit<Toast, "id" | "message">>): void;
   dismissToast(id: number): void;
@@ -234,6 +238,7 @@ export const useApp = create<State>((set, get) => {
     draft: null,
     panel: "none",
     monitorOpen: false,
+    monitorTab: "log",
     search: "",
     toasts: [],
 
@@ -511,6 +516,14 @@ export const useApp = create<State>((set, get) => {
 
     setMonitorOpen(open) {
       set({ monitorOpen: open });
+    },
+
+    setMonitorTab(tab) {
+      set({ monitorTab: tab });
+    },
+
+    openVirtualController() {
+      set({ monitorOpen: true, monitorTab: "virtual" });
     },
 
     setSearch(search) {

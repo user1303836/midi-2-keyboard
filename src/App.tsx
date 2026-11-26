@@ -8,6 +8,7 @@ import { MappingList } from "@/features/mappings/MappingList";
 import { MonitorPanel } from "@/features/monitor/Monitor";
 import { StatusBar, TopBar } from "@/features/shell/Bars";
 import { DevicesDialog, ProfileDialog, SettingsDialog } from "@/features/shell/Dialogs";
+import { Notices } from "@/features/shell/Notices";
 import { Sidebar } from "@/features/shell/Sidebar";
 import { isTauri } from "@/lib/platform";
 import { useApp, useSelectedMapping, useViewedProfile } from "@/lib/store";
@@ -132,6 +133,7 @@ export function App() {
         <Sidebar onEditProfile={setEditingProfile} />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar profile={profile} onEditProfile={setEditingProfile} />
+          <Notices />
           <div className="flex min-h-0 flex-1">
             {profile ? (
               <MappingList profile={profile} />
