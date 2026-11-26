@@ -30,40 +30,10 @@ import {
   Tooltip,
 } from "@/components/ui/overlays";
 import { deviceLabel } from "@/lib/describe";
+import { EXAMPLES, importExample } from "@/lib/examples";
 import { onDeviceActivity } from "@/lib/monitor";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
-
-interface Example {
-  file: string;
-  title: string;
-  detail: string;
-  text: string;
-}
-
-/** The profiles under /examples, bundled as text so they can be imported with one click. */
-const EXAMPLES: Example[] = Object.entries(
-  import.meta.glob("/examples/*.json", { eager: true, query: "?raw", import: "default" }) as Record<string, string>,
-)
-  .map(([path, text]) => {
-    const file = path.split("/").pop()!.replace(/\.json$/, "");
-    let names: string[] = [];
-    let count = 0;
-    try {
-      const data = JSON.parse(text) as { profiles?: { name?: string; mappings?: unknown[] }[] };
-      names = (data.profiles ?? []).map((p) => p.name ?? file);
-      count = (data.profiles ?? []).reduce((sum, p) => sum + (p.mappings?.length ?? 0), 0);
-    } catch {
-      // A broken example simply shows its file name; importing it reports the problem.
-    }
-    return {
-      file,
-      title: names[0] ?? file,
-      detail: `${names.length > 1 ? `${names.length} profiles · ` : ""}${count} mappings`,
-      text,
-    };
-  })
-  .sort((a, b) => a.title.localeCompare(b.title));
 
 function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: Profile) => void }) {
   const viewed = useApp((state) => state.viewProfileId === profile.id);
@@ -286,20 +256,6 @@ export function Sidebar({ onEditProfile }: { onEditProfile: (profile: Profile) =
       toast(`Imported ${imported.length === 1 ? `“${imported[0].name}”` : `${imported.length} profiles`}`, { kind: "success" });
     } catch (error) {
       toast(`Import failed: ${String(error)}`, { kind: "error" });
-    }
-  };
-
-  const importExample = async (example: Example) => {
-    try {
-      const backend = await api();
-      const parsed = await backend.parseProfiles(example.text);
-      importProfiles(parsed);
-      toast(
-        `Added ${parsed.length === 1 ? `“${parsed[0].name}”` : `${parsed.length} example profiles`}. Open a mapping to see how it is built.`,
-        { kind: "success" },
-      );
-    } catch (error) {
-      toast(`Could not load the example: ${String(error)}`, { kind: "error" });
     }
   };
 

@@ -24,6 +24,7 @@ import { Badge, Kbd } from "@/components/ui/misc";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tooltip } from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
 import { findConflicts, type Conflict } from "@/lib/conflicts";
+import { EXAMPLES, importExample } from "@/lib/examples";
 import { onMappingActivity, type ActivityKind } from "@/lib/monitor";
 import { useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
@@ -431,8 +432,22 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <Button variant="primary" size="lg" icon={<Plus size={16} />} onClick={onAdd}>
         Add mapping
       </Button>
-      <div className="text-sm text-fg-faint">
+      <div className="flex items-center gap-2 text-sm text-fg-faint">
         or press <Kbd>N</Kbd>
+        <span>·</span>
+        <Menu>
+          <MenuTrigger className="underline underline-offset-2 hover:text-fg">start from an example</MenuTrigger>
+          <MenuContent align="center" className="max-h-[360px] w-[300px] overflow-y-auto">
+            {EXAMPLES.map((example) => (
+              <MenuItem key={example.file} className="h-auto py-1" onSelect={() => void importExample(example)}>
+                <div className="min-w-0">
+                  <div className="truncate">{example.title}</div>
+                  <div className="truncate text-sm text-fg-faint">{example.detail}</div>
+                </div>
+              </MenuItem>
+            ))}
+          </MenuContent>
+        </Menu>
       </div>
     </div>
   );

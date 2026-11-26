@@ -29,6 +29,8 @@ import {
   type BehaviorType,
   type SourceShape,
 } from "@/lib/model";
+import { isModifier } from "@/lib/keys";
+import { platform } from "@/lib/platform";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -236,6 +238,12 @@ export function BehaviorEditor({
           {pulse && (
             <div className="rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
               This message has no “release”, so there is nothing to hold. Try Press or Toggle.
+            </div>
+          )}
+          {platform() === "macos" && b.target.type === "keys" && b.target.keys.length > 0 && b.target.keys.every(isModifier) && (
+            <div className="text-sm text-fg-faint">
+              On macOS a modifier held this way applies to keys and clicks sent by MIDI 2 Keyboard, not to
+              your own keyboard or mouse.
             </div>
           )}
         </div>
