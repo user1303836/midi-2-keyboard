@@ -19,6 +19,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-snippet",
           "name": "Log line snippet",
           "rate_limit": null,
@@ -81,6 +82,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-format",
           "name": "Format document (macro)",
           "rate_limit": null,
@@ -123,6 +125,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-esc-ctrl",
           "name": "Esc, hold for Ctrl",
           "rate_limit": null,
@@ -155,6 +158,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-fn",
           "name": "Fn layer while held",
           "rate_limit": null,
@@ -199,6 +203,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-pad5",
           "name": "Build",
           "rate_limit": null,
@@ -241,6 +246,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-pad5-fn",
           "name": "Run tests (Fn)",
           "rate_limit": null,
@@ -284,6 +290,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-pad6",
           "name": "Comment line",
           "rate_limit": null,
@@ -326,6 +333,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-coder-pad6-fn",
           "name": "Go to definition (Fn)",
           "rate_limit": null,

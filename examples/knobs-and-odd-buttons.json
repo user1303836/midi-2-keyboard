@@ -17,10 +17,12 @@
               "tap_ms": null,
               "type": "keys"
             },
+            "min_change": 0,
             "type": "change"
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-throttled-hotkey",
           "name": "Hotkey knob (at most every 500 ms)",
           "rate_limit": {
@@ -53,6 +55,7 @@
               "tap_ms": null,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 4,
@@ -67,6 +70,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-volume",
           "name": "System volume",
           "rate_limit": null,
@@ -93,10 +97,12 @@
               "text": "{value}\n",
               "type": "text"
             },
+            "min_change": 0,
             "type": "change"
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-settled",
           "name": "Type the value once the knob stops",
           "rate_limit": {
@@ -131,10 +137,12 @@
               "tap_ms": null,
               "type": "keys"
             },
+            "min_change": 0,
             "type": "change"
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-press-only-button",
           "name": "Screenshot (button that only sends 127)",
           "rate_limit": null,
@@ -163,10 +171,12 @@
               "tap_ms": null,
               "type": "keys"
             },
+            "min_change": 0,
             "type": "change"
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-toggling-button",
           "name": "Play / pause (button that alternates 127 / 0)",
           "rate_limit": null,
@@ -201,6 +211,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-crossfader",
           "name": "Crossfader: left third",
           "rate_limit": null,
@@ -235,6 +246,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-crossfader-mid",
           "name": "Crossfader: middle third",
           "rate_limit": null,
@@ -269,6 +281,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-knobs-crossfader-right",
           "name": "Crossfader: right third",
           "rate_limit": null,

@@ -15,6 +15,7 @@
               "tap_ms": 5,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 128,
@@ -29,6 +30,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-hires-nrpn-knob",
           "name": "Fine nudge (14-bit NRPN knob)",
           "rate_limit": null,
@@ -57,6 +59,7 @@
               "tap_ms": null,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 1,
@@ -71,6 +74,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-hires-nrpn-buttons",
           "name": "Selection up / down (NRPN +/- buttons)",
           "rate_limit": null,
@@ -99,6 +103,7 @@
               "tap_ms": 5,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 16,
             "step": 1024,
@@ -113,6 +118,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-hires-fader",
           "name": "Steps along a 14-bit fader",
           "rate_limit": null,
@@ -138,10 +144,12 @@
               "text": "bend range {value} ",
               "type": "text"
             },
+            "min_change": 0,
             "type": "change"
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-hires-pitch-range",
           "name": "Type the new pitch bend range",
           "rate_limit": {

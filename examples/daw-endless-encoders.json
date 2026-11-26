@@ -15,6 +15,7 @@
               "tap_ms": 5,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 1,
@@ -35,6 +36,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-enc-select",
           "name": "Move the selection",
           "rate_limit": null,
@@ -64,6 +66,7 @@
               "tap_ms": 5,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 1,
             "step": 1,
@@ -79,6 +82,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-enc-zoom",
           "name": "Zoom (throttled)",
           "rate_limit": {
@@ -109,6 +113,7 @@
               "dy": 0,
               "type": "mouse_scroll"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 1,
@@ -121,6 +126,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-enc-scroll",
           "name": "Scroll the timeline",
           "rate_limit": null,
@@ -163,6 +169,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-push-transport",
           "name": "Play / stop, hold to save",
           "rate_limit": null,
@@ -193,6 +200,7 @@
           },
           "conditions": [],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-fine-mode",
           "name": "Fine mode while held",
           "rate_limit": null,
@@ -222,6 +230,7 @@
               "tap_ms": 5,
               "type": "keys"
             },
+            "fast": null,
             "invert": false,
             "max_burst": 8,
             "step": 1,
@@ -243,6 +252,7 @@
             }
           ],
           "enabled": true,
+          "feedback": null,
           "id": "ex-daw-enc-select-fine",
           "name": "Move the selection (fine mode)",
           "rate_limit": null,

@@ -18,6 +18,7 @@ the ones your hardware sends: MIDI learn in the editor fills them in for you.
 | `live-show-control.json` | Live performers | Program changes select song profiles, MIDI clock presses a key on every bar, MMC transport and MIDI Stop drive media keys / the backing video | Program changes 0 and 1 (patches 1 and 2 on most devices), MIDI clock from the DAW or sequencer, MMC Play / Stop, pad on note 36 |
 | `coder-macro-pad.json` | Programmers | A text snippet with placeholders (`{note_name}`, `{velocity}`), a multi-step command-palette macro, tap = Esc / hold = Ctrl, an Fn layer that gives two pads a second meaning | Pads on notes 36–41 (hold 39 for the Fn layer) |
 | `nrpn-and-14-bit.json` | Synth and high-resolution controller owners | A 14-bit NRPN knob stepping in fine increments, NRPN data increment / decrement buttons, a 14-bit fader (CC 7 + 39) giving one step per 1/16 of its travel, reacting to an RPN change | NRPN 130 and 131, CC 7 / 39 as a 14-bit pair, RPN 0 |
+| `pad-lights.json` | Anyone whose pad controller has lights | Pads that light up to show state: three latches (auto-run W, crouch C, open mic V) lit while on; a "shift" pad lit while held, which turns the next pad's Screenshot (F12) into Save a clip (F9); two page pads switching between a media page and a volume page, only the active page's pad lit | Pads on notes 36–38 (latches), 40 (shift), 41, 42 / 43 (pages), 44 / 45 (page 1: play / pause, next track; page 2: volume up / down) |
 | `knobs-and-odd-buttons.json` | Everyone with knobs and cheap buttons | The classic "knob CC 20 on channel 2 fires Ctrl+Shift+O at most every 500 ms", a volume knob, "type the value once the knob stops", buttons that only ever send 127 or that alternate 127 / 0 (both fire on every press), a crossfader split into three zones | CC 20 on channel 2, CC 7, 21, 80, 81, 8 |
 
 ## Notes
@@ -29,7 +30,13 @@ the ones your hardware sends: MIDI learn in the editor fills them in for you.
   delayed behind a queue of long key presses.
 - **Per-app profiles** need the name of your application: open the profile and pick it from the
   list of running applications.
-- **Combining examples.** "Streaming: voice" and "Live show: control" are *always on*: their
-  mappings work in every profile. "Streaming: voice" uses pads 1 and 2 (notes 36 and 37), which
-  other examples use too, so after importing both, those pads do two things at once. The list marks
-  such mappings as **shared**; change the notes on one side.
+- **Lights need a controller that reacts to the notes it receives** — most pad controllers light a
+  pad for a note on and switch it off for velocity 0 (on many the velocity picks the colour).
+  `pad-lights.json` sends velocity 127 / 0 on **channel 10**; change the channel and velocities in
+  each light to what your controller expects. A light goes to the controller its pad is pressed
+  on: with one controller connected, the lights show from the start; with several, a pad lights
+  up only after its first press, unless you pick the controller under *Send to*.
+- **Combining examples.** "Streaming: voice", "Live show: control" and "Lights: pad grid" are
+  *always on*: their mappings work in every profile. They use pads (notes 36 and up) that other
+  examples use too, so after importing them together those pads do two things at once. The list
+  marks such mappings as **shared**; change the notes on one side.

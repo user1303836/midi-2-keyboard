@@ -1,0 +1,614 @@
+{
+  "format": "midi-2-keyboard-profiles",
+  "profiles": [
+    {
+      "always_on": true,
+      "apps": [],
+      "id": "ex-lights-pads",
+      "mappings": [
+        {
+          "behavior": {
+            "target": {
+              "keys": [
+                "KeyW"
+              ],
+              "type": "keys"
+            },
+            "type": "toggle"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 36,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 36,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "type": "engaged"
+            }
+          },
+          "id": "ex-lights-autorun",
+          "name": "Auto-run (holds W), lit while on",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 36,
+                "min": 36
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "target": {
+              "keys": [
+                "KeyC"
+              ],
+              "type": "keys"
+            },
+            "type": "toggle"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 37,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 37,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "type": "engaged"
+            }
+          },
+          "id": "ex-lights-crouch",
+          "name": "Crouch lock (holds C), lit while on",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 37,
+                "min": 37
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "target": {
+              "keys": [
+                "KeyV"
+              ],
+              "type": "keys"
+            },
+            "type": "toggle"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 38,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 38,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "type": "engaged"
+            }
+          },
+          "id": "ex-lights-talk",
+          "name": "Open mic (holds V), lit while on",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 38,
+                "min": 38
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "auto_repeat": true,
+            "target": {
+              "layer": "shift",
+              "type": "layer"
+            },
+            "type": "hold"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 40,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 40,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "layer": "shift",
+              "type": "layer"
+            }
+          },
+          "id": "ex-lights-shift",
+          "name": "Shift layer while held, lit while on",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 40,
+                "min": 40
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F12"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": false,
+              "layer": "shift",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-shot",
+          "name": "Screenshot",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "F9"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [
+            {
+              "active": true,
+              "layer": "shift",
+              "type": "layer"
+            }
+          ],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-clip",
+          "name": "Save a clip (with shift)",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 41,
+                "min": 41
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "target": {
+                "id": "ex-lights-page-1-profile",
+                "type": "profile"
+              },
+              "type": "switch_profile"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 42,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 42,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "id": "ex-lights-page-1-profile",
+              "type": "profile"
+            }
+          },
+          "id": "ex-lights-page-1",
+          "name": "Page 1, lit while it is active",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 42,
+                "min": 42
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "target": {
+                "id": "ex-lights-page-2-profile",
+                "type": "profile"
+              },
+              "type": "switch_profile"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": {
+            "device": null,
+            "off": {
+              "channel": 10,
+              "note": 43,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 0
+              }
+            },
+            "on": {
+              "channel": 10,
+              "note": 43,
+              "type": "note_on",
+              "velocity": {
+                "type": "fixed",
+                "value": 127
+              }
+            },
+            "when": {
+              "id": "ex-lights-page-2-profile",
+              "type": "profile"
+            }
+          },
+          "id": "ex-lights-page-2",
+          "name": "Page 2, lit while it is active",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 43,
+                "min": 43
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        }
+      ],
+      "name": "Lights: pad grid (always on)"
+    },
+    {
+      "always_on": false,
+      "apps": [],
+      "id": "ex-lights-page-1-profile",
+      "mappings": [
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "MediaPlayPause"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-p1-play",
+          "name": "Play / pause",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 44,
+                "min": 44
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "MediaTrackNext"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-p1-next",
+          "name": "Next track",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 45,
+                "min": 45
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        }
+      ],
+      "name": "Lights: page 1 (media)"
+    },
+    {
+      "always_on": false,
+      "apps": [],
+      "id": "ex-lights-page-2-profile",
+      "mappings": [
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "AudioVolumeUp"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-p2-up",
+          "name": "Volume up",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 44,
+                "min": 44
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        },
+        {
+          "behavior": {
+            "on_press": {
+              "keys": [
+                "AudioVolumeDown"
+              ],
+              "tap_ms": null,
+              "type": "keys"
+            },
+            "on_release": null,
+            "repeat": null,
+            "type": "trigger"
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-lights-p2-down",
+          "name": "Volume down",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "notes": {
+                "max": 45,
+                "min": 45
+              },
+              "type": "note",
+              "velocity": {
+                "max": 127,
+                "min": 1
+              }
+            },
+            "hysteresis": 0
+          }
+        }
+      ],
+      "name": "Lights: page 2 (volume)"
+    }
+  ],
+  "version": 1
+}
