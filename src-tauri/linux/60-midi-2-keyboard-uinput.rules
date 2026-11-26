@@ -1,0 +1,9 @@
+# Installed by the MIDI 2 Keyboard package.
+#
+# MIDI 2 Keyboard sends keystrokes and mouse input through a virtual input device, which on
+# Wayland is the only way to reach every application. Creating one needs write access to
+# /dev/uinput. This grants it to the user logged in at the local seat ("uaccess", applied by
+# systemd-logind) and to members of the "input" group; "static_node" applies it to the node that
+# exists before the uinput module is loaded. Note that any program of that user can then create
+# virtual input devices.
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput", TAG+="uaccess"

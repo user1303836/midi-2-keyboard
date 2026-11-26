@@ -40,6 +40,22 @@
     "category": "Utility",
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-midi-2-keyboard-uinput.rules": "linux/60-midi-2-keyboard-uinput.rules"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "postRemoveScript": "linux/postrm.sh"
+      },
+      "rpm": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-midi-2-keyboard-uinput.rules": "linux/60-midi-2-keyboard-uinput.rules"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "postRemoveScript": "linux/postrm.sh"
+      }
     }
   }
 }
