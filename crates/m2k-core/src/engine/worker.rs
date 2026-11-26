@@ -822,8 +822,17 @@ impl Worker {
 /// Whether two definitions of a mapping behave the same (its label does not matter). Destructured
 /// exhaustively so a field added to `Mapping` later has to be considered here.
 fn same_behavior(a: &crate::model::Mapping, b: &crate::model::Mapping) -> bool {
-    let crate::model::Mapping { id, name: _, enabled, source, behavior, conditions, rate_limit } =
-        a;
+    // TODO(engine): `feedback` is new in the model; decide whether changing it alone resets state.
+    let crate::model::Mapping {
+        id,
+        name: _,
+        enabled,
+        source,
+        behavior,
+        conditions,
+        rate_limit,
+        feedback: _,
+    } = a;
     *id == b.id
         && *enabled == b.enabled
         && *source == b.source

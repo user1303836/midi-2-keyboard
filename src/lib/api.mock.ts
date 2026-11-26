@@ -59,6 +59,7 @@ function sampleConfig(): Config {
             behavior: { type: "trigger", on_press: keys("ArrowUp"), on_release: null, repeat: null },
             conditions: [],
             rate_limit: null,
+            feedback: null,
           },
           {
             id: "m2",
@@ -72,6 +73,7 @@ function sampleConfig(): Config {
             behavior: { type: "change", action: keys("ControlLeft", "ShiftLeft", "KeyO"), min_change: 0 },
             conditions: [],
             rate_limit: { mode: "throttle", interval_ms: 500, trailing: false },
+            feedback: null,
           },
           {
             id: "m3",
@@ -85,6 +87,7 @@ function sampleConfig(): Config {
             behavior: { type: "hold", target: { type: "keys", keys: ["Space"] }, auto_repeat: true },
             conditions: [],
             rate_limit: null,
+            feedback: null,
           },
           {
             id: "m4",
@@ -111,6 +114,7 @@ function sampleConfig(): Config {
             },
             conditions: [],
             rate_limit: null,
+            feedback: null,
           },
           {
             id: "m5",
@@ -130,6 +134,7 @@ function sampleConfig(): Config {
             },
             conditions: [{ type: "layer", layer: "shift", active: false }],
             rate_limit: null,
+            feedback: null,
           },
         ],
       },
@@ -154,6 +159,7 @@ function normalizeProfiles(data: { profiles?: Profile[] }): Profile[] {
       enabled: m.enabled ?? true,
       conditions: m.conditions ?? [],
       rate_limit: m.rate_limit ?? null,
+      feedback: m.feedback ?? null,
       source: {
         ...m.source,
         device: m.source.device ?? null,
@@ -340,6 +346,11 @@ export function createMockBackend(): Backend {
         config,
         engine: { ...status },
         ports,
+        outputs: [
+          { name: "Launchkey Mini MK3", state: "disabled", error: "", is_virtual: false },
+          { name: "Arturia BeatStep", state: "disabled", error: "", is_virtual: false },
+          { name: "Microsoft GS Wavetable Synth", state: "disabled", error: "", is_virtual: false },
+        ],
         permissions: { can_inject: true, can_detect_foreground: true, hint: "" },
         warnings: [],
         backend_error: "",

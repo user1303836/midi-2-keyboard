@@ -744,6 +744,12 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             Class::Os,
             format!("open {}", shorten(target, 60)),
         ),
+        // TODO(engine): "Send MIDI" is new in the model (see `Action::Midi`, `MidiSend`).
+        Action::Midi { .. } => (
+            ActionKind::Unavailable("sending MIDI is not implemented yet".to_string()),
+            Class::Internal,
+            "send MIDI".to_string(),
+        ),
     };
     let est_ms = match &kind {
         ActionKind::Output(steps) => steps
@@ -798,6 +804,8 @@ fn sequence(steps: &[SequenceStep], settings: &Settings, gap: u32) -> Vec<Prim> 
         // Separate consecutive taps so each one registers, unless a delay follows anyway.
         let separate = !matches!(steps.get(i + 1), None | Some(SequenceStep::Delay { .. }));
         match step {
+            // TODO(engine): "Send MIDI" as a macro step is new in the model.
+            SequenceStep::Midi { .. } => {}
             SequenceStep::Keys { keys, tap_ms } => {
                 let tap_ms = tap_ms.unwrap_or(settings.tap_ms).max(1);
                 push_tap(&mut out, keys, tap_ms, settings.key_stagger_ms);
@@ -891,6 +899,7 @@ fn sequence_label(steps: &[SequenceStep]) -> String {
         .iter()
         .take(4)
         .map(|step| match step {
+            SequenceStep::Midi { .. } => "send MIDI".to_string(),
             SequenceStep::Keys { keys, .. } => keys_label(keys),
             SequenceStep::KeyDown { key } => format!("press {}", key.label()),
             SequenceStep::KeyUp { key } => format!("release {}", key.label()),

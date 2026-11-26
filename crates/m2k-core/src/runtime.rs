@@ -296,6 +296,8 @@ impl Runtime {
             config: lock(&inner.config).clone(),
             engine: inner.engine.status(),
             ports: lock(&inner.ports).clone(),
+            // TODO(engine): the output ports of m2k-midi's OutputManager.
+            outputs: Vec::new(),
             permissions: lock(&inner.permissions).clone(),
             warnings: std::mem::take(&mut *lock(&inner.warnings)),
             backend_error: lock(&inner.backend_error).clone(),

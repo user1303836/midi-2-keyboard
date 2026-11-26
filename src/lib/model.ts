@@ -5,8 +5,10 @@ import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
 import type { Condition } from "@/bindings/Condition";
 import type { Config } from "@/bindings/Config";
+import type { Feedback } from "@/bindings/Feedback";
 import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { Mapping } from "@/bindings/Mapping";
+import type { MidiSend } from "@/bindings/MidiSend";
 import type { Profile } from "@/bindings/Profile";
 import type { RateLimit } from "@/bindings/RateLimit";
 import type { SequenceStep } from "@/bindings/SequenceStep";
@@ -336,7 +338,7 @@ export interface ActionTypeInfo {
   type: ActionType;
   label: string;
   hint: string;
-  group: "Keyboard" | "Mouse" | "App" | "System";
+  group: "Keyboard" | "Mouse" | "App" | "System" | "MIDI";
 }
 
 export const ACTION_TYPES: ActionTypeInfo[] = [
@@ -351,6 +353,7 @@ export const ACTION_TYPES: ActionTypeInfo[] = [
   { type: "engine", label: "Pause / resume", hint: "Pause output, resume, or release everything", group: "App" },
   { type: "run", label: "Run program", hint: "Launch an application or script", group: "System" },
   { type: "open", label: "Open file or URL", hint: "Open with the default application", group: "System" },
+  { type: "midi", label: "Send MIDI", hint: "Light a pad, or pass a control on to other gear", group: "MIDI" },
 ];
 
 export function actionTypeInfo(type: ActionType): ActionTypeInfo {
@@ -381,7 +384,69 @@ export function defaultAction(type: ActionType, profileId = ""): Action {
       return { type, command: "", args: [], working_dir: "" };
     case "open":
       return { type, target: "" };
+    case "midi":
+      return { type, device: null, message: defaultMidiSend("control_change") };
   }
+}
+
+export type MidiSendType = MidiSend["type"];
+
+export const MIDI_SEND_TYPES: { type: MidiSendType; label: string }[] = [
+  { type: "note_on", label: "Note on" },
+  { type: "note_off", label: "Note off" },
+  { type: "control_change", label: "Control change" },
+  { type: "program_change", label: "Program change" },
+  { type: "raw", label: "Raw bytes (SysEx…)" },
+];
+
+/** A fresh message of the given kind, keeping channel and number of `previous` where they fit. */
+export function defaultMidiSend(type: MidiSendType, previous?: MidiSend): MidiSend {
+  const channel = previous && "channel" in previous ? previous.channel : 1;
+  const number =
+    previous?.type === "note_on" || previous?.type === "note_off"
+      ? previous.note
+      : previous?.type === "control_change"
+        ? previous.controller
+        : null;
+  switch (type) {
+    case "note_on":
+      return { type, channel, note: number ?? 60, velocity: { type: "fixed", value: 127 } };
+    case "note_off":
+      return { type, channel, note: number ?? 60 };
+    case "control_change":
+      return { type, channel, controller: number ?? 1, value: { type: "fixed", value: 127 } };
+    case "program_change":
+      return { type, channel, program: { type: "fixed", value: 0 } };
+    case "raw":
+      return { type, bytes: "" };
+  }
+}
+
+/**
+ * The obvious light for a mapping: the pad or button it is on. Notes get "note on, velocity
+ * 127" / "velocity 0", control changes get 127 / 0, on the source's own channel.
+ */
+export function feedbackForSource(source: Source): Feedback | null {
+  const channel = source.channel ?? 1;
+  const event = source.event;
+  if (event.type === "note") {
+    const note = event.notes.min;
+    return {
+      device: null,
+      when: { type: "engaged" },
+      on: { type: "note_on", channel, note, velocity: { type: "fixed", value: 127 } },
+      off: { type: "note_on", channel, note, velocity: { type: "fixed", value: 0 } },
+    };
+  }
+  if (event.type === "control_change") {
+    return {
+      device: null,
+      when: { type: "engaged" },
+      on: { type: "control_change", channel, controller: event.controller, value: { type: "fixed", value: 127 } },
+      off: { type: "control_change", channel, controller: event.controller, value: { type: "fixed", value: 0 } },
+    };
+  }
+  return null;
 }
 
 export const STEP_TYPES: { type: StepType; label: string }[] = [
@@ -395,6 +460,7 @@ export const STEP_TYPES: { type: StepType; label: string }[] = [
   { type: "mouse_up", label: "Mouse button up" },
   { type: "mouse_scroll", label: "Scroll" },
   { type: "mouse_move", label: "Move pointer" },
+  { type: "midi", label: "Send MIDI" },
 ];
 
 export function defaultStep(type: StepType): SequenceStep {
@@ -417,6 +483,8 @@ export function defaultStep(type: StepType): SequenceStep {
       return { type, dx: 0, dy: 1 };
     case "mouse_move":
       return { type, x: 0, y: 0, absolute: false };
+    case "midi":
+      return { type, device: null, message: defaultMidiSend("control_change") };
   }
 }
 
@@ -436,6 +504,8 @@ export function isEmptyAction(action: Action | null): boolean {
       return action.target.trim().length === 0;
     case "mouse_scroll":
       return action.dx === 0 && action.dy === 0;
+    case "midi":
+      return action.message.type === "raw" && action.message.bytes.trim().length === 0;
     default:
       return false;
   }
@@ -486,6 +556,7 @@ export function newMapping(source: Source = newSource(), behavior?: Behavior): M
     behavior: behavior ?? defaultBehavior(suggestedBehavior(sourceShape(source.event))),
     conditions: [],
     rate_limit: null,
+    feedback: null,
   };
 }
 

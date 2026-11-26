@@ -221,6 +221,10 @@ impl Printer {
                 }
             }
             RuntimeEvent::Ports { ports } => self.ports_changed(ports),
+            RuntimeEvent::Outputs { outputs } => {
+                let names: Vec<String> = outputs.iter().map(|port| port.name.clone()).collect();
+                self.line(None, "OUT", format!("MIDI outputs: {}", names.join(", ")));
+            }
             RuntimeEvent::Permissions { permissions, backend_error, .. } => {
                 let output = if permissions.can_inject { "works" } else { "blocked" };
                 let foreground =

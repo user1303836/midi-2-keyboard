@@ -266,6 +266,77 @@ pub struct Mapping {
     /// `Cycle`, `Change` and `Step`; ignored by `Hold`, `Toggle`, `TapHold` and `MultiTap`.
     #[serde(default)]
     pub rate_limit: Option<RateLimit>,
+    /// MIDI sent back to the controller to show a state (light a pad while a toggle is on, ...).
+    #[serde(default)]
+    pub feedback: Option<Feedback>,
+}
+
+/// MIDI sent to a controller whenever a state turns on or off, so its lights (or motor faders,
+/// or displays) show what the computer side is doing.
+///
+/// `on` is sent when the state described by `when` becomes true, `off` when it becomes false.
+/// Both are also sent to bring a controller up to date: when the output port (re)appears, when
+/// the configuration changes, and when the set of live profiles changes (a mapping that stops
+/// being live gets its `off`). On exit and on pause nothing is sent: lights keep showing the
+/// state. Sending never blocks and never delays key output; a missing port is reported once, not
+/// per message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Feedback {
+    /// Output port to send to. `None` = the output named like the mapping's source device; if
+    /// the source accepts any device, the one named like the device that last reached this
+    /// mapping (so nothing is sent before the control was touched once).
+    #[serde(default)]
+    pub device: Option<String>,
+    #[serde(default)]
+    pub when: FeedbackWhen,
+    pub on: MidiSend,
+    pub off: MidiSend,
+}
+
+/// The state a [`Feedback`] shows.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FeedbackWhen {
+    /// While this mapping is engaged — what the UI shows as ON: a `Hold` / `TapHold` target
+    /// that is down, a latched `Toggle`.
+    #[default]
+    Engaged,
+    /// While the named layer is on, whoever switched it (a "shift" light).
+    Layer { layer: String },
+    /// While the profile with this id is the effective one (radio lights on profile pads).
+    Profile { id: String },
+}
+
+/// A MIDI message to send. Channels are 1..=16.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MidiSend {
+    /// Note on. Velocity 0 is how most pads are told to go dark.
+    NoteOn { channel: u8, note: u8, velocity: SendValue },
+    NoteOff { channel: u8, note: u8 },
+    ControlChange { channel: u8, controller: u8, value: SendValue },
+    ProgramChange { channel: u8, program: SendValue },
+    /// Any bytes as space separated hex (`F0 7F 7F 06 02 F7`): SysEx, several messages in a
+    /// row, anything the other variants do not cover. Sent exactly as written.
+    Raw { bytes: String },
+}
+
+impl MidiSend {
+    /// Nothing to send (raw bytes left blank).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, MidiSend::Raw { bytes } if bytes.trim().is_empty())
+    }
+}
+
+/// Where a data byte of a [`MidiSend`] comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SendValue {
+    Fixed { value: u8 },
+    /// The value of the message that triggered the action, as 0..=127 (a note's velocity, a
+    /// controller's value, a program number; 14-bit values give their upper 7 bits). In a
+    /// [`Feedback`], where no message is at hand, it stands for 127 in `on` and 0 in `off`.
+    Incoming,
 }
 
 /// An inclusive range. Used for 7-bit values (0..=127), 14-bit values (0..=16383), note numbers
@@ -784,6 +855,16 @@ pub enum Action {
     },
     /// Open a file, folder or URL with the default application.
     Open { target: String },
+    /// Send a MIDI message to an output port: light a pad, move a motor fader, forward or
+    /// translate a control to other gear or software.
+    Midi {
+        /// Output port to send to (a name from `Snapshot::outputs`). `None` = the output named
+        /// like the device the triggering message came from, i.e. back to the controller
+        /// itself. When there is no such output the firing is reported as failed.
+        #[serde(default)]
+        device: Option<String>,
+        message: MidiSend,
+    },
 }
 
 fn default_clicks() -> u8 {
@@ -811,6 +892,7 @@ impl Action {
             Action::Layer { layer, .. } => layer.trim().is_empty(),
             Action::Run { command, .. } => command.trim().is_empty(),
             Action::Open { target } => target.trim().is_empty(),
+            Action::Midi { message, .. } => message.is_empty(),
         }
     }
 }
@@ -850,6 +932,12 @@ pub enum SequenceStep {
         #[serde(default)]
         absolute: bool,
     },
+    /// Send a MIDI message (see [`Action::Midi`]).
+    Midi {
+        #[serde(default)]
+        device: Option<String>,
+        message: MidiSend,
+    },
 }
 
 impl SequenceStep {
@@ -862,6 +950,7 @@ impl SequenceStep {
             SequenceStep::Delay { .. } => false,
             SequenceStep::MouseScroll { dx, dy } => *dx != 0 || *dy != 0,
             SequenceStep::MouseMove { x, y, absolute } => *absolute || *x != 0 || *y != 0,
+            SequenceStep::Midi { message, .. } => !message.is_empty(),
             SequenceStep::KeyDown { .. }
             | SequenceStep::KeyUp { .. }
             | SequenceStep::MouseClick { .. }

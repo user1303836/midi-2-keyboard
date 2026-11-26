@@ -6,6 +6,7 @@ import type { Condition } from "@/bindings/Condition";
 import type { Config } from "@/bindings/Config";
 import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { Mapping } from "@/bindings/Mapping";
+import type { MidiSend } from "@/bindings/MidiSend";
 import type { RateLimit } from "@/bindings/RateLimit";
 import type { SequenceStep } from "@/bindings/SequenceStep";
 import type { Source } from "@/bindings/Source";
@@ -145,8 +146,30 @@ export function deviceLabel(name: string, config: Config | null): string {
   return alias || name;
 }
 
+/** A MIDI message to send, in a few words: "CC 20 = 127 (ch 1)", "note C3 on (ch 10)". */
+export function midiSendText(message: MidiSend, octave = 4): string {
+  const value = (v: { type: "fixed"; value: number } | { type: "incoming" }) =>
+    v.type === "fixed" ? String(v.value) : "the incoming value";
+  switch (message.type) {
+    case "note_on":
+      return message.velocity.type === "fixed" && message.velocity.value === 0
+        ? `note ${noteName(message.note, octave)} off (ch ${message.channel})`
+        : `note ${noteName(message.note, octave)} at ${value(message.velocity)} (ch ${message.channel})`;
+    case "note_off":
+      return `note ${noteName(message.note, octave)} off (ch ${message.channel})`;
+    case "control_change":
+      return `CC ${message.controller} = ${value(message.value)} (ch ${message.channel})`;
+    case "program_change":
+      return `program ${value(message.program)} (ch ${message.channel})`;
+    case "raw":
+      return message.bytes.trim() ? truncate(message.bytes.trim().toUpperCase(), 26) : "(no bytes)";
+  }
+}
+
 export function stepText(step: SequenceStep): string {
   switch (step.type) {
+    case "midi":
+      return `send ${midiSendText(step.message)}`;
     case "keys":
       return step.keys.length ? comboText(step.keys) : "(no keys)";
     case "key_down":
@@ -231,6 +254,8 @@ export function actionText(action: Action | null, config: Config | null = null):
       return action.command ? `run ${truncate(basename(action.command), 28)}` : "run (nothing)";
     case "open":
       return action.target ? `open ${truncate(action.target, 28)}` : "open (nothing)";
+    case "midi":
+      return `send ${midiSendText(action.message)}${action.device ? ` to ${deviceLabel(action.device, config)}` : ""}`;
   }
 }
 
@@ -365,6 +390,7 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
   }
   const extras = [
     mapping.rate_limit && rateLimitText(mapping.rate_limit),
+    mapping.feedback && "with a light on the controller",
     ...mapping.conditions.map((c) => conditionText(c, config, octave)),
   ].filter(Boolean);
   return `${source} → ${what}${extras.length ? ` (${extras.join(", ")})` : ""}`;

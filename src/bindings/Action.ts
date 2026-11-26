@@ -2,6 +2,7 @@
 import type { EngineOp } from "./EngineOp";
 import type { Key } from "./Key";
 import type { LayerOp } from "./LayerOp";
+import type { MidiSend } from "./MidiSend";
 import type { MouseButton } from "./MouseButton";
 import type { ProfileTarget } from "./ProfileTarget";
 import type { SequenceStep } from "./SequenceStep";
@@ -9,4 +10,10 @@ import type { SequenceStep } from "./SequenceStep";
 /**
  * Something that happens at one instant (or plays out over time, for sequences).
  */
-export type Action = { "type": "keys", keys: Array<Key>, tap_ms: number | null, } | { "type": "text", text: string, char_delay_ms: number, } | { "type": "mouse_click", button: MouseButton, clicks: number, } | { "type": "mouse_scroll", dx: number, dy: number, } | { "type": "mouse_move", x: number, y: number, absolute: boolean, } | { "type": "sequence", steps: Array<SequenceStep>, } | { "type": "switch_profile", target: ProfileTarget, } | { "type": "layer", layer: string, op: LayerOp, } | { "type": "engine", op: EngineOp, } | { "type": "run", command: string, args: Array<string>, working_dir: string, } | { "type": "open", target: string, };
+export type Action = { "type": "keys", keys: Array<Key>, tap_ms: number | null, } | { "type": "text", text: string, char_delay_ms: number, } | { "type": "mouse_click", button: MouseButton, clicks: number, } | { "type": "mouse_scroll", dx: number, dy: number, } | { "type": "mouse_move", x: number, y: number, absolute: boolean, } | { "type": "sequence", steps: Array<SequenceStep>, } | { "type": "switch_profile", target: ProfileTarget, } | { "type": "layer", layer: string, op: LayerOp, } | { "type": "engine", op: EngineOp, } | { "type": "run", command: string, args: Array<string>, working_dir: string, } | { "type": "open", target: string, } | { "type": "midi", 
+/**
+ * Output port to send to (a name from `Snapshot::outputs`). `None` = the output named
+ * like the device the triggering message came from, i.e. back to the controller
+ * itself. When there is no such output the firing is reported as failed.
+ */
+device: string | null, message: MidiSend, };

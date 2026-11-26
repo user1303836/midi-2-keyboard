@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
+  Cable,
   ChevronDown,
   ExternalLink,
   Keyboard,
@@ -54,6 +55,7 @@ const ACTION_ICONS: Record<ActionType, ReactNode> = {
   engine: <Pause size={15} />,
   run: <Terminal size={15} />,
   open: <ExternalLink size={15} />,
+  midi: <Cable size={15} />,
 };
 
 const TARGET_ICONS: Record<HoldTarget["type"], ReactNode> = {
@@ -62,7 +64,6 @@ const TARGET_ICONS: Record<HoldTarget["type"], ReactNode> = {
   layer: <Layers size={15} />,
 };
 
-/** The compact "what kind of thing is this" button at the end of an action row. */
 /** What the engine fills in while typing text, with what each one stands for. */
 const TEXT_PLACEHOLDERS: [string, string][] = [
   ["value", "The value of the message: a knob's position, a note's velocity, a program number"],
@@ -82,6 +83,7 @@ function unknownPlaceholders(text: string): string[] {
   return [...found].slice(0, 3);
 }
 
+/** The compact "what kind of thing is this" button at the end of an action row. */
 function TypeMenu({
   label,
   icon,

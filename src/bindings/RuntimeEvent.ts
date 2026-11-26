@@ -8,4 +8,4 @@ import type { PortStatus } from "./PortStatus";
 /**
  * Live updates pushed to the front end.
  */
-export type RuntimeEvent = { "type": "engine", events: Array<EngineEvent>, } | { "type": "ports", ports: Array<PortStatus>, } | { "type": "permissions", permissions: Permissions, backend_error: string, unsupported_keys: Array<Key>, } | { "type": "config", config: Config, };
+export type RuntimeEvent = { "type": "engine", events: Array<EngineEvent>, } | { "type": "ports", ports: Array<PortStatus>, } | { "type": "outputs", outputs: Array<PortStatus>, } | { "type": "permissions", permissions: Permissions, backend_error: string, unsupported_keys: Array<Key>, } | { "type": "config", config: Config, };

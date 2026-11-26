@@ -35,6 +35,10 @@ pub struct Snapshot {
     pub config: Config,
     pub engine: EngineStatus,
     pub ports: Vec<PortStatus>,
+    /// MIDI output ports (for "Send MIDI" actions and feedback). `Connected` = open (they are
+    /// opened on first use), `Disabled` = present but not in use, `Error` = could not be opened.
+    #[serde(default)]
+    pub outputs: Vec<PortStatus>,
     pub permissions: Permissions,
     /// Problems found while loading the config (recovered corruption, repairs, ...).
     pub warnings: Vec<String>,
@@ -54,6 +58,8 @@ pub enum RuntimeEvent {
     Engine { events: Vec<EngineEvent> },
     /// The set of MIDI ports or their states changed.
     Ports { ports: Vec<PortStatus> },
+    /// The set of MIDI output ports or their states changed.
+    Outputs { outputs: Vec<PortStatus> },
     Permissions {
         permissions: Permissions,
         backend_error: String,

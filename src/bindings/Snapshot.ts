@@ -9,7 +9,12 @@ import type { PortStatus } from "./PortStatus";
 /**
  * Everything a front end needs to render its first frame.
  */
-export type Snapshot = { info: AppInfo, config: Config, engine: EngineStatus, ports: Array<PortStatus>, permissions: Permissions, 
+export type Snapshot = { info: AppInfo, config: Config, engine: EngineStatus, ports: Array<PortStatus>, 
+/**
+ * MIDI output ports (for "Send MIDI" actions and feedback). `Connected` = open (they are
+ * opened on first use), `Disabled` = present but not in use, `Error` = could not be opened.
+ */
+outputs: Array<PortStatus>, permissions: Permissions, 
 /**
  * Problems found while loading the config (recovered corruption, repairs, ...).
  */
