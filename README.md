@@ -59,14 +59,14 @@ import/export, undo/redo, copy and paste of mappings as plain text. The list poi
 that share a control, and *find by touching* jumps to the mapping of whatever control you touch.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
-*why* something was not sent), the engine's measured MIDI-to-key latency, an activity light on
-every mapping, and an on-screen virtual controller for trying things without hardware.
+*why* something was not sent), the engine's measured MIDI-to-key latency, an activity dot on
+every mapping in the list, and an on-screen virtual controller for trying things without hardware.
 
 **Safety** — everything the app holds down is tracked and released on pause, profile switch,
 device disconnect, config change and exit; a key release the system refuses is retried until it
 goes through. (A macro that is already playing finishes across a profile switch, and releases
-what it pressed at its end.) By default nothing is sent while the app's own window has focus, so
-a mapping cannot type into (or close) the editor.
+what it pressed at its end.) By default no keys or mouse input are sent while the app's own
+window has focus (MIDI still is), so a mapping cannot type into (or close) the editor.
 
 **Light on the machine** — the engine is native code on its own thread (tens of microseconds
 from MIDI message to key event, 0% CPU when idle). Closing the window keeps the mappings running
@@ -85,6 +85,8 @@ Not there yet:
 - Output that scales with the value (knob position → pointer speed, jog / shuttle rates).
 - Per-application profiles on Wayland (there is no portable way to ask which window is in front).
 - Signed installers: Windows SmartScreen and macOS Gatekeeper warn about the downloads.
+- A system-wide pause shortcut: Settings already has the field (*Pause from anywhere*), but the
+  app does not react to it yet.
 
 ## Using it
 
@@ -120,18 +122,19 @@ Settings; *Launch at login* is there too.
 | --- | --- |
 | `N` | Add a mapping: touch a control, then press the key or shortcut to send |
 | `Enter` | Open the focused mapping |
-| `Esc` | Cancel a key capture; close the quick add, the editor, a menu or a dialog |
+| `Esc` | Cancel a key capture; close the quick add, the editor, a menu or a dialog; let go of picked mappings |
 | `↑` / `↓` | Previous / next mapping |
 | `Alt+↑` / `Alt+↓` | Move the mapping up / down |
 | `Ctrl`+click, `Shift`+click, `Shift+↑` / `↓`, `Ctrl+A` | Pick several mappings: enable, disable, duplicate, copy, move or delete them together |
-| `Del` | Delete the focused mapping (the message that follows has *Undo*) |
-| `Ctrl+D` | Duplicate the focused mapping |
-| `Ctrl+C` / `Ctrl+V` | Copy the focused mapping / paste mappings into the profile in view. They travel as plain JSON text, so they can be pasted into a chat or a text editor and back |
+| `Del` | Delete the focused mapping, or all picked ones (the message that follows has *Undo*) |
+| `Ctrl+D` | Duplicate the focused mapping, or all picked ones |
+| `Ctrl+C` / `Ctrl+V` | Copy the focused mapping (or the picked ones) / paste mappings into the profile in view. They travel as plain JSON text, so they can be pasted into a chat or a text editor and back |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo (`Ctrl+Y` redoes too) |
 | `Ctrl+F` | Search mappings |
 | `Ctrl+M` | Show / hide the monitor |
 | `Ctrl+,` | Settings |
 | `F2` | Rename the profile that has the focus in the sidebar |
+| `Backspace` | Clear the shortcut field that has the focus |
 | Right-click, `Shift+F10` | The menu of a mapping: edit, duplicate, disable, move up / down, move or copy to another profile, delete. On empty space: add a mapping, map a run of notes |
 
 On a Mac, use `Cmd` instead of `Ctrl`; the ⌫ key deletes too. To send `Esc` itself, pick it from
