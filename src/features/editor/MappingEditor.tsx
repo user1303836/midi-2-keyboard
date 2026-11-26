@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
+import type { Key } from "@/bindings/Key";
 import type { Mapping } from "@/bindings/Mapping";
 import type { RateLimit } from "@/bindings/RateLimit";
 import type { Source } from "@/bindings/Source";
@@ -38,7 +39,9 @@ import {
   supportsRateLimit,
   UPPER7,
   type BehaviorType,
+  type SourceShape,
 } from "@/lib/model";
+import { platform } from "@/lib/platform";
 import { findConflicts } from "@/lib/conflicts";
 import { api, profileOfMapping, useApp, useKnownLayers, useOctave } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -531,6 +534,68 @@ function RateTip({
   );
 }
 
+/**
+ * The things people map most often, one click away — several of them (volume and media keys,
+ * Esc, the scroll wheel) cannot be captured by pressing them. Turning controls get pairs for
+ * the two directions, everything else single actions.
+ */
+function Suggestions({ shape, onPick }: { shape: SourceShape; onPick: (behavior: Behavior) => void }) {
+  const unsupported = useApp((state) => state.unsupportedKeys);
+  const mac = platform() === "macos";
+  const mod: Key = mac ? "MetaLeft" : "ControlLeft";
+  const keys = (...combo: Key[]): Action => ({ type: "keys", keys: combo, tap_ms: null });
+  const scroll = (dy: number): Action => ({ type: "mouse_scroll", dx: 0, dy });
+  const usable = (action: Action) => action.type !== "keys" || action.keys.every((key) => !unsupported.includes(key));
+
+  const pairs: [string, Action, Action][] = [
+    ["Volume", keys("AudioVolumeUp"), keys("AudioVolumeDown")],
+    ["Scroll", scroll(1), scroll(-1)],
+    ["Zoom", keys(mod, "Equal"), keys(mod, "Minus")],
+    ["Undo / redo", mac ? keys(mod, "ShiftLeft", "KeyZ") : keys(mod, "KeyY"), keys(mod, "KeyZ")],
+    ["← →", keys("ArrowRight"), keys("ArrowLeft")],
+    ["↑ ↓", keys("ArrowUp"), keys("ArrowDown")],
+    ["Next / previous tab", keys("ControlLeft", "Tab"), keys("ControlLeft", "ShiftLeft", "Tab")],
+  ];
+  const singles: [string, Action][] = [
+    ["Play / pause", keys("MediaPlayPause")],
+    ["Next track", keys("MediaTrackNext")],
+    ["Previous track", keys("MediaTrackPrevious")],
+    ["Mute", keys("AudioVolumeMute")],
+    ["Esc", keys("Escape")],
+    ["Copy", keys(mod, "KeyC")],
+    ["Paste", keys(mod, "KeyV")],
+    ["Undo", keys(mod, "KeyZ")],
+  ];
+  const turning = shape === "relative" || shape === "continuous";
+  const offers: [string, Behavior][] = turning
+    ? pairs
+        .filter(([, up, down]) => usable(up) && usable(down))
+        .map(([label, up, down]) => [
+          label,
+          // An absolute knob has 127 positions: one step every few of them is plenty.
+          { type: "step", up, down, step: shape === "relative" ? 1 : 4, max_burst: 8, invert: false, fast: null },
+        ])
+    : singles
+        .filter(([, action]) => usable(action))
+        .map(([label, action]) => [label, { type: "trigger", on_press: action, on_release: null, repeat: null }]);
+
+  return (
+    <div data-suggestions className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 text-sm text-fg-muted">Or pick a common one:</span>
+      {offers.map(([label, behavior]) => (
+        <button
+          key={label}
+          type="button"
+          className="rounded-full border border-line-strong bg-app px-2.5 py-[1px] text-sm text-fg-muted outline-hidden transition-colors hover:border-key hover:text-fg focus-visible:border-key"
+          onClick={() => onPick(behavior)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Wizard({
   mapping,
   onSource,
@@ -707,6 +772,15 @@ function Wizard({
                 // Choosing another behavior starts over with its first slot.
                 if (behavior.type !== mapping.behavior.type) setArmedSlot(0);
                 onBehavior(behavior, key);
+              }}
+            />
+          )}
+          {stage === "action" && !done && (
+            <Suggestions
+              shape={shape}
+              onPick={(behavior) => {
+                setArmedSlot(null);
+                onBehavior(behavior);
               }}
             />
           )}

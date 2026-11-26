@@ -353,9 +353,12 @@ export function MappingList({ profile }: { profile: Profile }) {
     setDropIndex(null);
   }, [moveMapping]);
 
+  // Without a search every mapping is shown: no need to spell each one out to find that out.
   const visible = useMemo(
     () =>
-      profile.mappings.filter((mapping) => matchesSearch(mapping, search, mappingSentence(mapping, config, octave))),
+      search
+        ? profile.mappings.filter((mapping) => matchesSearch(mapping, search, mappingSentence(mapping, config, octave)))
+        : profile.mappings,
     [profile.mappings, search, config, octave],
   );
 

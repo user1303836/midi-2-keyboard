@@ -157,14 +157,19 @@ export function midiBytesProblem(text: string): string | null {
       running = null;
       if (status === 0xf1 || status === 0xf3) [name, count] = [status === 0xf1 ? "time code" : "song select", 1];
       else if (status === 0xf2) [name, count] = ["song position", 2];
-      else if (status === 0xf4 || status === 0xf5 || status === 0xf7) return `${hex(status)} cannot start a message.`;
-      else [name, count] = ["system message", 0];
+      else if (status === 0xf7) return "F7 only ends a SysEx message; it cannot start one.";
+      else if (status === 0xf4 || status === 0xf5 || status === 0xf9 || status === 0xfd) {
+        return `${hex(status)} is not a defined MIDI status byte.`;
+      } else [name, count] = ["system message", 0];
     }
     const data = bytes.slice(i, i + count);
     const high = data.find((value) => value >= 0x80);
     if (data.length < count || high !== undefined) {
       const missing = high !== undefined ? count - data.indexOf(high) : count - data.length;
-      return `Incomplete: ${hex(status)} (${name}) needs ${needs(missing)}${count === 2 ? `, e.g. ${hex(status)} 3C 7F` : ""}.`;
+      // The example keeps what was typed and only adds what is missing.
+      const typed = data.slice(0, count - missing).map(hex);
+      const example = [hex(status), ...typed, ...["3C", "7F"].slice(typed.length, count)].join(" ");
+      return `Incomplete: ${hex(status)} (${name}) needs ${needs(missing)}, e.g. ${example}.`;
     }
     i += count;
   }

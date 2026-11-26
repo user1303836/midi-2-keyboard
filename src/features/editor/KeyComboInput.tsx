@@ -186,7 +186,7 @@ export function KeyComboInput({
           }
         }}
         className={cn(
-          "group/combo flex min-h-[34px] min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 rounded-md border bg-app px-2 py-[4px] transition-colors",
+          "group/combo flex min-h-[34px] min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 overflow-hidden rounded-md border bg-app px-2 py-[4px] transition-colors",
           capturing
             ? "animate-listen border-key ring-2 ring-key-soft [--ring-color:var(--key-line)]"
             : "border-line-strong hover:border-fg-faint",
@@ -195,8 +195,11 @@ export function KeyComboInput({
         {shown.length > 0 ? (
           <KeyCombo keys={shown} />
         ) : (
-          <span className={cn("text-fg-faint", capturing && "text-key")}>
-            {capturing ? "Press a key or shortcut…  (Esc cancels)" : placeholder}
+          // One line in every state: a hint that wrapped while the field listens would make the
+          // field shrink the moment a click elsewhere ends the capture — and the layout under
+          // the pointer jump away before that click lands.
+          <span className={cn("min-w-0 flex-1 truncate text-fg-faint", capturing && "text-key")}>
+            {capturing ? "Press a key or shortcut… (Esc cancels)" : placeholder}
           </span>
         )}
         {capturing && shown.length > 0 && live.length === 0 && (

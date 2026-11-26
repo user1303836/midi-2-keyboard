@@ -160,7 +160,9 @@ export function midiSendText(message: MidiSend, octave = 4): string {
     case "control_change":
       return `CC ${message.controller} = ${value(message.value)} (ch ${message.channel})`;
     case "program_change":
-      return `program ${value(message.program)} (ch ${message.channel})`;
+      return message.program.type === "fixed"
+        ? `program ${message.program.value} (ch ${message.channel})`
+        : `the program change, as received (ch ${message.channel})`;
     case "raw":
       return message.bytes.trim() ? truncate(message.bytes.trim().toUpperCase(), 26) : "(no bytes)";
   }
