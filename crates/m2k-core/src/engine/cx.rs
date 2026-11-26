@@ -285,8 +285,15 @@ impl Cx {
         }));
     }
 
-    pub fn report_skip(&mut self, info: &OwnerInfo, description: String, reason: SkipReason) {
-        self.report(info, description, Outcome::Skipped { reason });
+    /// `detail`: why, in the user's terms (empty when the reason says it all).
+    pub fn report_skip(
+        &mut self,
+        info: &OwnerInfo,
+        description: String,
+        reason: SkipReason,
+        detail: String,
+    ) {
+        self.report(info, description, Outcome::Skipped { reason, detail });
     }
 
     /// Reports a backend failure: as the outcome of the firing being sent right now, or as its
@@ -335,9 +342,9 @@ impl Cx {
 
     // ----- conditions -----
 
-    pub fn conditions_hold(&self, conditions: &[CCondition]) -> bool {
-        conditions.iter().all(|condition| match condition {
-            CCondition::App { rule, negate } => {
+    fn condition_holds(&self, condition: &CCondition) -> bool {
+        match condition {
+            CCondition::App { rule, negate, .. } => {
                 self.foreground.as_ref().is_some_and(|app| rule.matches(app)) != *negate
             }
             CCondition::Layer { layer, active } => self.layers.is_active(layer) == *active,
@@ -346,6 +353,58 @@ impl Cx {
             }
             CCondition::ControlValue { channel, controller, range } => {
                 self.devices.control_in(*channel, *controller, *range)
+            }
+        }
+    }
+
+    /// The first condition that does not hold, described for the user (`layer "shift" is
+    /// off`, `C2 is not held`, `CC 1 is 12, needs 64-127`, `Photoshop.exe is not in front
+    /// (chrome.exe is)`); `None` when all hold.
+    pub fn failed_condition(&self, conditions: &[CCondition]) -> Option<String> {
+        let failed = conditions.iter().find(|c| !self.condition_holds(c))?;
+        let on_channel = |channel: &Option<u8>| match channel {
+            Some(channel) => format!(" on channel {channel}"),
+            None => String::new(),
+        };
+        Some(match failed {
+            CCondition::Layer { layer, active: true } => format!("layer \"{layer}\" is off"),
+            CCondition::Layer { layer, active: false } => format!("layer \"{layer}\" is on"),
+            CCondition::NoteHeld { channel, note, held } => {
+                let name = m2k_midi::names::note_name(*note, self.settings.middle_c_octave);
+                let state = if *held { "is not held" } else { "is held" };
+                format!("{name}{} {state}", on_channel(channel))
+            }
+            CCondition::ControlValue { channel, controller, range } => {
+                let which = format!("CC {controller}{}", on_channel(channel));
+                match self.devices.control_value(*channel, *controller) {
+                    Some(value) => {
+                        format!("{which} is {value}, needs {}\u{2013}{}", range.min, range.max)
+                    }
+                    None => format!("{which} has not been received yet"),
+                }
+            }
+            CCondition::App { negate, process, title, .. } => {
+                let wanted = if !process.is_empty() {
+                    process.clone()
+                } else if !title.is_empty() {
+                    format!("a window titled \"{title}\"")
+                } else {
+                    "an app".to_string()
+                };
+                let current = self.foreground.as_ref().map(|f| {
+                    if f.app.process.is_empty() {
+                        f.app.title.clone()
+                    } else {
+                        f.app.process.clone()
+                    }
+                });
+                match (negate, current) {
+                    (true, _) => format!("{wanted} is in front"),
+                    (false, Some(current)) if !current.is_empty() => {
+                        format!("{wanted} is not in front ({current} is)")
+                    }
+                    (false, _) => format!("{wanted} is not in front (the app in front is unknown)"),
+                }
             }
         })
     }
@@ -360,14 +419,15 @@ impl Cx {
 
         let description = action.describe(&ctx, self.settings.middle_c_octave);
         if gated && let Some(reason) = self.gate.check(action.class) {
-            self.report_skip(info, description, reason);
+            self.report_skip(info, description, reason, String::new());
             return false;
         }
         match &action.kind {
             ActionKind::Output(_) => {
                 if self.exec.is_full(info.owner) {
                     if self.exec.note_overflow(info.owner, self.now) {
-                        self.report_skip(info, description, SkipReason::RateLimited);
+                        let detail = "its action queue is full".to_string();
+                        self.report_skip(info, description, SkipReason::RateLimited, detail);
                     }
                     return false;
                 }
@@ -427,7 +487,7 @@ impl Cx {
     /// it. Conditions are the caller's business. Returns whether it was engaged.
     pub fn engage(&mut self, info: &OwnerInfo, target: &CHoldTarget, auto_repeat: bool) -> bool {
         if let Some(reason) = self.gate.check(target.class()) {
-            self.report_skip(info, target.hold_label.clone(), reason);
+            self.report_skip(info, target.hold_label.clone(), reason, String::new());
             return false;
         }
         self.report_sent(info, target.hold_label.clone(), |cx| match &target.what {

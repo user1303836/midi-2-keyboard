@@ -214,14 +214,39 @@ pub enum CBehavior {
         step: u16,
         max_burst: u16,
         invert: bool,
+        fast: Option<CFastStep>,
     },
 }
 
+/// [`FastStep`]: one coarse action instead of `ticks` or more fine ones.
+pub struct CFastStep {
+    pub ticks: u32,
+    pub up: Option<CAction>,
+    pub down: Option<CAction>,
+}
+
 pub enum CCondition {
-    App { rule: AppRule, negate: bool },
-    Layer { layer: String, active: bool },
-    NoteHeld { channel: Option<u8>, note: u8, held: bool },
-    ControlValue { channel: Option<u8>, controller: u8, range: ValueRange },
+    /// `process` / `title`: the patterns as written, for messages.
+    App {
+        rule: AppRule,
+        negate: bool,
+        process: String,
+        title: String,
+    },
+    Layer {
+        layer: String,
+        active: bool,
+    },
+    NoteHeld {
+        channel: Option<u8>,
+        note: u8,
+        held: bool,
+    },
+    ControlValue {
+        channel: Option<u8>,
+        controller: u8,
+        range: ValueRange,
+    },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -504,10 +529,14 @@ fn compile_mapping(
             }
         }
         Behavior::Change { action } => CBehavior::Change { action: act(action) },
-        // TODO(engine): `fast` (a second action for fast movement) is new in the model.
-        Behavior::Step { up, down, step, max_burst, invert, .. } => CBehavior::Step {
+        Behavior::Step { up, down, step, max_burst, invert, fast } => CBehavior::Step {
             up: up.as_ref().map(act),
             down: down.as_ref().map(act),
+            fast: fast.as_ref().map(|fast| CFastStep {
+                ticks: u32::from(fast.ticks.max(2)),
+                up: fast.up.as_ref().map(act),
+                down: fast.down.as_ref().map(act),
+            }),
             step: (*step).max(1),
             max_burst: *max_burst,
             invert: *invert,
@@ -529,9 +558,12 @@ fn compile_mapping(
         .conditions
         .iter()
         .map(|c| match c {
-            Condition::App { app, negate } => {
-                CCondition::App { rule: AppRule::new(app), negate: *negate }
-            }
+            Condition::App { app, negate } => CCondition::App {
+                rule: AppRule::new(app),
+                negate: *negate,
+                process: app.process.trim().to_string(),
+                title: app.title.trim().to_string(),
+            },
             Condition::Layer { layer, active } => {
                 CCondition::Layer { layer: layer.clone(), active: *active }
             }
@@ -571,7 +603,11 @@ fn behavior_actions(behavior: &Behavior) -> Vec<&Action> {
             single.iter().chain(double).chain(triple).collect()
         }
         Behavior::Change { action } => vec![action],
-        Behavior::Step { up, down, .. } => up.iter().chain(down).collect(),
+        Behavior::Step { up, down, fast, .. } => up
+            .iter()
+            .chain(down)
+            .chain(fast.iter().flat_map(|fast| fast.up.iter().chain(&fast.down)))
+            .collect(),
     }
 }
 

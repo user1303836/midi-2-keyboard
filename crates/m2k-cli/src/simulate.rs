@@ -541,7 +541,12 @@ fn print_event(clock: &Clock, options: PrintOptions, tally: &Mutex<Tally>, event
         EngineEvent::Fired(fired) => {
             let outcome = match &fired.outcome {
                 Outcome::Sent => "sent".to_string(),
-                Outcome::Skipped { reason } => format!("skipped: {}", skip_reason(*reason)),
+                Outcome::Skipped { reason, detail } if detail.is_empty() => {
+                    format!("skipped: {}", skip_reason(*reason))
+                }
+                Outcome::Skipped { reason, detail } => {
+                    format!("skipped: {}: {detail}", skip_reason(*reason))
+                }
                 Outcome::Failed { error } => format!("FAILED: {error}"),
             };
             let who =

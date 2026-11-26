@@ -297,11 +297,11 @@ export function createMockBackend(): Backend {
           mapping_id: mapping.id,
           description,
           outcome: status.learning
-            ? { type: "skipped", reason: "learning" }
+            ? { type: "skipped", reason: "learning", detail: "" }
             : status.paused
-              ? { type: "skipped", reason: "paused" }
+              ? { type: "skipped", reason: "paused", detail: "" }
               : limited
-                ? { type: "skipped", reason: "rate_limited" }
+                ? { type: "skipped", reason: "rate_limited", detail: "" }
                 : { type: "sent" },
         });
       }

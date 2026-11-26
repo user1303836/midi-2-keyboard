@@ -210,6 +210,14 @@ impl Devices {
         })
     }
 
+    /// The controller's last value (first device / channel that has one), for messages.
+    pub fn control_value(&self, channel: Option<u8>, controller: u8) -> Option<u8> {
+        self.list.iter().find_map(|d| match channel {
+            Some(channel) => d.midi.control(channel, controller),
+            None => (1..=16).find_map(|channel| d.midi.control(channel, controller)),
+        })
+    }
+
     /// [`crate::model::Condition::ControlValue`]: the controller's last value on any device is
     /// inside `range`. False when it was never received.
     pub fn control_in(&self, channel: Option<u8>, controller: u8, range: ValueRange) -> bool {

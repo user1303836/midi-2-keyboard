@@ -111,6 +111,24 @@ impl Limiter {
         }
     }
 
+    /// Why a trigger was just swallowed, in the user's terms.
+    pub fn explain(&self, limit: &RateLimit, now: Instant) -> String {
+        match limit.mode {
+            RateLimitMode::Throttle => {
+                let wait =
+                    self.window_end.map_or(0, |end| end.saturating_duration_since(now).as_millis());
+                if limit.trailing {
+                    format!("next allowed in {wait} ms; the latest then fires")
+                } else {
+                    format!("next allowed in {wait} ms")
+                }
+            }
+            RateLimitMode::Debounce => {
+                format!("fires once it has been quiet for {} ms", limit.interval_ms)
+            }
+        }
+    }
+
     /// Forgets everything (the caller cancels `timer`).
     pub fn clear(&mut self) {
         self.window_end = None;

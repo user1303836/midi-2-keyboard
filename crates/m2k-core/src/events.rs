@@ -70,7 +70,15 @@ pub enum Outcome {
     /// The action was sent to the OS.
     Sent,
     /// The mapping matched but nothing was sent.
-    Skipped { reason: SkipReason },
+    Skipped {
+        reason: SkipReason,
+        /// Why, in the user's terms, where there is more to say than the reason (empty
+        /// otherwise): which condition is not met (`layer "shift" is off`,
+        /// `C2 is not held`, `CC 1 is 12, needs 64-127`), or when it may fire again
+        /// (`next allowed in 320 ms`).
+        #[serde(default)]
+        detail: String,
+    },
     /// The OS / backend rejected it.
     Failed { error: String },
 }

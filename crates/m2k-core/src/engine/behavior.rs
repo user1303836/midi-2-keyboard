@@ -19,7 +19,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::compile::{CAction, CBehavior, CMapping, CSource, Class};
+use super::compile::{CAction, CBehavior, CFastStep, CMapping, CSource, Class};
 use super::cx::{Ctx, Cx, OwnerInfo, TimerKind};
 use super::limiter::{Admission, Limiter, SLOTS, Slot};
 use super::source::{DeviceId, InstKey, Obs};
@@ -159,6 +159,9 @@ pub struct MappingRt {
     debounce: Vec<Debounce>,
     pub state: State,
     limiters: [Limiter; SLOTS],
+    /// A swallowed firing that will be fired later by the limiter with a specific action (a
+    /// fast step) rather than the slot's usual one.
+    deferred: [Option<CAction>; SLOTS],
     limit_reported: Option<Instant>,
 }
 
@@ -177,6 +180,7 @@ impl MappingRt {
             debounce: Vec::new(),
             state: State::initial(&def.behavior),
             limiters: Default::default(),
+            deferred: Default::default(),
             limit_reported: None,
         }
     }
@@ -188,6 +192,7 @@ impl MappingRt {
         self.debounce.clear();
         self.state = State::initial(&def.behavior);
         self.limiters = Default::default();
+        self.deferred = Default::default();
         self.limit_reported = None;
     }
 
@@ -430,13 +435,28 @@ fn slot_action(def: &CMapping, state: &State, slot: Slot) -> Option<CAction> {
 /// A rate-limitable firing: conditions, then the slot's limiter, then execution. `quiet`
 /// suppresses skip reports (auto-fire repeats would flood the monitor).
 fn fire(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, slot: Slot, ctx: Ctx, quiet: bool) {
-    let Some(action) = slot_action(def, &rt.state, slot) else {
-        return;
-    };
-    if !cx.conditions_hold(&def.conditions) {
+    if let Some(action) = slot_action(def, &rt.state, slot) {
+        fire_action(rt, def, cx, slot, action, false, ctx, quiet);
+    }
+}
+
+/// [`fire`] with an explicit action. `special`: the action is not the slot's usual one (a fast
+/// step), so a deferred firing remembers it.
+#[allow(clippy::too_many_arguments)]
+fn fire_action(
+    rt: &mut MappingRt,
+    def: &CMapping,
+    cx: &mut Cx,
+    slot: Slot,
+    action: CAction,
+    special: bool,
+    ctx: Ctx,
+    quiet: bool,
+) {
+    if let Some(detail) = cx.failed_condition(&def.conditions) {
         if !quiet {
             let description = action.describe(&ctx, cx.settings.middle_c_octave);
-            cx.report_skip(&rt.info, description, SkipReason::ConditionFailed);
+            cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         }
         return;
     }
@@ -448,11 +468,15 @@ fn fire(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, slot: Slot, ctx: Ctx, q
                 if limiter.timer.is_none() {
                     limiter.timer = Some(cx.timers.schedule(at, TimerKind::Limiter(rt.key, slot)));
                 }
-                note_rate_limited(rt, cx, &action, &ctx, limit.interval_ms);
+                let detail = limiter.explain(limit, cx.now);
+                // The latest trigger wins, with its own action.
+                rt.deferred[slot.index()] = special.then(|| action.clone());
+                note_rate_limited(rt, cx, &action, &ctx, limit.interval_ms, detail);
                 return;
             }
             Admission::Drop => {
-                note_rate_limited(rt, cx, &action, &ctx, limit.interval_ms);
+                let detail = limiter.explain(limit, cx.now);
+                note_rate_limited(rt, cx, &action, &ctx, limit.interval_ms, detail);
                 return;
             }
         }
@@ -490,6 +514,7 @@ fn note_rate_limited(
     action: &CAction,
     ctx: &Ctx,
     interval_ms: u32,
+    detail: String,
 ) {
     let window = Cx::ms(interval_ms.max(1));
     if rt.limit_reported.is_some_and(|at| cx.now.saturating_duration_since(at) < window) {
@@ -497,17 +522,24 @@ fn note_rate_limited(
     }
     rt.limit_reported = Some(cx.now);
     let description = action.describe(ctx, cx.settings.middle_c_octave);
-    cx.report_skip(&rt.info, description, SkipReason::RateLimited);
+    cx.report_skip(&rt.info, description, SkipReason::RateLimited, detail);
 }
 
 /// A firing that is not rate limited (tap-hold, multi-tap, hold pulses).
 fn fire_direct(rt: &MappingRt, def: &CMapping, cx: &mut Cx, action: &CAction, ctx: Ctx) {
-    if !cx.conditions_hold(&def.conditions) {
+    if let Some(detail) = cx.failed_condition(&def.conditions) {
         let description = action.describe(&ctx, cx.settings.middle_c_octave);
-        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed);
+        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         return;
     }
     cx.execute(&rt.info, action, ctx, true);
+}
+
+/// The Step backlog is full when the queued output would take longer than this to play.
+fn step_backlog_full(rt: &MappingRt, cx: &Cx, action: &CAction) -> Option<String> {
+    let backlog = cx.exec.backlog_ms(rt.key, cx.now);
+    (action.queues() && backlog > STEP_BACKLOG_MS)
+        .then(|| format!("{backlog} ms of steps are already queued"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -566,12 +598,9 @@ pub fn on_edge(
                 if rt.engaged() {
                     return;
                 }
-                if !cx.conditions_hold(&def.conditions) {
-                    cx.report_skip(
-                        &rt.info,
-                        target.hold_label.clone(),
-                        SkipReason::ConditionFailed,
-                    );
+                if let Some(detail) = cx.failed_condition(&def.conditions) {
+                    let label = target.hold_label.clone();
+                    cx.report_skip(&rt.info, label, SkipReason::ConditionFailed, detail);
                     return;
                 }
                 if cx.engage(&rt.info, target, *auto_repeat) {
@@ -602,8 +631,9 @@ pub fn on_edge(
             if rt.engaged() {
                 cx.disengage(&rt.info, target, false);
                 rt.state = State::Toggle { latched: false, by: None };
-            } else if !cx.conditions_hold(&def.conditions) {
-                cx.report_skip(&rt.info, target.hold_label.clone(), SkipReason::ConditionFailed);
+            } else if let Some(detail) = cx.failed_condition(&def.conditions) {
+                let label = target.hold_label.clone();
+                cx.report_skip(&rt.info, label, SkipReason::ConditionFailed, detail);
             } else if cx.engage(&rt.info, target, false) {
                 rt.state = State::Toggle { latched: true, by: Some(ctx.device) };
             }
@@ -668,7 +698,7 @@ pub fn on_edge(
             }
         }
 
-        CBehavior::Step { up, down, step, max_burst, invert } => {
+        CBehavior::Step { up, down, step, max_burst, invert, fast } => {
             let moved = match edge {
                 Edge::Press => {
                     rt.set_ref(inst, ctx.value);
@@ -687,25 +717,42 @@ pub fn on_edge(
                 return;
             }
             let up_now = (moved > 0) != *invert;
-            let mut count = moved.unsigned_abs();
+            let steps = moved.unsigned_abs();
+            let (slot, this, other) =
+                if up_now { (Slot::Up, up, down) } else { (Slot::Down, down, up) };
+            let fast_of =
+                |fast: &CFastStep, up: bool| if up { fast.up.clone() } else { fast.down.clone() };
+            // Turning back cancels what is still queued for the other direction (fine or fast).
+            let other_fast = fast.as_ref().and_then(|fast| fast_of(fast, !up_now));
+            cx.exec.drop_pending(rt.key, |queued| {
+                other.as_ref().is_some_and(|o| Arc::ptr_eq(queued, o))
+                    || other_fast.as_ref().is_some_and(|o| Arc::ptr_eq(queued, o))
+            });
+            // Moved by `ticks` or more at once: one coarse action instead of many fine ones.
+            if let Some(fast_action) = fast
+                .as_ref()
+                .filter(|fast| steps >= fast.ticks)
+                .and_then(|fast| fast_of(fast, up_now))
+            {
+                if let Some(detail) = step_backlog_full(rt, cx, &fast_action) {
+                    note_rate_limited(rt, cx, &fast_action, &ctx, 500, detail);
+                    return;
+                }
+                fire_action(rt, def, cx, slot, fast_action, true, ctx, false);
+                return;
+            }
+            let mut count = steps;
             if *max_burst > 0 {
                 count = count.min(u32::from(*max_burst));
             }
             // "Unlimited" still has to end somewhere: a 14-bit jump with step 1 would otherwise
             // queue thousands of firings for one message.
             count = count.min(MAX_STEPS_PER_MESSAGE);
-            let (slot, this, other) =
-                if up_now { (Slot::Up, up, down) } else { (Slot::Down, down, up) };
-            // Turning back cancels what is still queued for the other direction.
-            if let Some(other) = other {
-                cx.exec.drop_pending(rt.key, |action| Arc::ptr_eq(action, other));
-            }
             for _ in 0..count {
                 if let Some(action) = this
-                    && action.queues()
-                    && cx.exec.backlog_ms(rt.key, cx.now) > STEP_BACKLOG_MS
+                    && let Some(detail) = step_backlog_full(rt, cx, action)
                 {
-                    note_rate_limited(rt, cx, action, &ctx, 500);
+                    note_rate_limited(rt, cx, action, &ctx, 500, detail);
                     break;
                 }
                 fire(rt, def, cx, slot, ctx, false);
@@ -931,13 +978,13 @@ fn on_tap_hold(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, id: TimerId) {
     if !rt.live || rt.instances.is_empty() {
         return;
     }
-    if !cx.conditions_hold(&def.conditions) {
+    if let Some(detail) = cx.failed_condition(&def.conditions) {
         let description = match (hold, hold_target) {
             (Some(action), _) => action.describe(&ctx, cx.settings.middle_c_octave),
             (None, Some(target)) => target.hold_label.clone(),
             (None, None) => return,
         };
-        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed);
+        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         return;
     }
     if let Some(action) = hold {
@@ -991,12 +1038,13 @@ fn on_limiter(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, slot: Slot, id: T
     if !rt.live {
         return;
     }
-    let Some(action) = slot_action(def, &rt.state, slot) else {
+    let deferred = rt.deferred[slot.index()].take();
+    let Some(action) = deferred.or_else(|| slot_action(def, &rt.state, slot)) else {
         return;
     };
-    if !cx.conditions_hold(&def.conditions) {
+    if let Some(detail) = cx.failed_condition(&def.conditions) {
         let description = action.describe(&ctx, cx.settings.middle_c_octave);
-        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed);
+        cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         return;
     }
     run_slot(rt, def, cx, slot, &action, ctx, false);
@@ -1060,6 +1108,7 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
         cx.timers.cancel_slot(&mut limiter.timer);
         limiter.clear();
     }
+    rt.deferred = Default::default();
     rt.drop_windows(cx, None);
     rt.instances.clear();
     rt.step_refs.clear();
