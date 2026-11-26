@@ -28,11 +28,14 @@ import {
   defaultBehavior,
   isEmptyAction,
   isFullRange,
+  layerSwitches,
+  newSource,
   primaryAction,
   rangeLimit,
   sourceShape,
   suggestedBehavior,
   supportsRateLimit,
+  UPPER7,
   type BehaviorType,
 } from "@/lib/model";
 import { findConflicts } from "@/lib/conflicts";
@@ -40,7 +43,7 @@ import { api, profileOfMapping, useApp, useKnownLayers, useOctave } from "@/lib/
 import { cn } from "@/lib/utils";
 
 import { BehaviorEditor } from "./BehaviorEditor";
-import { ConditionsEditor, RateLimitEditor } from "./ExtrasEditor";
+import { ConditionsEditor, LearnOnce, RateLimitEditor } from "./ExtrasEditor";
 import { SourceEditor } from "./SourceEditor";
 import { SourceIcon } from "../mappings/tokens";
 
@@ -76,7 +79,8 @@ function reconcile(previous: Mapping, next: Mapping): Mapping {
       "range" in event &&
       isFullRange(event)
     ) {
-      const range = { min: Math.ceil((limit + 1) / 2), max: limit };
+      // Pitch bend rests in the middle, so its "pressed" part starts well above the rest position.
+      const range = { min: event.type === "pitch_bend" ? 12288 : Math.ceil((limit + 1) / 2), max: limit };
       result = { ...result, source: { ...result.source, event: { ...event, range } as Source["event"] } };
     }
   }
@@ -189,10 +193,14 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
       <LayerVariantDialog
         open={variantOpen}
         onOpenChange={setVariantOpen}
-        onCreate={(layer) => {
-          addLayerVariant(mapping.id, layer);
+        onCreate={(layer, switchSource, hasSwitch) => {
+          addLayerVariant(mapping.id, layer, switchSource);
           toast(
-            `This control now has a second job while layer “${layer}” is on. Give a pad the behavior Hold → Layer “${layer}” to switch.`,
+            switchSource
+              ? `This control now has a second job while layer “${layer}” is on — hold ${sourceTitle(switchSource.event, octave)} to use it.`
+              : hasSwitch
+                ? `This control now has a second job while layer “${layer}” is on.`
+                : `This control now has a second job while layer “${layer}” is on. Give a pad the behavior Hold → Layer “${layer}” to switch.`,
             { kind: "success" },
           );
         }}
@@ -284,15 +292,24 @@ function LayerVariantDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (layer: string) => void;
+  onCreate: (layer: string, switchSource: Source | null, hasSwitch: boolean) => void;
 }) {
   const layers = useKnownLayers();
+  const config = useApp((state) => state.config);
+  const pinDevice = useApp((state) => state.ports.filter((p) => p.state === "connected").length > 1);
+  const octave = useOctave();
   const [layer, setLayer] = useState("");
+  // The control that will turn the layer on, when nothing does yet.
+  const [switchSource, setSwitchSource] = useState<Source | null>(null);
   useEffect(() => {
-    if (open) setLayer(layers[0] ?? "shift");
+    if (open) {
+      setLayer(layers[0] ?? "shift");
+      setSwitchSource(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const name = layer.trim();
+  const switches = useMemo(() => (name ? layerSwitches(config, name) : []), [config, name]);
   return (
     <Dialog
       open={open}
@@ -307,7 +324,7 @@ function LayerVariantDialog({
             variant="primary"
             disabled={!name}
             onClick={() => {
-              onCreate(name);
+              onCreate(name, switches.length > 0 ? null : switchSource, switches.length > 0);
               onOpenChange(false);
             }}
           >
@@ -333,10 +350,59 @@ function LayerVariantDialog({
             ))}
           </datalist>
         </label>
+        <div className="flex min-h-[28px] flex-wrap items-center gap-2">
+          <span className="text-fg-muted">Turned on by</span>
+          {switches.length > 0 ? (
+            <span>
+              <span className="font-semibold text-midi">
+                {switches
+                  .slice(0, 3)
+                  .map((m) => sourceTitle(m.source.event, octave))
+                  .join(", ")}
+              </span>
+              <span className="text-fg-faint"> — already set up</span>
+            </span>
+          ) : switchSource ? (
+            <>
+              <span className="flex h-[26px] items-center rounded-md border border-midi-line bg-midi-soft px-2 font-semibold text-midi">
+                {sourceTitle(switchSource.event, octave)}
+              </span>
+              <span className="text-fg-muted">while it is held</span>
+              <IconButton label="Choose another control" size="sm" onClick={() => setSwitchSource(null)}>
+                <X size={13} />
+              </IconButton>
+            </>
+          ) : (
+            <>
+              <LearnOnce
+                label="Press the pad or button…"
+                accept={(log) => {
+                  const message = log.message;
+                  const device = pinDevice ? log.device : null;
+                  if (message.type === "note_on" && message.velocity > 0) {
+                    const event = { type: "note" as const, notes: { min: message.note, max: message.note }, velocity: { min: 1, max: 127 } };
+                    setSwitchSource({ ...newSource(event), channel: message.channel, device });
+                    return true;
+                  }
+                  if (message.type === "control_change" && message.value >= 64) {
+                    const event = { type: "control_change" as const, controller: message.controller, range: { ...UPPER7 }, encoding: "absolute" as const };
+                    setSwitchSource({ ...newSource(event), channel: message.channel, device });
+                    return true;
+                  }
+                  return false;
+                }}
+              />
+              <span className="text-sm text-fg-faint">nothing yet — optional</span>
+            </>
+          )}
+        </div>
         <div className="text-sm leading-relaxed text-fg-faint">
           This mapping will only fire while the layer is <b>off</b>, and a copy that only fires while
-          it is <b>on</b> is added below it for you to change. To turn the layer on, give another
-          control the behavior <b>Hold</b> (or Toggle) with the target <b>Layer</b>.
+          it is <b>on</b> is added below it for you to change.
+          {switches.length === 0 &&
+            (switchSource
+              ? " The control above is added as the layer’s switch: the layer is on while you hold it."
+              : " Click Learn and press the pad or button that should turn the layer on — or do it later with the behavior Hold and the target Layer.")}
         </div>
       </div>
     </Dialog>
@@ -409,10 +475,32 @@ function TestPanel({ action }: { action: Action | null }) {
  * The owner's own example in one click: a knob bound to a shortcut with "on change" fires for
  * every one of the dozens of messages a turn produces. Say so, and offer the cure.
  */
-function RateTip({ mapping, onApply }: { mapping: Mapping; onApply: (limit: RateLimit) => void }) {
+function RateTip({
+  mapping,
+  onApply,
+  confirm = false,
+}: {
+  mapping: Mapping;
+  onApply: (limit: RateLimit | null) => void;
+  /** Keep a line in its place once a limit is set (where no rate limit editor is in sight). */
+  confirm?: boolean;
+}) {
   const shape = sourceShape(mapping.source.event);
-  if (mapping.behavior.type !== "change" || mapping.rate_limit || shape === "button" || shape === "pulse") return null;
+  if (mapping.behavior.type !== "change" || shape === "button" || shape === "pulse") return null;
   if (isEmptyAction(mapping.behavior.action)) return null;
+  if (mapping.rate_limit) {
+    if (!confirm) return null;
+    return (
+      <div className="mt-3 flex items-center gap-1.5 text-sm text-fg-muted">
+        <Timer size={14} className="shrink-0 text-accent" />
+        <span>Limited: {rateLimitText(mapping.rate_limit)}</span>
+        <span className="text-fg-faint">·</span>
+        <button type="button" className="underline underline-offset-2 hover:text-fg" onClick={() => onApply(null)}>
+          remove
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="mt-3 flex items-center gap-2 rounded-lg border border-accent-line bg-accent-soft px-2.5 py-2">
       <Timer size={15} className="shrink-0 text-accent" />
@@ -596,7 +684,9 @@ function Wizard({
               }}
             />
           )}
-          {stage === "action" && <RateTip mapping={mapping} onApply={(rate_limit) => onUpdate((m) => ({ ...m, rate_limit }))} />}
+          {stage === "action" && (
+            <RateTip confirm mapping={mapping} onApply={(rate_limit) => onUpdate((m) => ({ ...m, rate_limit }))} />
+          )}
         </div>
       </div>
 

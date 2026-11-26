@@ -447,7 +447,7 @@ export function SourceEditor({
         summary={[
           event.type === "note" && (event.velocity.min > 1 || event.velocity.max < 127) && "velocity range",
           event.type === "chord" && event.window_ms > 0 && `within ${event.window_ms} ms`,
-          source.hysteresis > 0 && `slack ${source.hysteresis}`,
+          source.hysteresis > 0 && `dead zone ${source.hysteresis}`,
           source.debounce_ms > 0 && `debounce ${source.debounce_ms} ms`,
           source.device && "one device",
         ]
@@ -504,8 +504,8 @@ export function SourceEditor({
           )}
           {limit !== null && "range" in event && !isFullRange(event) && sourceShape(event) === "button" && (
             <Field
-              label="Slack"
-              hint="How far past the edge of the range the value must go before it counts as released. Stops a jittery pedal or fader from flickering on and off."
+              label="Dead zone"
+              hint="How far back past the edge of the range the value must travel before it counts as released. Stops a jittery pedal or fader from flickering on and off."
             >
               <NumberInput
                 aria-label="Hysteresis"

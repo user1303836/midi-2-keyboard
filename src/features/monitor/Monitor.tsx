@@ -7,7 +7,8 @@ import type { Outcome } from "@/bindings/Outcome";
 import { IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Select, Switch } from "@/components/ui/inputs";
 import { Tooltip } from "@/components/ui/overlays";
-import { deviceLabel, sourceTitle } from "@/lib/describe";
+import { silentReason } from "@/lib/conflicts";
+import { deviceLabel, mappingBrief, sourceTitle } from "@/lib/describe";
 import { bytesToHex, encodeMessage, isBlackKey, noteName, viewMessage } from "@/lib/midi";
 import { clearLog, onFired, onMidi, setLogFrozen, useLog, useLogFrozen, type LogEntry } from "@/lib/monitor";
 import { api, profileOfMapping, useApp, useOctave } from "@/lib/store";
@@ -33,8 +34,7 @@ export function outcomeText(outcome: Outcome): string | null {
   if (outcome.type === "failed") return `failed: ${outcome.error}`;
   const base = SKIP_TEXT[outcome.reason] ?? outcome.reason;
   // The engine may say exactly which condition was not met / how long the rate limit still runs.
-  const detail = (outcome as { detail?: string }).detail;
-  return detail ? `${base}: ${detail}` : base;
+  return outcome.detail ? `${base}: ${outcome.detail}` : base;
 }
 
 function mappingLabel(id: string): string {
@@ -43,6 +43,19 @@ function mappingLabel(id: string): string {
   const mapping = owner?.mappings.find((m) => m.id === id);
   if (!mapping) return "a deleted mapping";
   return mapping.name || sourceTitle(mapping.source.event, config.settings.middle_c_octave);
+}
+
+/** What the mapping does ("Ctrl+Shift+O"): next to a MIDI row the control is already named. */
+function mappingEffect(id: string): string {
+  const config = useApp.getState().config;
+  const mapping = profileOfMapping(config, id)?.mappings.find((m) => m.id === id);
+  return mapping ? mappingBrief(mapping, config) : "a deleted mapping";
+}
+
+/** Why nothing reacted to a message, in a few words. */
+function whyNothing(log: MidiLog): string {
+  const { config, engine } = useApp.getState();
+  return silentReason(config, engine.effective_profile, log.device, log.message) ?? "no mapping listens to this";
 }
 
 const KIND_COLOR: Record<string, string> = {
@@ -127,11 +140,11 @@ const LogRow = memo(function LogRow({ entry, octave }: { entry: LogEntry; octave
           className="min-w-0 truncate text-sm text-fg-muted underline-offset-2 hover:text-fg hover:underline"
           onClick={() => selectMapping(entry.mappings[0])}
         >
-          → {mappingLabel(entry.mappings[0])}
+          → {mappingEffect(entry.mappings[0])}
           {entry.mappings.length > 1 ? ` +${entry.mappings.length - 1}` : ""}
         </button>
       ) : (
-        <span className="min-w-0 truncate text-sm text-fg-faint italic">no mapping listens to this</span>
+        <span className="min-w-0 truncate text-sm text-fg-faint italic">{whyNothing(entry)}</span>
       )}
       <span className="selectable ml-auto shrink-0 pl-3 font-mono text-sm text-fg-faint">
         {bytesToHex(encodeMessage(entry.message).slice(0, 8))}
@@ -496,19 +509,34 @@ export function MonitorPanel() {
 export function LastEvent() {
   const octave = useOctave();
   const config = useApp((state) => state.config);
-  const [midi, setMidi] = useState<MidiLog | null>(null);
-  const [fired, setFired] = useState<{ text: string; sent: boolean; note: string | null } | null>(null);
-  const firedAt = useRef(0);
+  type Result = { mappingId: string; text: string; sent: boolean; note: string | null };
+  const [shown, setShown] = useState<{ midi: MidiLog; fired: Result | null } | null>(null);
 
   useEffect(() => {
+    // An output is only ever shown next to a message of the control that caused it: the engine
+    // names the mappings a message reached, and every firing names its mapping.
     const offMidi = onMidi((log) => {
       if (log.message.type === "clock" || log.message.type === "active_sensing") return;
-      setMidi(log);
-      if (performance.now() - firedAt.current > 250) setFired(null);
+      setShown((current) => ({
+        midi: log,
+        // The same control's last result stays through its release or the rest of a knob turn.
+        fired: current?.fired && log.mappings.includes(current.fired.mappingId) ? current.fired : null,
+      }));
     });
     const offFired = onFired((log) => {
-      firedAt.current = performance.now();
-      setFired({ text: log.description, sent: log.outcome.type === "sent", note: outcomeText(log.outcome) });
+      setShown((current) =>
+        current && current.midi.mappings.includes(log.mapping_id)
+          ? {
+              midi: current.midi,
+              fired: {
+                mappingId: log.mapping_id,
+                text: log.description,
+                sent: log.outcome.type === "sent",
+                note: outcomeText(log.outcome),
+              },
+            }
+          : current,
+      );
     });
     return () => {
       offMidi();
@@ -516,7 +544,8 @@ export function LastEvent() {
     };
   }, []);
 
-  if (!midi) return <span className="truncate text-fg-faint">No MIDI received yet</span>;
+  if (!shown) return <span className="truncate text-fg-faint">No MIDI received yet</span>;
+  const { midi, fired } = shown;
   const view = viewMessage(midi.message, octave);
   return (
     <span className="flex min-w-0 items-center gap-1.5">
@@ -532,6 +561,14 @@ export function LastEvent() {
           <ArrowRight size={12} className="shrink-0 text-fg-faint" />
           <span className={cn("truncate font-medium", fired.sent ? "text-key" : "text-fg-faint")}>{fired.text}</span>
           {fired.note && <span className="truncate text-fg-faint">({fired.note})</span>}
+        </>
+      )}
+      {!fired && midi.mappings.length === 0 && (
+        <>
+          <ArrowRight size={12} className="shrink-0 text-fg-faint" />
+          <span className="truncate text-fg-faint">
+            {silentReason(config, useApp.getState().engine.effective_profile, midi.device, midi.message) ?? "no mapping"}
+          </span>
         </>
       )}
     </span>

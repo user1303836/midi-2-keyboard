@@ -149,7 +149,7 @@ export function RateLimitEditor({
  * "Touch it instead of typing it": waits for the next matching MIDI message and hands it over.
  * While armed, the engine holds its fire like during any other learn.
  */
-function LearnOnce({
+export function LearnOnce({
   accept,
   label,
 }: {

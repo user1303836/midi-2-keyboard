@@ -12,9 +12,10 @@ import { cn } from "@/lib/utils";
  * Captures a key combination by pressing it.
  *
  * Click (or focus + Enter) arms the field; every key pressed until all keys are released again
- * becomes the combination, then the field disarms itself — so Esc, Tab and Enter can be bound
- * like any other key and the field never traps keyboard focus. Keys the browser cannot see
- * (media keys, OS-reserved shortcuts) can be added from the picker.
+ * becomes the combination, then the field disarms itself — so Tab and Enter can be bound like
+ * any other key and the field never traps keyboard focus. Esc as the very first key backs out
+ * instead, as everybody expects it to; Escape itself, like the keys the browser cannot see
+ * (media keys, OS-reserved shortcuts), is added from the picker.
  */
 export function KeyComboInput({
   keys,
@@ -39,14 +40,21 @@ export function KeyComboInput({
   const [capturing, setCapturing] = useState(autoCapture);
   const [live, setLive] = useState<Key[]>([]);
   const [unknown, setUnknown] = useState(false);
+  // Esc just cancelled a capture the user started: say how to bind Esc itself.
+  const [escNote, setEscNote] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fieldRef = useRef<HTMLDivElement>(null);
   const latest = useRef({ onChange, onCaptured });
   latest.current = { onChange, onCaptured };
 
-  // Armed by the quick-add flow rather than by the user: there, Esc means "not now" instead of
-  // "bind the Escape key" (click the field and press Esc to bind it).
+  // Armed by the quick-add flow rather than by the user: there, Esc also closes the quick-add.
   const autoArmed = useRef(autoCapture);
+
+  useEffect(() => {
+    if (!escNote) return;
+    const timer = setTimeout(() => setEscNote(false), 8000);
+    return () => clearTimeout(timer);
+  }, [escNote]);
 
   // The quick-add flow arms fields one after another.
   useEffect(() => {
@@ -71,15 +79,25 @@ export function KeyComboInput({
     const combo: Key[] = [];
     setLive([]);
     setUnknown(false);
+    setEscNote(false);
 
     const down = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (autoArmed.current && event.key === "Escape" && combo.length === 0) {
-        autoArmed.current = false;
+      // Esc as the very first key backs out instead of binding Escape.
+      if (event.key === "Escape" && combo.length === 0) {
         setCapturing(false);
+        if (autoArmed.current) {
+          // Nobody clicked this field, the quick-add armed it: the key is left alone so that
+          // it closes the quick-add as well.
+          autoArmed.current = false;
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        setEscNote(true);
         return;
       }
+      event.preventDefault();
+      event.stopPropagation();
       const key = keyFromEvent(event);
       if (!key) {
         setUnknown(true);
@@ -158,11 +176,14 @@ export function KeyComboInput({
           <KeyCombo keys={shown} />
         ) : (
           <span className={cn("text-fg-faint", capturing && "text-key")}>
-            {capturing ? (autoArmed.current ? "Press a key or shortcut…  (Esc: not now)" : "Press a key or shortcut…") : placeholder}
+            {capturing ? "Press a key or shortcut…  (Esc cancels)" : placeholder}
           </span>
         )}
         {capturing && shown.length > 0 && live.length === 0 && (
           <span className="ml-1 text-sm text-key">press new keys…</span>
+        )}
+        {!capturing && escNote && (
+          <span className="ml-1 text-sm text-fg-muted">To send Esc itself, pick it from the list →</span>
         )}
         {capturing && unknown && (
           <span className="ml-1 text-sm text-warn">That key can’t be captured — add it from the list →</span>

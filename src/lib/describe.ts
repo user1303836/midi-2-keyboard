@@ -124,7 +124,7 @@ export function sourceQualifiers(source: Source, config: Config | null): string[
     }
   }
   if (event.type === "chord" && event.window_ms > 0) parts.push(`within ${event.window_ms} ms`);
-  if (source.hysteresis > 0 && !isFullRange(event)) parts.push(`slack ${source.hysteresis}`);
+  if (source.hysteresis > 0 && !isFullRange(event)) parts.push(`dead zone ${source.hysteresis}`);
   if (source.debounce_ms > 0) parts.push(`debounce ${source.debounce_ms} ms`);
   if (source.device) parts.push(deviceLabel(source.device, config));
   return parts;
@@ -271,6 +271,39 @@ export function conditionText(condition: Condition, config: Config | null, octav
       return `while CC ${condition.controller} ${rangeText(condition.range, 127).replace("= ", "is ")}`;
   }
   void config;
+}
+
+/** What a mapping does, in as few words as possible: its name, or "Ctrl+Shift+O", "hold Space"… */
+export function mappingBrief(mapping: Mapping, config: Config | null = null): string {
+  if (mapping.name) return mapping.name;
+  const b = mapping.behavior;
+  const several = (actions: (Action | null)[]) =>
+    actions
+      .filter((action): action is Action => action !== null)
+      .map((action) => actionText(action, config))
+      .join(" / ") || "nothing yet";
+  switch (b.type) {
+    case "trigger":
+      return several([b.on_press, b.on_release]);
+    case "hold":
+      return `hold ${targetText(b.target)}`;
+    case "toggle":
+      return `toggle ${targetText(b.target)}`;
+    case "cycle":
+      return several(b.actions);
+    case "tap_hold":
+      return [b.tap && actionText(b.tap, config), b.hold && actionText(b.hold, config), b.hold_target && `hold ${targetText(b.hold_target)}`]
+        .filter(Boolean)
+        .join(" / ") || "nothing yet";
+    case "multi_tap":
+      return several([b.single, b.double, b.triple, b.hold]);
+    case "change":
+      return actionText(b.action, config);
+    case "step":
+      return [b.up && `↑ ${actionText(b.up, config)}`, b.down && `↓ ${actionText(b.down, config)}`]
+        .filter(Boolean)
+        .join("  ") || "nothing yet";
+  }
 }
 
 /** A complete sentence describing a mapping, for tooltips and screen readers. */

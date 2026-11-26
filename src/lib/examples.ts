@@ -23,9 +23,12 @@ export const EXAMPLES: Example[] = Object.entries(
     } catch {
       // A broken example simply shows its file name; importing it reports the problem.
     }
+    // "Streaming: voice", "Streaming: OBS scenes" … are listed once, as "Streaming".
+    const heads = names.map((name) => (name.includes(":") ? name.split(":")[0].trim() : ""));
+    const theme = names.length > 1 && heads[0] && heads.every((head) => head === heads[0]) ? heads[0] : null;
     return {
       file,
-      title: names[0] ?? file,
+      title: theme ?? names[0] ?? file,
       detail: `${names.length > 1 ? `${names.length} profiles · ` : ""}${count} mappings`,
       text,
     };

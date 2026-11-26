@@ -105,11 +105,10 @@ export function NoteRunDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [mode, setMode] = useState<Mode>("hold");
   const [learning, setLearning] = useState(false);
 
+  // The dialog listens for the first note from the moment it opens (and never after it closed).
   useEffect(() => {
-    if (open) {
-      setKeys([]);
-      setLearning(false);
-    }
+    if (open) setKeys([]);
+    setLearning(open);
   }, [open]);
 
   // Learn the first note by playing it.
@@ -182,9 +181,22 @@ export function NoteRunDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="Start at" hint="The lowest note of the run. Play it, or type it.">
+        <Field
+          label="Start at"
+          hint={
+            learning
+              ? "Play the lowest note of the run now — or type it."
+              : "The lowest note of the run. Click Learn to play it again, or type it."
+          }
+        >
           <div className="flex flex-wrap items-center gap-2">
-            <NoteInput value={first} onChange={setFirst} />
+            <NoteInput
+              value={first}
+              onChange={(note) => {
+                setFirst(note);
+                setLearning(false);
+              }}
+            />
             <Button
               variant={learning ? "midi" : "secondary"}
               icon={<CircleDot size={13} className={learning ? "animate-pulse" : undefined} />}

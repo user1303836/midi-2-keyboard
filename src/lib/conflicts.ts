@@ -4,7 +4,9 @@
 
 import type { Config } from "@/bindings/Config";
 import type { Mapping } from "@/bindings/Mapping";
+import type { MidiMessage } from "@/bindings/MidiMessage";
 import type { Profile } from "@/bindings/Profile";
+import type { Source } from "@/bindings/Source";
 import type { SourceEvent } from "@/bindings/SourceEvent";
 import type { ValueRange } from "@/bindings/ValueRange";
 
@@ -12,6 +14,79 @@ import { deepEqual } from "./utils";
 
 function overlap(a: ValueRange, b: ValueRange): boolean {
   return a.min <= b.max && b.min <= a.max;
+}
+
+function within(range: ValueRange, value: number): boolean {
+  return value >= range.min && value <= range.max;
+}
+
+/** Does `source` belong to the control this message came from, whatever value it sent? */
+export function listensTo(source: Source, device: string, message: MidiMessage): boolean {
+  if (source.device !== null && source.device !== device) return false;
+  if (source.channel !== null && "channel" in message && message.channel !== source.channel) return false;
+  const event = source.event;
+  switch (message.type) {
+    case "note_on":
+    case "note_off":
+      return (
+        (event.type === "note" && within(event.notes, message.note)) ||
+        (event.type === "chord" && event.notes.includes(message.note))
+      );
+    case "control_change":
+      return (
+        (event.type === "control_change" && event.controller === message.controller) ||
+        (event.type === "control_change14" &&
+          (event.controller === message.controller || event.controller + 32 === message.controller))
+      );
+    case "program_change":
+      return event.type === "program_change" && within(event.programs, message.program);
+    case "pitch_bend":
+      return event.type === "pitch_bend";
+    case "channel_pressure":
+      return event.type === "channel_pressure";
+    case "poly_pressure":
+      return event.type === "poly_pressure" && within(event.notes, message.note);
+    case "song_select":
+      return event.type === "song_select" && within(event.songs, message.song);
+    case "song_position":
+      return event.type === "song_position";
+    default:
+      return event.type === "system" && (event.message as string) === message.type;
+  }
+}
+
+/**
+ * Why a message that no live mapping reacted to did nothing, when the configuration can tell:
+ * its mapping is switched off, the value is outside what its mapping reacts to, or it is only
+ * mapped in a profile that is not live right now. `null` = nothing listens to it anywhere.
+ */
+export function silentReason(
+  config: Config,
+  liveProfileId: string | null,
+  device: string,
+  message: MidiMessage,
+): string | null {
+  let outside = false;
+  let elsewhere: string | null = null;
+  for (const profile of config.profiles) {
+    const live = profile.always_on || profile.id === liveProfileId;
+    for (const mapping of profile.mappings) {
+      if (!listensTo(mapping.source, device, message)) continue;
+      if (!live) {
+        if (mapping.enabled) elsewhere ??= profile.name;
+        continue;
+      }
+      if (!mapping.enabled) return "its mapping is switched off";
+      const event = mapping.source.event;
+      if (event.type === "note" && message.type === "note_on" && message.velocity > 0) {
+        outside ||= !within(event.velocity, message.velocity);
+      } else if (event.type === "control_change" && event.encoding === "absolute" && message.type === "control_change") {
+        outside ||= !within(event.range, message.value);
+      }
+    }
+  }
+  if (outside) return "outside the range its mapping reacts to";
+  return elsewhere ? `only mapped in “${elsewhere}”` : null;
 }
 
 function sameControl(a: SourceEvent, b: SourceEvent): boolean {

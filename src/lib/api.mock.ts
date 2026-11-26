@@ -209,6 +209,24 @@ function parse(bytes: number[]): MidiMessage {
   }
 }
 
+/** Splits a byte stream into messages at the status bytes (SysEx runs to its F7). */
+function split(bytes: number[]): number[][] {
+  const messages: number[][] = [];
+  let start = 0;
+  while (start < bytes.length) {
+    let end = start + 1;
+    if (bytes[start] === 0xf0) {
+      const stop = bytes.indexOf(0xf7, start);
+      end = stop < 0 ? bytes.length : stop + 1;
+    } else {
+      while (end < bytes.length && bytes[end] < 0x80) end++;
+    }
+    messages.push(bytes.slice(start, end));
+    start = end;
+  }
+  return messages;
+}
+
 type Edge = "press" | "release" | "value";
 
 function match(mapping: Mapping, device: string, message: MidiMessage): Edge | null {
@@ -311,7 +329,7 @@ export function createMockBackend(): Backend {
 
   // Lets scripts and the browser console play MIDI into the mock: __m2k.send("Dev", [0x90, 60, 100]).
   (window as unknown as Record<string, unknown>).__m2k = {
-    send: (device: string, bytes: number[]) => handle(device, parse(bytes)),
+    send: (device: string, bytes: number[]) => split(bytes).forEach((message) => handle(device, parse(message))),
   };
 
   return {
@@ -346,7 +364,7 @@ export function createMockBackend(): Backend {
       emitStatus();
     },
     async sendMidi(device, bytes) {
-      handle(device, parse(bytes));
+      split(bytes).forEach((message) => handle(device, parse(message)));
     },
     async testAction(action, delayMs) {
       setTimeout(() => {

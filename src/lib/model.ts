@@ -511,6 +511,45 @@ export function findProfile(config: Config, id: string | null): Profile | null {
   return config.profiles.find((profile) => profile.id === id) ?? null;
 }
 
+/** The mappings that turn `layer` on or off: hold / toggle targets and layer actions. */
+export function layerSwitches(config: Config, layer: string): Mapping[] {
+  const sets = (action: Action | null | undefined) => action?.type === "layer" && action.layer === layer;
+  const holds = (target: HoldTarget | null | undefined) => target?.type === "layer" && target.layer === layer;
+  const result: Mapping[] = [];
+  for (const profile of config.profiles) {
+    for (const mapping of profile.mappings) {
+      const b = mapping.behavior;
+      let hit = false;
+      switch (b.type) {
+        case "trigger":
+          hit = sets(b.on_press) || sets(b.on_release);
+          break;
+        case "hold":
+        case "toggle":
+          hit = holds(b.target);
+          break;
+        case "cycle":
+          hit = b.actions.some(sets);
+          break;
+        case "tap_hold":
+          hit = sets(b.tap) || sets(b.hold) || holds(b.hold_target);
+          break;
+        case "multi_tap":
+          hit = sets(b.single) || sets(b.double) || sets(b.triple) || sets(b.hold);
+          break;
+        case "change":
+          hit = sets(b.action);
+          break;
+        case "step":
+          hit = sets(b.up) || sets(b.down) || sets(b.fast?.up) || sets(b.fast?.down);
+          break;
+      }
+      if (hit) result.push(mapping);
+    }
+  }
+  return result;
+}
+
 /** Every layer name mentioned anywhere in the config (for suggestions). */
 export function knownLayers(config: Config): string[] {
   const names = new Set<string>();

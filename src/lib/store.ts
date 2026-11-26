@@ -15,6 +15,7 @@ import type { PortStatus } from "@/bindings/PortStatus";
 import type { Profile } from "@/bindings/Profile";
 import type { RuntimeEvent } from "@/bindings/RuntimeEvent";
 import type { Settings } from "@/bindings/Settings";
+import type { Source } from "@/bindings/Source";
 
 import { getBackend, type Backend } from "./api";
 import { loadKeyboardLayout } from "./keys";
@@ -91,9 +92,10 @@ interface State {
   cloneMapping(id: string): void;
   /**
    * Gives a control a second job on a layer: the mapping itself becomes "only while the layer is
-   * off", and a copy "only while the layer is on" is added right below it and opened.
+   * off", and a copy "only while the layer is on" is added right below it and opened. With
+   * `switchSource`, that control also becomes the layer's switch (the layer is on while it is held).
    */
-  addLayerVariant(id: string, layer: string): void;
+  addLayerVariant(id: string, layer: string, switchSource?: Source | null): void;
   moveMapping(id: string, toIndex: number): void;
   moveMappingToProfile(id: string, profileId: string): void;
   /** Puts a copy of the mapping at the end of another profile (the original stays). */
@@ -531,7 +533,7 @@ export const useApp = create<State>((set, get) => {
       set({ selectedMappingId: copy.id });
     },
 
-    addLayerVariant(id, layer) {
+    addLayerVariant(id, layer, switchSource) {
       const owner = profileOfMapping(get().config, id);
       const source = owner?.mappings.find((m) => m.id === id);
       if (!owner || !source || !layer) return;
@@ -542,11 +544,14 @@ export const useApp = create<State>((set, get) => {
         name: source.name ? `${source.name} (${layer})` : "",
         conditions: [...others, { type: "layer", layer, active: true }],
       };
+      const layerSwitch = switchSource
+        ? [newMapping(switchSource, { type: "hold", target: { type: "layer", layer }, auto_repeat: true })]
+        : [];
       get().edit((config) =>
         mapProfile(config, owner.id, (profile) => {
           const index = profile.mappings.findIndex((m) => m.id === id);
           const mappings = profile.mappings.slice();
-          mappings.splice(index, 1, base, variant);
+          mappings.splice(index, 1, base, variant, ...layerSwitch);
           return { ...profile, mappings };
         }),
       );
