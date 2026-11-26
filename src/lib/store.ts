@@ -737,6 +737,37 @@ export async function restartAsAdmin(): Promise<void> {
   }
 }
 
+/** What Ctrl+C puts on the clipboard for a mapping: plain JSON that can be pasted back, shared or edited. */
+export function mappingsToText(mappings: Mapping[]): string {
+  return JSON.stringify({ m2k: "mappings", mappings }, null, 2);
+}
+
+/**
+ * The mappings in a piece of text, if it holds any: what `mappingsToText` wrote, a bare mapping,
+ * or a list of them (hand-written ones included — the backend's forgiving loader completes
+ * them). `null` when the text is something else.
+ */
+export async function mappingsFromText(text: string): Promise<Mapping[] | null> {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const looksLikeMapping = (item: unknown) => typeof item === "object" && item !== null && "source" in item && "behavior" in item;
+  const list = Array.isArray(data)
+    ? data
+    : typeof data === "object" && data !== null && Array.isArray((data as { mappings?: unknown }).mappings)
+      ? (data as { mappings: unknown[] }).mappings
+      : looksLikeMapping(data)
+        ? [data]
+        : null;
+  if (!list || list.length === 0 || !list.every(looksLikeMapping)) return null;
+  const profiles = await (await api()).parseProfiles(JSON.stringify({ profiles: [{ name: "clipboard", mappings: list }] }));
+  const parsed = profiles[0]?.mappings ?? [];
+  return parsed.length > 0 ? parsed.map(duplicateMapping) : null;
+}
+
 /** The backend, for imperative calls from components (learn, test, simulate, import/export). */
 export async function api(): Promise<Backend> {
   return backend ?? (await getBackend());

@@ -11,7 +11,7 @@ import { DevicesDialog, ProfileDialog, SettingsDialog } from "@/features/shell/D
 import { Notices } from "@/features/shell/Notices";
 import { Sidebar } from "@/features/shell/Sidebar";
 import { isTauri } from "@/lib/platform";
-import { useApp, useSelectedMapping, useViewedProfile } from "@/lib/store";
+import { mappingsFromText, mappingsToText, profileOfMapping, useApp, useSelectedMapping, useViewedProfile } from "@/lib/store";
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -152,6 +152,44 @@ function useShortcuts() {
       }
     };
     window.addEventListener("keydown", onKeyDown);
+
+    // Ctrl+C / Ctrl+V move mappings around as plain JSON text: between profiles, into a chat or
+    // a text editor, and back (hand-written JSON pastes too). Text fields keep the clipboard.
+    const onCopy = (event: ClipboardEvent) => {
+      const state = useApp.getState();
+      if (isTyping(event.target) || window.getSelection()?.toString() || state.panel !== "none") return;
+      const id = focusedMappingId() ?? state.selectedMappingId;
+      const mapping = id ? profileOfMapping(state.config, id)?.mappings.find((m) => m.id === id) : null;
+      if (!mapping || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", mappingsToText([mapping]));
+      event.preventDefault();
+      state.toast("Mapping copied. Paste it into another profile — or anywhere, it is plain text.");
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const state = useApp.getState();
+      if (isTyping(event.target) || state.panel !== "none" || !state.viewProfileId) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (!/^\s*[[{]/.test(text)) return;
+      event.preventDefault();
+      void mappingsFromText(text)
+        .then((mappings) => {
+          if (!mappings) {
+            state.toast("The clipboard does not hold any mappings.", { kind: "warning" });
+            return;
+          }
+          state.addMappings(mappings);
+          state.selectMapping(mappings[0].id);
+          focusMappingRow(mappings[0].id);
+          state.toast(mappings.length === 1 ? "Mapping pasted" : `${mappings.length} mappings pasted`, {
+            kind: "success",
+            action: { label: "Undo", run: state.undo },
+          });
+        })
+        .catch((error) => state.toast(`Could not paste: ${String(error)}`, { kind: "error" }));
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("paste", onPaste);
     const onContextMenu = (event: MouseEvent) => {
       if (isTauri && !import.meta.env.DEV && !isTyping(event.target)) event.preventDefault();
     };
@@ -159,6 +197,8 @@ function useShortcuts() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("paste", onPaste);
     };
   }, []);
 }

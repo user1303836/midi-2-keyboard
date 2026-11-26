@@ -3,12 +3,14 @@ import {
   ArrowRight,
   ArrowUp,
   ChevronDown,
+  ClipboardCopy,
   Copy,
   CopyPlus,
   Filter,
   FolderInput,
   FolderPlus,
   GripVertical,
+  LocateFixed,
   MoreHorizontal,
   Pencil,
   Piano,
@@ -43,10 +45,10 @@ import {
   Tooltip,
 } from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
-import { findConflicts, type Conflict } from "@/lib/conflicts";
+import { findConflicts, listensTo, type Conflict } from "@/lib/conflicts";
 import { EXAMPLES, importExample } from "@/lib/examples";
-import { onMappingActivity, type ActivityKind } from "@/lib/monitor";
-import { useApp, useOctave } from "@/lib/store";
+import { onMappingActivity, onMidi, type ActivityKind } from "@/lib/monitor";
+import { api, mappingsToText, useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
 
 import { NoteRunDialog } from "./NoteRunDialog";
@@ -332,6 +334,48 @@ export function MappingList({ profile }: { profile: Profile }) {
   const quickAdd = startWizard;
   const reorderable = search === "";
 
+  // "Which mapping is this knob?": touch a control and the list jumps to its mapping, wherever
+  // it lives. The engine holds its fire meanwhile, like during any other learn.
+  const [locating, setLocating] = useState(false);
+  useEffect(() => {
+    if (!locating) return;
+    void api().then((backend) => backend.setLearning(true));
+    const off = onMidi((log) => {
+      const message = log.message;
+      if (message.type === "clock" || message.type === "active_sensing" || message.type === "note_off") return;
+      if (message.type === "note_on" && message.velocity === 0) return;
+      const state = useApp.getState();
+      const found: { profileId: string; mappingId: string }[] = [];
+      for (const p of state.config.profiles) {
+        for (const m of p.mappings) {
+          if (listensTo(m.source, log.device, message)) found.push({ profileId: p.id, mappingId: m.id });
+        }
+      }
+      setLocating(false);
+      const hit = found.find((f) => f.profileId === state.viewProfileId) ?? found[0];
+      if (!hit) {
+        state.toast("No mapping uses that control yet.", { action: { label: "Add one", run: state.startWizard } });
+        return;
+      }
+      if (hit.profileId !== state.viewProfileId) state.viewProfile(hit.profileId);
+      state.setSearch("");
+      state.selectMapping(hit.mappingId);
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>(`[data-mapping-id="${CSS.escape(hit.mappingId)}"]`)
+          ?.scrollIntoView({ block: "center" }),
+      );
+      if (found.length > 1) state.toast(`${found.length} mappings use this control — this is the first.`);
+    });
+    const cancel = (event: KeyboardEvent) => event.key === "Escape" && setLocating(false);
+    window.addEventListener("keydown", cancel, true);
+    return () => {
+      off();
+      window.removeEventListener("keydown", cancel, true);
+      void api().then((backend) => backend.setLearning(false));
+    };
+  }, [locating]);
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-[46px] shrink-0 items-center gap-2 border-b px-4">
@@ -356,6 +400,23 @@ export function MappingList({ profile }: { profile: Profile }) {
             </button>
           )}
         </div>
+        <Tooltip content={locating ? "Touch a control… (Esc to cancel)" : "Find a mapping by touching its control"}>
+          <button
+            type="button"
+            aria-label="Find a mapping by touching its control"
+            aria-pressed={locating}
+            onClick={() => setLocating(!locating)}
+            className={cn(
+              "inline-flex h-[28px] shrink-0 items-center gap-1.5 rounded-md border px-2 outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+              locating
+                ? "animate-listen border-midi bg-midi-soft text-midi [--ring-color:var(--midi-line)]"
+                : "border-transparent text-fg-muted hover:bg-hover hover:text-fg",
+            )}
+          >
+            <LocateFixed size={15} />
+            {locating && <span className="text-sm whitespace-nowrap">Touch a control…</span>}
+          </button>
+        </Tooltip>
         <span className="shrink-0 text-sm whitespace-nowrap text-fg-faint max-[1000px]:hidden">
           {search ? `${visible.length} of ${profile.mappings.length}` : plural(profile.mappings.length, "mapping")}
         </span>
@@ -474,6 +535,18 @@ function RowMenu({ mapping, otherProfiles }: { mapping: Mapping; otherProfiles: 
       </ContextMenuItem>
       <ContextMenuItem icon={<Copy size={14} />} shortcut="Ctrl+D" onSelect={() => act().cloneMapping(mapping.id)}>
         Duplicate
+      </ContextMenuItem>
+      <ContextMenuItem
+        icon={<ClipboardCopy size={14} />}
+        shortcut="Ctrl+C"
+        onSelect={() =>
+          void navigator.clipboard
+            .writeText(mappingsToText([mapping]))
+            .then(() => act().toast("Mapping copied. Paste it into another profile with Ctrl+V — or anywhere, it is plain text."))
+            .catch(() => act().toast("The clipboard is not available here. Press Ctrl+C on the row instead.", { kind: "warning" }))
+        }
+      >
+        Copy
       </ContextMenuItem>
       <ContextMenuItem
         icon={<Power size={14} />}

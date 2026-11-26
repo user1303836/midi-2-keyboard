@@ -53,7 +53,8 @@ for worn knobs that flutter on their own, debouncing for chattering switches, pe
 **Organization** — profiles, always-on (global) profiles, automatic profile switching by
 foreground application (picked from a list of open apps) or by program change, layers with
 one-click "layer variants", mapping a whole run of notes to a row of keys in one step,
-import/export, undo/redo. The list points out mappings that share a control.
+import/export, undo/redo, copy and paste of mappings as plain text. The list points out mappings
+that share a control, and *find by touching* jumps to the mapping of whatever control you touch.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
 *why* something was not sent), the engine's measured MIDI-to-key latency, an activity light on
@@ -122,6 +123,7 @@ Settings; *Launch at login* is there too.
 | `Alt+↑` / `Alt+↓` | Move the mapping up / down |
 | `Del` | Delete the focused mapping (the message that follows has *Undo*) |
 | `Ctrl+D` | Duplicate the focused mapping |
+| `Ctrl+C` / `Ctrl+V` | Copy the focused mapping / paste mappings into the profile in view. They travel as plain JSON text, so they can be pasted into a chat or a text editor and back |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo (`Ctrl+Y` redoes too) |
 | `Ctrl+F` | Search mappings |
 | `Ctrl+M` | Show / hide the monitor |

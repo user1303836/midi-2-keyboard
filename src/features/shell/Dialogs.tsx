@@ -214,6 +214,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               ["Alt+↑ / ↓", "Move the mapping up / down"],
               ["Del", "Delete the selected mapping"],
               [`${mod}+D`, "Duplicate the selected mapping"],
+              [`${mod}+C / ${mod}+V`, "Copy / paste mappings (as text)"],
               [`${mod}+Z`, "Undo"],
               [`${mod}+Shift+Z`, "Redo"],
               [`${mod}+F`, "Search mappings"],
