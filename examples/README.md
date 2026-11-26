@@ -29,3 +29,7 @@ the ones your hardware sends: MIDI learn in the editor fills them in for you.
   delayed behind a queue of long key presses.
 - **Per-app profiles** need the name of your application: open the profile and pick it from the
   list of running applications.
+- **Combining examples.** "Streaming: voice" and "Live show: control" are *always on*: their
+  mappings work in every profile. "Streaming: voice" uses pads 1 and 2 (notes 36 and 37), which
+  other examples use too, so after importing both, those pads do two things at once. The list marks
+  such mappings as **shared**; change the notes on one side.
