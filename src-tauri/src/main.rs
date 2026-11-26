@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use m2k_core::{Action, Config, EngineEvent, Profile, Runtime, RuntimeEvent, Snapshot, store};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -30,6 +31,8 @@ struct TrayView {
 struct AppState {
     runtime: Runtime,
     tray: Mutex<TrayView>,
+    /// Set once the user really wants out (as opposed to closing the window to the tray).
+    quitting: AtomicBool,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -183,8 +186,22 @@ fn reveal(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Shows the main window, creating it first if it does not exist.
+///
+/// While the app sits in the tray there is no window at all: a hidden webview would keep a few
+/// hundred megabytes of browser processes alive for nothing. The engine does not need it.
 fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+    let window = app.get_webview_window(MAIN_WINDOW).or_else(|| {
+        let config = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW)?.clone();
+        match tauri::WebviewWindowBuilder::from_config(app, &config).and_then(|builder| builder.build()) {
+            Ok(window) => Some(window),
+            Err(error) => {
+                log::error!("could not create the main window: {error}");
+                None
+            }
+        }
+    });
+    if let Some(window) = window {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -194,10 +211,8 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-fn hide_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        let _ = window.hide();
-    }
+/// The window is gone (closed to the tray): stop collecting monitor events for it.
+fn main_window_gone(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         state.runtime.set_monitoring(false);
         state.runtime.set_window_focused(false);
@@ -227,6 +242,7 @@ fn explain_tray_once(app: &AppHandle, runtime: &Runtime) {
 
 fn quit_app(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
+        state.quitting.store(true, Ordering::SeqCst);
         state.runtime.shutdown();
     }
     app.exit(0);
@@ -410,14 +426,20 @@ fn main() {
                 }
             });
             let config = runtime.config();
-            app.manage(AppState { runtime, tray: Mutex::new(TrayView::default()) });
+            app.manage(AppState {
+                runtime,
+                tray: Mutex::new(TrayView::default()),
+                quitting: AtomicBool::new(false),
+            });
 
             setup_tray(&handle)?;
             refresh_tray(&handle);
             sync_autostart(&handle, config.settings.launch_at_login);
 
+            // The window is not created at startup (see tauri.conf.json): starting in the tray
+            // costs no webview at all.
             if launched_minimized || config.settings.start_minimized {
-                hide_main_window(&handle);
+                main_window_gone(&handle);
             } else {
                 show_main_window(&handle);
             }
@@ -431,10 +453,11 @@ fn main() {
             let Some(state) = app.try_state::<AppState>() else { return };
             match event {
                 WindowEvent::Focused(focused) => state.runtime.set_window_focused(*focused),
-                WindowEvent::CloseRequested { api, .. } => {
+                WindowEvent::CloseRequested { .. } => {
                     if state.runtime.config().settings.close_to_tray {
-                        api.prevent_close();
-                        hide_main_window(app);
+                        // Let the window (and its webview) really close; `ExitRequested` below
+                        // keeps the app itself alive in the tray.
+                        main_window_gone(app);
                         explain_tray_once(app, &state.runtime);
                     } else {
                         quit_app(app);
@@ -446,12 +469,24 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building midi-2-keyboard");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
+    app.run(|app, event| match event {
+        // Closing the last window is not quitting: the engine lives on in the tray.
+        RunEvent::ExitRequested { api, code, .. } => {
+            let stay = app.try_state::<AppState>().is_some_and(|state| {
+                code.is_none()
+                    && !state.quitting.load(Ordering::SeqCst)
+                    && state.runtime.config().settings.close_to_tray
+            });
+            if stay {
+                api.prevent_exit();
+            }
+        }
+        RunEvent::Exit => {
             // Whatever the way out, never leave a key held down.
             if let Some(state) = app.try_state::<AppState>() {
                 state.runtime.shutdown();
             }
         }
+        _ => {}
     });
 }

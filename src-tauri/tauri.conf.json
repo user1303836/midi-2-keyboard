@@ -19,6 +19,7 @@
         "minWidth": 920,
         "minHeight": 600,
         "visible": false,
+        "create": false,
         "center": true
       }
     ],
