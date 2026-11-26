@@ -200,8 +200,8 @@ fn matches_filter(name: &str, lowercase_filter: &str) -> bool {
     name.to_lowercase().contains(lowercase_filter)
 }
 
-/// Parses `"90 3C 64"`, `"903C64"`, `"0x90,0x3c,0x64"`, ...
-fn parse_hex(text: &str) -> Result<Vec<u8>, String> {
+/// Parses `"90 3C 64"`, `"903C64"`, `"0x90,0x3c,0x64"`, ... (also used by `m2k send`).
+pub(crate) fn parse_hex(text: &str) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     for token in text.split(|c: char| c.is_whitespace() || c == ',').filter(|t| !t.is_empty()) {
         let digits = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")).unwrap_or(token);
