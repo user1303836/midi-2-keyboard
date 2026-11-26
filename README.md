@@ -18,15 +18,15 @@ It is built around two promises:
 | --- | --- |
 | Notes | single notes or ranges, any/one channel, velocity zones |
 | Chords | several notes held together, optionally "struck within N ms" |
-| Control Change | knobs/faders, buttons and pedals (a "pressed" range), endless encoders in all three relative encodings (two's complement, binary offset, sign-magnitude) |
+| Control Change | knobs/faders, buttons and pedals (a "pressed" range, including buttons that only ever send "on"), endless encoders in all three relative encodings (two's complement, binary offset, sign-magnitude) |
 | 14-bit CC, NRPN, RPN | assembled from their MSB/LSB/data messages; 7-bit or 14-bit data; increment/decrement |
 | Program Change, Pitch Bend, Channel and Poly Pressure | |
 | SysEx | byte patterns with `??` (any byte) and `**` (any run) wildcards, MMC presets |
 | Clock, Start/Stop/Continue, Song Select/Position, … | e.g. "every beat" or "every bar" of MIDI clock |
 
 **MIDI learn that understands the control.** Touch something and the app works out whether it is a
-key, a pad, a button, a pedal, an absolute knob, or an endless encoder (and which encoding it
-speaks), or an NRPN parameter.
+key, a pad, a chord, a button, a pedal, an absolute knob, an endless encoder (and which encoding
+it speaks, acceleration included), or an NRPN parameter.
 
 **Behaviors** — how a control is interpreted:
 
@@ -34,10 +34,11 @@ speaks), or an NRPN parameter.
 - **Hold** – keep keys down exactly as long as the control is held, with keyboard-like auto-repeat
 - **Toggle** – first press holds, next press releases
 - **On change** – fire whenever a knob/fader moves
-- **Up / Down** – one action per step up, another per step down (absolute controls and encoders)
+- **Up / Down** – one action per step up, another per step down (absolute controls and encoders),
+  optionally a second, coarser action for fast turns
 - **Tap or hold** – different actions for a quick tap and a long press (including dual-role keys:
   tap = Esc, hold = Ctrl)
-- **Multi-tap** – single / double / triple press
+- **Multi-tap** – single / double / triple press, plus a long press, on one control
 - **Cycle** – each press fires the next action in a list
 
 **Actions** — key combinations, typed text (with `{value}`, `{note_name}`, … placeholders), mouse
@@ -46,12 +47,13 @@ launching programs, opening files and URLs.
 
 **Shaping** — rate limits (throttle, throttle with a final trailing fire, debounce), conditions
 (only in a certain application, only while a layer is on, only while another pad is held, only
-while a knob is in a certain position), hysteresis for jittery pedals and faders, per-action
-timing.
+while a knob is in a certain position), hysteresis for jittery pedals and faders, debouncing for
+chattering switches, per-action timing.
 
 **Organization** — profiles, always-on (global) profiles, automatic profile switching by
-foreground application (picked from a list of open apps), import/export, undo/redo. The list
-points out mappings that share a control.
+foreground application (picked from a list of open apps) or by program change, layers with
+one-click "layer variants", mapping a whole run of notes to a row of keys in one step,
+import/export, undo/redo. The list points out mappings that share a control.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
 *why* something was not sent), the engine's measured MIDI-to-key latency, an activity light on
