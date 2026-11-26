@@ -7,7 +7,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
 m2k-midi.workspace = true
@@ -16,7 +16,8 @@ m2k-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
-tauri = { version = "2", features = ["tray-icon"] }
+# Keep in step with @tauri-apps/api in package.json (the CLI refuses mismatched minor versions).
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"

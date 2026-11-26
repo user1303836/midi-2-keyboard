@@ -6,7 +6,8 @@ default-members = ["crates/m2k-midi", "crates/m2k-output", "crates/m2k-core", "c
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+# Tauri 2.12 needs 1.90; the resolver is MSRV-aware, so a lower value here silently downgrades it.
+rust-version = "1.90"
 repository = "https://github.com/user1303836/midi-2-keyboard"
 
 [workspace.dependencies]
