@@ -528,7 +528,8 @@ fn compile_mapping(
                 hold_ms: (*hold_ms).max(1),
             }
         }
-        Behavior::Change { action } => CBehavior::Change { action: act(action) },
+        // TODO(engine): `min_change` (jitter guard) is new in the model.
+        Behavior::Change { action, .. } => CBehavior::Change { action: act(action) },
         Behavior::Step { up, down, step, max_burst, invert, fast } => CBehavior::Step {
             up: up.as_ref().map(act),
             down: down.as_ref().map(act),
@@ -602,7 +603,7 @@ fn behavior_actions(behavior: &Behavior) -> Vec<&Action> {
         Behavior::MultiTap { single, double, triple, .. } => {
             single.iter().chain(double).chain(triple).collect()
         }
-        Behavior::Change { action } => vec![action],
+        Behavior::Change { action, .. } => vec![action],
         Behavior::Step { up, down, fast, .. } => up
             .iter()
             .chain(down)

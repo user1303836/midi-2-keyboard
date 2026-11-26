@@ -68,7 +68,7 @@ function sampleConfig(): Config {
               channel: 2, hysteresis: 0, debounce_ms: 0,
               event: { type: "control_change", controller: 20, range: { min: 0, max: 127 }, encoding: "absolute" },
             },
-            behavior: { type: "change", action: keys("ControlLeft", "ShiftLeft", "KeyO") },
+            behavior: { type: "change", action: keys("ControlLeft", "ShiftLeft", "KeyO"), min_change: 0 },
             conditions: [],
             rate_limit: { mode: "throttle", interval_ms: 500, trailing: false },
           },

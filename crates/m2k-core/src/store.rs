@@ -370,6 +370,7 @@ fn sanitize_mapping(mapping: &mut Mapping) {
                 fast.ticks = fast.ticks.max(2);
             }
         }
+        Behavior::Change { min_change, .. } => *min_change = (*min_change).min(8_191),
         Behavior::Trigger { repeat: Some(repeat), .. } => {
             repeat.interval_ms = repeat.interval_ms.max(5);
         }

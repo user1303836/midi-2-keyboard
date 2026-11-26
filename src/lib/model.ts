@@ -304,7 +304,7 @@ export function defaultBehavior(type: BehaviorType, previous?: Behavior): Behavi
     case "multi_tap":
       return { type, single: action, double: emptyKeys(), triple: null, window_ms: 300, hold: null, hold_ms: 500 };
     case "change":
-      return { type, action };
+      return { type, action, min_change: 0 };
     case "step":
       return { type, up: action, down: emptyKeys(), step: 1, max_burst: 8, invert: false, fast: null };
   }

@@ -599,7 +599,18 @@ pub enum Behavior {
     },
     /// Fire on every matching message (while the value is inside the source range). This is the
     /// natural behavior for "when I move this knob, do X"; combine with a rate limit.
-    Change { action: Action },
+    ///
+    /// `min_change` guards against a worn or noisy control that flutters by a step or two while
+    /// nobody touches it: a message only counts when its value is at least that far away from
+    /// the value of the last message that counted (the first message after start-up or
+    /// reconnecting always counts). The reference moves whenever a message counts, whether or
+    /// not the rate limit then lets the action through. Absolute sources only; relative
+    /// encoders and pulses are never filtered. `0` and `1` = every message counts.
+    Change {
+        action: Action,
+        #[serde(default)]
+        min_change: u16,
+    },
     /// Fire `up` when the value increases and `down` when it decreases: one action per `step`
     /// units of movement (absolute controls) or per `step` ticks (relative encoders,
     /// NRPN/RPN increment/decrement). The first message after (re)connecting only sets the

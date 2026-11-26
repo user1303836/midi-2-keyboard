@@ -350,7 +350,7 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
         .join("; ");
       break;
     case "change":
-      what = `on change: ${actionText(b.action, config)}`;
+      what = `on change: ${actionText(b.action, config)}${b.min_change > 1 ? ` (ignoring jitter under ${b.min_change})` : ""}`;
       break;
     case "step":
       what = [

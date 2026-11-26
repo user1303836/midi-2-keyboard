@@ -272,13 +272,38 @@ export function BehaviorEditor({
       )}
 
       {b.type === "change" && (
-        <Slot label="Send">
-          <ActionEditor
-            action={b.action}
-            {...arm(0, b.action)}
-            onChange={(action, key) => onChange({ ...b, action }, key && `action:${key}`)}
-          />
-        </Slot>
+        <div className="flex flex-col gap-2.5">
+          <Slot label="Send">
+            <ActionEditor
+              action={b.action}
+              {...arm(0, b.action)}
+              onChange={(action, key) => onChange({ ...b, action }, key && `action:${key}`)}
+            />
+          </Slot>
+          {shape === "continuous" && (
+            <>
+              <InlineSwitch
+                label="Ignore jitter"
+                hint="A worn or noisy knob flutters by a step or two while nobody touches it, and every flutter would fire. Turn this on to react only to real movement."
+                checked={b.min_change > 1}
+                onChange={(on) => onChange({ ...b, min_change: on ? 3 : 0 })}
+              />
+              {b.min_change > 1 && (
+                <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                  React only when the value has moved by at least
+                  <NumberInput
+                    aria-label="Smallest change that counts"
+                    className="w-[64px]"
+                    min={2}
+                    max={8191}
+                    value={b.min_change}
+                    onChange={(min_change) => onChange({ ...b, min_change }, "minchange")}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {b.type === "step" && (
