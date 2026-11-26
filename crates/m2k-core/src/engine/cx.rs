@@ -172,6 +172,11 @@ impl Layers {
         false
     }
 
+    /// Forgets every hold (their holders were reset); latched layers stay.
+    pub fn release_held(&mut self) {
+        self.held.clear();
+    }
+
     pub fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.latched.iter().map(|n| n.to_string()).collect();
         for name in self.held.keys() {

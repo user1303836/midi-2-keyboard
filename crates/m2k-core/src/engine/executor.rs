@@ -109,6 +109,11 @@ impl Executor {
         self.queues.get(&owner).is_some_and(|q| q.pending.len() >= QUEUE_LIMIT)
     }
 
+    /// An action of `owner` is playing or waiting to.
+    pub fn busy(&self, owner: u64) -> bool {
+        self.queues.get(&owner).is_some_and(|q| q.running.is_some() || !q.pending.is_empty())
+    }
+
     /// Something is queued behind the running action.
     pub fn has_pending(&self, owner: u64) -> bool {
         self.queues.get(&owner).is_some_and(|q| !q.pending.is_empty())

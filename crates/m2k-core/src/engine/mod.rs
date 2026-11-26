@@ -8,7 +8,9 @@
 //!   sleeps while handling an event: delays (tap duration, macros, repeats, rate limits,
 //!   tap-hold / multi-tap decisions) are timers.
 //! - Whatever happens (pause, config change, profile switch, device disconnect, shutdown, panic)
-//!   keys and buttons held by the engine are released.
+//!   keys and buttons held by the engine are released. An action that is already playing when
+//!   only the profile changes (or a device disconnects) finishes first, releasing what it
+//!   pressed; pause, release all, a change of its mapping, shutdown and panics stop it at once.
 //!
 //! # Inside
 //!

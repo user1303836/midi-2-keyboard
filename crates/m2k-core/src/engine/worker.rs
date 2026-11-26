@@ -381,9 +381,11 @@ impl Worker {
         }
         for (j, kept) in kept.iter().enumerate() {
             if !kept {
+                // Removed or changed: what it already fired stops as well.
                 self.deactivate(j);
-                let key = self.maps[j].key;
-                self.cx.remove_queue(key);
+                let info = self.maps[j].info.clone();
+                self.cx.remove_queue(info.owner);
+                self.cx.release_owner(&info);
             }
         }
 
@@ -765,6 +767,8 @@ impl Worker {
         self.cx.typematic = None;
         self.cx.requests.clear();
         self.cx.devices.forget_timers();
+        // Layer holds belong to mapping states, which are reset below (latched layers stay).
+        self.cx.layers.release_held();
         // The panic may have struck in the middle of a config swap: re-derive everything that
         // is indexed by mapping position.
         if self.maps.len() != self.cfg.mappings.len() {

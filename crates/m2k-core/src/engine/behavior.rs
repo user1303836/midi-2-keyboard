@@ -1108,7 +1108,11 @@ pub fn release(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, all: bool) {
 }
 
 /// The mapping stops being live (profile switch) or is removed / changed (config reload):
-/// release everything, cancel its timers, forget its instances and pending decisions.
+/// release what it holds, cancel its timers, forget its instances and pending decisions.
+/// Actions it already fired play out (each releases what it pressed when it ends): a macro
+/// that brings another app to the front, and so switches profiles, must not be cut short, and
+/// what the monitor reported as sent is sent. Removing or changing the mapping aborts them too
+/// (`Worker::install`).
 pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
     release(rt, def, cx, true);
     match &mut rt.state {
@@ -1136,9 +1140,12 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
     rt.instances.clear();
     rt.step_refs.clear();
     rt.limit_reported = None;
-    cx.abort_queue(rt.key);
     cx.unhold_keys(rt.key, true);
-    cx.release_owner(&rt.info);
+    // Safety net for what its own bookkeeping missed; while an action is still playing, the
+    // keys it holds are its own, released when it ends.
+    if !cx.exec.busy(rt.key) {
+        cx.release_owner(&rt.info);
+    }
     cx.dirty = true;
 }
 
