@@ -1,4 +1,18 @@
-import { ArrowRight, Copy, CopyPlus, Filter, GripVertical, MoreHorizontal, Plus, Search, Timer, Trash2, X } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronDown,
+  Copy,
+  CopyPlus,
+  Filter,
+  GripVertical,
+  MoreHorizontal,
+  Piano,
+  Plus,
+  Search,
+  Timer,
+  Trash2,
+  X,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Config } from "@/bindings/Config";
@@ -14,6 +28,7 @@ import { onMappingActivity, type ActivityKind } from "@/lib/monitor";
 import { useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
 
+import { NoteRunDialog } from "./NoteRunDialog";
 import { BehaviorSummary, SourceIcon } from "./tokens";
 
 const FLASH: Keyframe[] = [
@@ -256,6 +271,7 @@ export function MappingList({ profile }: { profile: Profile }) {
   const moveMapping = useApp((state) => state.moveMapping);
   const config = useApp((state) => state.config);
   const octave = useOctave();
+  const [runOpen, setRunOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   // Latest drag state for the stable row callbacks below.
@@ -323,10 +339,38 @@ export function MappingList({ profile }: { profile: Profile }) {
           {search ? `${visible.length} of ${profile.mappings.length}` : plural(profile.mappings.length, "mapping")}
         </span>
         <div className="flex-1" />
-        <Button variant="primary" icon={<Plus size={15} />} onClick={quickAdd}>
-          Add mapping
-        </Button>
+        <div className="flex">
+          <Button variant="primary" className="rounded-r-none" icon={<Plus size={15} />} onClick={quickAdd}>
+            Add mapping
+          </Button>
+          <Menu>
+            <MenuTrigger asChild>
+              <Button
+                variant="primary"
+                aria-label="More ways to add mappings"
+                className="rounded-l-none border-l border-accent-fg/25 px-1.5"
+              >
+                <ChevronDown size={14} />
+              </Button>
+            </MenuTrigger>
+            <MenuContent className="w-[290px]">
+              <MenuItem icon={<Plus size={14} />} shortcut="N" className="h-auto py-1.5" onSelect={quickAdd}>
+                <div>
+                  <div>Add one mapping</div>
+                  <div className="text-sm text-fg-faint">Touch a control, press a key</div>
+                </div>
+              </MenuItem>
+              <MenuItem icon={<Piano size={14} />} className="h-auto py-1.5" onSelect={() => setRunOpen(true)}>
+                <div>
+                  <div>Map a run of notes…</div>
+                  <div className="text-sm text-fg-faint">A stretch of keys or pads to a row of computer keys</div>
+                </div>
+              </MenuItem>
+            </MenuContent>
+          </Menu>
+        </div>
       </div>
+      <NoteRunDialog open={runOpen} onOpenChange={setRunOpen} />
 
       {profile.mappings.length === 0 ? (
         <EmptyState onAdd={quickAdd} />

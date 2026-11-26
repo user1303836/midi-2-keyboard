@@ -76,6 +76,8 @@ interface State {
   importProfiles(profiles: Profile[]): void;
 
   addMapping(mapping: Mapping, options?: { wizard?: boolean; index?: number }): void;
+  /** Appends several mappings to the viewed profile as one undoable step. */
+  addMappings(mappings: Mapping[]): void;
   updateMapping(id: string, change: (mapping: Mapping) => Mapping, coalesceKey?: string): void;
   removeMapping(id: string): void;
   cloneMapping(id: string): void;
@@ -393,6 +395,14 @@ export const useApp = create<State>((set, get) => {
         }),
       );
       set({ selectedMappingId: mapping.id, wizardMappingId: options?.wizard ? mapping.id : null });
+    },
+
+    addMappings(mappings) {
+      const profileId = get().viewProfileId;
+      if (!profileId || mappings.length === 0) return;
+      get().edit((config) =>
+        mapProfile(config, profileId, (profile) => ({ ...profile, mappings: [...profile.mappings, ...mappings] })),
+      );
     },
 
     updateMapping(id, change, coalesceKey) {
