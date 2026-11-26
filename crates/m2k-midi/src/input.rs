@@ -32,13 +32,17 @@
 //!
 //! # Port names
 //!
-//! - **Windows (WinMM):** WinMM truncates names to 31 characters. A USB device without a serial
-//!   number gets a new device instance, and with it a `2- `, `3- `, ... name prefix, for every
-//!   USB port it is ever plugged into (`2- Launchkey`, `MIDIIN2 (2- Launchkey)`). That prefix is
-//!   stripped: otherwise moving a controller to another port would turn it into a different
-//!   device and orphan its alias and every mapping pinned to it. Two identical devices connected
-//!   at the same time are told apart by the ` #n` suffix like everywhere else. Ports whose
-//!   driver does not answer the device-interface query are not listed by midir at all.
+//! - **Windows (WinMM):** a USB device without a serial number gets a new device instance, and
+//!   with it a `2- `, `3- `, ... name prefix, for every USB port it is ever plugged into
+//!   (`2- Launchkey`, `MIDIIN2 (2- Launchkey)`). That prefix is stripped: otherwise moving a
+//!   controller to another port would turn it into a different device and orphan its alias and
+//!   every mapping pinned to it. WinMM cuts names to 31 characters *after* adding the prefix, so
+//!   a long name keeps fewer characters on another port (`MIDIIN2 (Launchkey Mini MK3 MID` on
+//!   the first, `MIDIIN2 (2- Launchkey Mini MK3 ` on the next). Every name is therefore cut to
+//!   the 27 characters that all of its instances keep (31 minus the longest prefix, `10- `),
+//!   whether or not it was truncated: `MIDIIN2 (Launchkey Mini MK3`. Two identical devices
+//!   connected at the same time are told apart by the ` #n` suffix like everywhere else. Ports
+//!   whose driver does not answer the device-interface query are not listed by midir at all.
 //! - **Linux (ALSA):** midir reports `client:port 20:0`; the trailing sequencer address changes
 //!   whenever a device is re-plugged, so it is stripped (`Launchkey MK3 25:Launchkey MK3 25 MIDI 1`).
 //! - **macOS (CoreMIDI):** the endpoint display name, as shown in Audio MIDI Setup.
@@ -781,8 +785,28 @@ fn normalize_port_name(raw: &str) -> String {
     if cfg!(target_os = "linux") {
         name = strip_alsa_address(name);
     }
-    let name = if cfg!(windows) { strip_winmm_instance(name) } else { name.to_owned() };
+    let name = if cfg!(windows) { winmm_stable_name(name) } else { name.to_owned() };
     if name.is_empty() { "Unnamed MIDI input".to_owned() } else { name }
+}
+
+/// WinMM's limit for a port name (`MAXPNAMELEN` without the terminating NUL), in UTF-16 units.
+const WINMM_NAME_LIMIT: usize = 31;
+/// What every instance of a WinMM name keeps: the limit minus the longest instance prefix, `10- `.
+const WINMM_STABLE_LEN: usize = WINMM_NAME_LIMIT - "10- ".len();
+
+/// The name a WinMM port is known by on whichever USB port its device sits: without the instance
+/// prefix, and cut to the length that survives WinMM's truncation on every port (module docs).
+fn winmm_stable_name(name: &str) -> String {
+    let name = strip_winmm_instance(name);
+    let mut units = 0;
+    let end = name
+        .char_indices()
+        .find(|&(_, c)| {
+            units += c.len_utf16();
+            units > WINMM_STABLE_LEN
+        })
+        .map_or(name.len(), |(at, _)| at);
+    name[..end].trim_end().to_owned()
 }
 
 /// `"2- Launchkey Mini"` -> `"Launchkey Mini"`, `"MIDIIN2 (3- Launchkey)"` -> `"MIDIIN2 (Launchkey)"`
