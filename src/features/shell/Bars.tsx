@@ -165,14 +165,14 @@ export function StatusBar() {
         </span>
       )}
       {suspended && (
-        <Tooltip content="So your mappings cannot type into this editor. Switch to another window to use them — or turn this off in Settings.">
+        <Tooltip content="So your mappings cannot type into this editor. Switch to another window to use them — or turn this off in Settings. MIDI (lights, Send MIDI) is not held back.">
           <button
             type="button"
             onClick={() => setPanel("settings")}
             className="flex shrink-0 items-center gap-1 text-fg-faint hover:text-fg"
           >
             <Info size={12} />
-            Output is held back while this window is in front
+            Keys and mouse are held back while this window is in front
           </button>
         </Tooltip>
       )}

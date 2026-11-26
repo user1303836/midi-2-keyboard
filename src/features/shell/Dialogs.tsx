@@ -81,11 +81,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
       <Group title="Behavior">
         <Option
-          title="Hold back output while this window is in front"
-          description="Stops your mappings from typing into (or closing) this editor while you set things up. The monitor still shows what would have been sent."
+          title="Hold back keys and mouse while this window is in front"
+          description="Stops your mappings from typing into (or closing) this editor while you set things up. MIDI — lights, Send MIDI — still goes out. The monitor shows what would have been sent."
         >
           <Switch
-            aria-label="Hold back output while this window is in front"
+            aria-label="Hold back keys and mouse while this window is in front"
             checked={settings.suspend_while_focused}
             onChange={(v) => set("suspend_while_focused", v)}
           />
@@ -218,21 +218,22 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           {(
             [
               ["N", "Add a mapping"],
-              ["Esc", "Close the editor"],
+              ["Esc", "Cancel a capture, close the editor, let go of picked mappings"],
               ["Enter", "Open the focused mapping"],
               ["↑ / ↓", "Previous / next mapping"],
               ["Alt+↑ / ↓", "Move the mapping up / down"],
               [`${mod}+click, Shift+click`, "Pick several mappings"],
+              ["Shift+↑ / ↓", "Pick a range with the keyboard"],
               [`${mod}+A`, "Pick all mappings"],
-              ["Del", "Delete the selected mapping"],
-              [`${mod}+D`, "Duplicate the selected mapping"],
+              ["Del", "Delete the focused mapping (or all picked)"],
+              [`${mod}+D`, "Duplicate the focused mapping (or all picked)"],
               [`${mod}+C / ${mod}+V`, "Copy / paste mappings (as text)"],
               [`${mod}+Z`, "Undo"],
               [`${mod}+Shift+Z`, "Redo"],
               [`${mod}+F`, "Search mappings"],
               [`${mod}+M`, "Show / hide the monitor"],
               [`${mod}+,`, "Settings"],
-              ["F2", "Rename the selected profile"],
+              ["F2", "Rename the profile focused in the sidebar"],
               ["Backspace", "Clear a focused shortcut field"],
               ["Right-click", "More for a mapping (or Shift+F10)"],
             ] as const
