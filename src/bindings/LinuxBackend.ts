@@ -2,5 +2,8 @@
 
 /**
  * Which injection backend to use on Linux.
+ *
+ * Wayland does not tell applications which window has focus, so per-application profiles and
+ * conditions only work in X11 sessions.
  */
 export type LinuxBackend = "auto" | "uinput" | "x11";

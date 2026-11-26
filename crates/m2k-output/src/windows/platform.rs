@@ -1,14 +1,19 @@
 //! Windows platform probes.
 
+use std::collections::HashSet;
+
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM,
 };
+use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows_sys::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetForegroundWindow, GetWindowThreadProcessId, InternalGetWindowText,
+    EnumChildWindows, EnumWindows, GW_OWNER, GWL_EXSTYLE, GetForegroundWindow, GetWindow,
+    GetWindowLongW, GetWindowThreadProcessId, InternalGetWindowText, IsWindowVisible,
+    WS_EX_TOOLWINDOW,
 };
 use windows_sys::core::BOOL;
 
@@ -36,6 +41,69 @@ pub(crate) fn foreground_app() -> Option<ForegroundApp> {
         info = app;
     }
     Some(ForegroundApp { process: info.name, title: window_title(hwnd), app_id: info.app_id, pid })
+}
+
+pub(crate) fn running_apps() -> Vec<ForegroundApp> {
+    unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        // SAFETY: `lparam` is the Vec below, alive for the whole enumeration.
+        let windows = unsafe { &mut *(lparam as *mut Vec<HWND>) };
+        windows.push(hwnd);
+        1
+    }
+    let mut windows: Vec<HWND> = Vec::new();
+    unsafe { EnumWindows(Some(collect), &mut windows as *mut Vec<HWND> as LPARAM) };
+    let mut seen = HashSet::new();
+    let mut apps = Vec::new();
+    for hwnd in windows {
+        if !is_app_window(hwnd) {
+            continue;
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        let Some(mut info) = process_info(pid) else { continue };
+        if info.name.eq_ignore_ascii_case(FRAME_HOST) {
+            // A frame without hosted content belongs to a suspended app: nothing to show.
+            match hosted_app_pid(hwnd, pid).and_then(|p| process_info(p).map(|i| (p, i))) {
+                Some((app_pid, app)) => (pid, info) = (app_pid, app),
+                None => continue,
+            }
+        }
+        if info.name.is_empty() || !seen.insert(info.name.to_lowercase()) {
+            continue;
+        }
+        apps.push(ForegroundApp {
+            process: info.name,
+            title: window_title(hwnd),
+            app_id: info.app_id,
+            pid,
+        });
+    }
+    apps.sort_by_cached_key(|app| app.process.to_lowercase());
+    apps
+}
+
+/// A window the taskbar / Alt+Tab would show: visible, titled, not owned by another window,
+/// not a tool window and not cloaked (background UWP apps, other virtual desktops).
+fn is_app_window(hwnd: HWND) -> bool {
+    unsafe {
+        if IsWindowVisible(hwnd) == 0 || !GetWindow(hwnd, GW_OWNER).is_null() {
+            return false;
+        }
+        if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0 {
+            return false;
+        }
+        let mut cloaked = 0u32;
+        let result = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED as u32,
+            &mut cloaked as *mut u32 as *mut core::ffi::c_void,
+            size_of::<u32>() as u32,
+        );
+        if result >= 0 && cloaked != 0 {
+            return false;
+        }
+    }
+    !window_title(hwnd).is_empty()
 }
 
 pub(crate) fn permissions() -> Permissions {

@@ -49,28 +49,48 @@ pub enum OutputError {
 pub type Result<T> = std::result::Result<T, OutputError>;
 
 /// How key events are delivered on Windows.
+///
+/// Every mode presses physical keys: what a key types follows the active keyboard layout, exactly
+/// like the real key. In every mode Windows refuses input into windows of programs running as
+/// administrator unless midi-2-keyboard runs as administrator too. Brightness, Fast Forward,
+/// Rewind, Eject, Power, Wake Up and Num = have no Windows equivalent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowsKeyMode {
     /// Virtual-key code **and** matching scan code in every event. Works for normal applications
-    /// and for most games. Recommended.
+    /// and for most games. Numpad digits always type digits, whatever the NumLock state.
+    /// Recommended.
     #[default]
     Auto,
     /// Scan codes only (`KEYEVENTF_SCANCODE`): the physical key position, as DirectInput/raw-input
-    /// games expect. Layout dependent.
+    /// games expect. Layout dependent. Windows then translates numpad keys as navigation keys
+    /// (Num 4 acts as Left, Num 7 as Home, even with NumLock on), so use Automatic for numpad
+    /// digits. Pause, and keys the active layout does not have, are still sent the Automatic way.
     ScanCode,
-    /// Virtual-key codes only.
+    /// Virtual-key codes only. Programs that read scan codes (most games, and apps that tell
+    /// left and right modifiers apart that way) may ignore these keys.
     VirtualKey,
 }
 
 /// Which injection backend to use on Linux.
+///
+/// Wayland does not tell applications which window has focus, so per-application profiles and
+/// conditions only work in X11 sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum LinuxBackend {
-    /// uinput when accessible (works on Wayland and X11), otherwise X11 XTest.
+    /// Wayland: uinput when `/dev/uinput` is writable, otherwise X11 XTest through XWayland (then
+    /// only X11 applications receive input). X11: XTest, falling back to uinput. Recommended.
     #[default]
     Auto,
+    /// A virtual keyboard and mouse (`/dev/uinput`). Works on Wayland and X11 alike and in every
+    /// application, but needs write access to `/dev/uinput` (a one-time udev rule; the
+    /// permission hint shows the commands). It cannot move the pointer to a screen position,
+    /// types text only for ASCII characters assuming a US layout, and long texts must be typed in
+    /// pieces.
     Uinput,
+    /// The X server's XTest extension. Needs no setup, moves the pointer to screen positions and
+    /// types text in any language, but on Wayland it only reaches X11 (XWayland) applications.
     X11,
 }
 

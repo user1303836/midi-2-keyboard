@@ -9,8 +9,23 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
-pub enum Key {
+/// Declares [`Key`] and [`Key::ALL`] from one list, so the two cannot drift apart. Every
+/// platform table in `keymap.rs` matches exhaustively, so a new key must be placed there too.
+macro_rules! keys {
+    ($($(#[$meta:meta])* $key:ident,)*) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+        pub enum Key {
+            $($(#[$meta])* $key,)*
+        }
+
+        impl Key {
+            /// Every key, in declaration order (`Key::ALL[key as usize] == key`).
+            pub const ALL: &'static [Key] = &[$(Key::$key,)*];
+        }
+    };
+}
+
+keys! {
     // ----- Writing system -----
     KeyA,
     KeyB,
@@ -187,6 +202,15 @@ pub enum Key {
     Lang2,
     Help,
 }
+
+// `ALL` is in declaration order, so `key as usize` indexes it.
+const _: () = {
+    let mut i = 0;
+    while i < Key::ALL.len() {
+        assert!(Key::ALL[i] as usize == i);
+        i += 1;
+    }
+};
 
 impl Key {
     /// Whether this is a modifier key (Shift / Control / Alt / Meta, either side).

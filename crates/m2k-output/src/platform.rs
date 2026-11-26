@@ -45,6 +45,18 @@ pub fn foreground_app() -> Option<ForegroundApp> {
     catch_unwind(imp::foreground_app).unwrap_or(None)
 }
 
+/// Applications that have a visible top-level window, one entry per application (process),
+/// sorted by name: the choices for "pick an application" lists. Takes a few milliseconds, so
+/// call it on demand rather than in a polling loop; never panics.
+///
+/// Windows: visible, unowned, non-tool, non-cloaked windows (UWP apps resolved like in
+/// [`foreground_app`]). macOS: the regular (Dock) applications, without window titles. Linux
+/// X11: the window manager's client list without docks, desktops and windows hidden from the
+/// taskbar. Wayland: empty (clients cannot see other windows there).
+pub fn running_apps() -> Vec<ForegroundApp> {
+    catch_unwind(imp::running_apps).unwrap_or_default()
+}
+
 /// Reports whether the permissions needed for input injection are in place.
 pub fn permissions() -> Permissions {
     catch_unwind(imp::permissions).unwrap_or_else(|_| Permissions {
@@ -73,6 +85,10 @@ mod imp {
 
     pub fn foreground_app() -> Option<ForegroundApp> {
         None
+    }
+
+    pub fn running_apps() -> Vec<ForegroundApp> {
+        Vec::new()
     }
 
     pub fn permissions() -> Permissions {

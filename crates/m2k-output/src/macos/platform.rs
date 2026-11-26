@@ -5,10 +5,11 @@
 //! value). The focused window's title needs the Accessibility permission and is read with a
 //! short messaging timeout so a hung application cannot stall the poller.
 
+use std::collections::HashSet;
 use std::ptr::NonNull;
 
 use objc2::rc::autoreleasepool;
-use objc2_app_kit::NSWorkspace;
+use objc2_app_kit::{NSApplicationActivationPolicy, NSWorkspace};
 use objc2_application_services::{
     AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElement,
     kAXTrustedCheckOptionPrompt,
@@ -37,6 +38,28 @@ pub(crate) fn foreground_app() -> Option<ForegroundApp> {
             String::new()
         };
         Some(ForegroundApp { process, title, app_id, pid: u32::try_from(pid).unwrap_or(0) })
+    })
+}
+
+pub(crate) fn running_apps() -> Vec<ForegroundApp> {
+    autoreleasepool(|_| {
+        let mut seen = HashSet::new();
+        let mut apps = Vec::new();
+        for app in NSWorkspace::sharedWorkspace().runningApplications().iter() {
+            if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
+                continue; // background agents and menu-bar extras
+            }
+            let process = app.localizedName().map(|name| name.to_string()).unwrap_or_default();
+            let app_id = app.bundleIdentifier().map(|id| id.to_string()).unwrap_or_default();
+            let key = if app_id.is_empty() { process.to_lowercase() } else { app_id.clone() };
+            if process.is_empty() || !seen.insert(key) {
+                continue;
+            }
+            let pid = u32::try_from(app.processIdentifier()).unwrap_or(0);
+            apps.push(ForegroundApp { process, title: String::new(), app_id, pid });
+        }
+        apps.sort_by_cached_key(|app| app.process.to_lowercase());
+        apps
     })
 }
 

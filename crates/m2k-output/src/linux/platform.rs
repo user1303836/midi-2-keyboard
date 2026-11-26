@@ -5,6 +5,7 @@
 //! process name). One connection is kept open between polls and re-established when it breaks.
 //! Wayland gives clients no way to see the focused window, so nothing is reported there.
 
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -32,6 +33,13 @@ pub(crate) fn foreground_app() -> Option<ForegroundApp> {
         None => Ok(None),
     })
     .flatten()
+}
+
+pub(crate) fn running_apps() -> Vec<ForegroundApp> {
+    if is_wayland() {
+        return Vec::new();
+    }
+    with_x(|x| x.client_apps()).unwrap_or_default()
 }
 
 pub(crate) fn permissions() -> Permissions {
@@ -120,15 +128,31 @@ struct XConn {
     net_wm_name: u32,
     net_wm_pid: u32,
     utf8_string: u32,
+    net_client_list: u32,
+    net_wm_window_type: u32,
+    type_dock: u32,
+    type_desktop: u32,
+    net_wm_state: u32,
+    state_skip_taskbar: u32,
 }
 
 impl XConn {
     fn connect() -> Option<Self> {
         let (conn, screen) = x11rb::connect(None).ok()?;
         let root = conn.setup().roots.get(screen)?.root;
-        let names: [&[u8]; 4] =
-            [b"_NET_ACTIVE_WINDOW", b"_NET_WM_NAME", b"_NET_WM_PID", b"UTF8_STRING"];
-        // Send all four requests before waiting for the first reply.
+        let names: [&[u8]; 10] = [
+            b"_NET_ACTIVE_WINDOW",
+            b"_NET_WM_NAME",
+            b"_NET_WM_PID",
+            b"UTF8_STRING",
+            b"_NET_CLIENT_LIST",
+            b"_NET_WM_WINDOW_TYPE",
+            b"_NET_WM_WINDOW_TYPE_DOCK",
+            b"_NET_WM_WINDOW_TYPE_DESKTOP",
+            b"_NET_WM_STATE",
+            b"_NET_WM_STATE_SKIP_TASKBAR",
+        ];
+        // Send all requests before waiting for the first reply.
         let atoms = names
             .iter()
             .map(|name| conn.intern_atom(false, name).ok())
@@ -136,10 +160,35 @@ impl XConn {
             .into_iter()
             .map(|cookie| cookie.reply().ok().map(|reply| reply.atom))
             .collect::<Option<Vec<_>>>()?;
-        let [net_active_window, net_wm_name, net_wm_pid, utf8_string] = atoms[..] else {
+        let [
+            net_active_window,
+            net_wm_name,
+            net_wm_pid,
+            utf8_string,
+            net_client_list,
+            net_wm_window_type,
+            type_dock,
+            type_desktop,
+            net_wm_state,
+            state_skip_taskbar,
+        ] = atoms[..]
+        else {
             return None;
         };
-        Some(Self { conn, root, net_active_window, net_wm_name, net_wm_pid, utf8_string })
+        Some(Self {
+            conn,
+            root,
+            net_active_window,
+            net_wm_name,
+            net_wm_pid,
+            utf8_string,
+            net_client_list,
+            net_wm_window_type,
+            type_dock,
+            type_desktop,
+            net_wm_state,
+            state_skip_taskbar,
+        })
     }
 
     fn property(
@@ -167,6 +216,53 @@ impl XConn {
         // No EWMH window manager: fall back to the input focus.
         let focus = reply(self.conn.get_input_focus().map_err(|_| Broken)?.reply())?;
         Ok(focus.map(|f| f.focus).filter(|&w| w > 1)) // 0 = None, 1 = PointerRoot
+    }
+
+    /// Applications of the managed windows, one per process, sorted by name.
+    fn client_apps(&self) -> XResult<Vec<ForegroundApp>> {
+        let windows: Vec<Window> = self
+            .property(self.root, self.net_client_list, AtomEnum::WINDOW, 4096)?
+            .and_then(|reply| reply.value32().map(|values| values.collect()))
+            .unwrap_or_default();
+        let mut seen = HashSet::new();
+        let mut apps = Vec::new();
+        for window in windows {
+            if self.hidden_from_taskbar(window)? {
+                continue;
+            }
+            let Some(app) = self.describe(window)? else { continue };
+            let key = if app.process.is_empty() { &app.app_id } else { &app.process };
+            if key.is_empty() || !seen.insert(key.to_lowercase()) {
+                continue;
+            }
+            apps.push(app);
+        }
+        apps.sort_by_cached_key(|app| {
+            if app.process.is_empty() {
+                app.app_id.to_lowercase()
+            } else {
+                app.process.to_lowercase()
+            }
+        });
+        Ok(apps)
+    }
+
+    /// Docks, desktops and windows that ask to be left off the taskbar.
+    fn hidden_from_taskbar(&self, window: Window) -> XResult<bool> {
+        let kind =
+            self.conn.get_property(false, window, self.net_wm_window_type, AtomEnum::ATOM, 0, 32);
+        let state = self.conn.get_property(false, window, self.net_wm_state, AtomEnum::ATOM, 0, 32);
+        let kind = reply(kind.map_err(|_| Broken)?.reply())?;
+        let state = reply(state.map_err(|_| Broken)?.reply())?;
+        let has = |reply: &Option<GetPropertyReply>, atom: u32| {
+            reply
+                .as_ref()
+                .and_then(|r| r.value32())
+                .is_some_and(|mut values| values.any(|a| a == atom))
+        };
+        Ok(has(&kind, self.type_dock)
+            || has(&kind, self.type_desktop)
+            || has(&state, self.state_skip_taskbar))
     }
 
     fn describe(&self, window: Window) -> XResult<Option<ForegroundApp>> {

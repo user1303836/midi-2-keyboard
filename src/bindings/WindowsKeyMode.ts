@@ -2,5 +2,10 @@
 
 /**
  * How key events are delivered on Windows.
+ *
+ * Every mode presses physical keys: what a key types follows the active keyboard layout, exactly
+ * like the real key. In every mode Windows refuses input into windows of programs running as
+ * administrator unless midi-2-keyboard runs as administrator too. Brightness, Fast Forward,
+ * Rewind, Eject, Power, Wake Up and Num = have no Windows equivalent.
  */
 export type WindowsKeyMode = "auto" | "scan_code" | "virtual_key";
