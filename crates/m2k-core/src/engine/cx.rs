@@ -386,7 +386,7 @@ impl Cx {
                 self.report(info, description, Outcome::Sent);
             }
             ActionKind::Launch(launch) => {
-                self.report(info, description.clone(), Outcome::Sent);
+                // Reported by the launcher once the program started (or failed to).
                 self.launcher.launch(launch.clone(), info.clone(), description);
             }
         }

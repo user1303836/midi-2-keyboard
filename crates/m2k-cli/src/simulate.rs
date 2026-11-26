@@ -48,6 +48,7 @@ options:
   --text-chunk <N>  the backend takes at most N characters per text call (like linux-uinput)
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
+  --track-foreground  poll the real foreground application (default: only `foreground` lines)
   --quiet-status    do not print status events";
 
 fn say(line: std::fmt::Arguments<'_>) {
@@ -583,6 +584,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut backend_name: &'static str = "simulate";
     let mut text_chunk: Option<usize> = None;
     let mut settle_ms = 1000u64;
+    let mut track_foreground = false;
     let parse_key =
         |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
     let mut iter = args.iter();
@@ -592,6 +594,7 @@ pub fn run(args: &[String]) -> i32 {
             "--clock" => print.clock = true,
             "--quiet-status" => print.quiet_status = true,
             "--repeats" => repeats = true,
+            "--track-foreground" => track_foreground = true,
             "--fail" | "--panic" => match iter.next().and_then(parse_key) {
                 Some(key) if arg == "--fail" => fail.push(key),
                 Some(key) => panic_key = Some(key),
@@ -706,7 +709,7 @@ pub fn run(args: &[String]) -> i32 {
         let tally = tally.clone();
         Engine::start(
             config,
-            EngineOptions { injector: Box::new(injector), track_foreground: false },
+            EngineOptions { injector: Box::new(injector), track_foreground },
             move |event| print_event(&clock, print, &tally, &event),
         )
     };

@@ -50,7 +50,10 @@ impl Envelope {
 }
 
 pub enum Command {
-    Midi { device: String, message: MidiMessage },
+    Midi {
+        device: String,
+        message: MidiMessage,
+    },
     SetConfig(Box<Config>),
     SetInjector(Box<dyn Injector>),
     DeviceDisconnected(String),
@@ -59,10 +62,21 @@ pub enum Command {
     SetLearning(bool),
     SelectProfile(String),
     SetForeground(Option<ForegroundApp>),
-    TrackedForeground { generation: u64, app: Option<ForegroundApp> },
-    RunAction { action: Box<Action>, delay_ms: u32 },
+    TrackedForeground {
+        generation: u64,
+        app: Option<ForegroundApp>,
+    },
+    RunAction {
+        action: Box<Action>,
+        delay_ms: u32,
+    },
     ReleaseAll,
-    LaunchFailed { info: OwnerInfo, description: String, error: String },
+    /// The launcher started (or could not start) a `Run` / `Open` action.
+    Launched {
+        info: OwnerInfo,
+        description: String,
+        error: Option<String>,
+    },
     Shutdown,
 }
 
@@ -253,8 +267,12 @@ impl Worker {
             }
             Command::RunAction { action, delay_ms } => self.run_action(&action, delay_ms),
             Command::ReleaseAll => self.release_outputs(true),
-            Command::LaunchFailed { info, description, error } => {
-                self.cx.report(&info, description, Outcome::Failed { error });
+            Command::Launched { info, description, error } => {
+                let outcome = match error {
+                    None => Outcome::Sent,
+                    Some(error) => Outcome::Failed { error },
+                };
+                self.cx.report(&info, description, outcome);
             }
             Command::Shutdown => return false,
         }

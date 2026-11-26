@@ -1,6 +1,6 @@
 //! `Run` and `Open` actions. Starting a process can take a while, so it happens on a helper
-//! thread (started on first use); the process is detached and never waited for. Failures are
-//! posted back to the engine and reported as `Outcome::Failed`.
+//! thread (started on first use); the process is detached and never waited for. The outcome
+//! (started, or why not) is posted back to the engine and reported then.
 
 use std::ffi::OsString;
 use std::process::{Child, Command as Process, Stdio};
@@ -38,10 +38,10 @@ impl Launcher {
             None => Some(job),
         };
         if let Some(job) = failed {
-            let _ = self.engine.send(Envelope::now(Command::LaunchFailed {
+            let _ = self.engine.send(Envelope::now(Command::Launched {
                 info: job.info,
                 description: job.description,
-                error: "the launcher thread is not running".into(),
+                error: Some("the launcher thread is not running".into()),
             }));
         }
     }
@@ -52,15 +52,13 @@ impl Launcher {
         let spawned = thread::Builder::new().name("m2k-launcher".into()).spawn(move || {
             init_thread();
             for job in receiver {
-                if let Err(error) = start(&job.launch) {
-                    let failed = Command::LaunchFailed {
-                        info: job.info,
-                        description: job.description,
-                        error,
-                    };
-                    if engine.send(Envelope::now(failed)).is_err() {
-                        return;
-                    }
+                let done = Command::Launched {
+                    error: start(&job.launch).err(),
+                    info: job.info,
+                    description: job.description,
+                };
+                if engine.send(Envelope::now(done)).is_err() {
+                    return;
                 }
             }
         });
