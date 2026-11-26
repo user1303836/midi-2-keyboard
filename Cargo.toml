@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/m2k-midi", "crates/m2k-output", "crates/m2k-core", "crates/m2k-cli"]
+members = ["crates/m2k-midi", "crates/m2k-output", "crates/m2k-core", "crates/m2k-cli", "src-tauri"]
 default-members = ["crates/m2k-midi", "crates/m2k-output", "crates/m2k-core", "crates/m2k-cli"]
 
 [workspace.package]

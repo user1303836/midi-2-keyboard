@@ -14,8 +14,9 @@ Instructions for every agent (and human) working in this repository. Read this f
 3. **The repository owner is the sole contributor.** Commit with the git identity already configured
    on this machine and nothing else. Never add `Co-Authored-By:` trailers, "Generated with ..." lines,
    or any other attribution to commits, files, or docs. Never change `user.name` / `user.email`.
-4. **Never push a broken build.** `cargo check --workspace` and `npm run typecheck` must pass for
-   whatever you touched before you push.
+4. **Never push a broken build.** `npm run cargo -- check` (the core crates) and, if you touched
+   the frontend, `npm run typecheck` must pass before you push. If you touched `src-tauri`, also
+   `npm run build && npm run cargo -- check -p midi-2-keyboard`.
 5. **Don't create planning / analysis / status markdown files.** Durable knowledge goes in this file
    or `README.md`; everything else stays in the conversation.
 
@@ -92,8 +93,14 @@ npm run tauri dev        # the real desktop app
 npm run tauri build      # release bundle
 npm run typecheck        # tsc
 npm run bindings         # regenerate src/bindings from Rust types
-cargo check --workspace  # Rust compile check
+npm run cargo -- check   # Rust compile check of the core crates (cargo with the build tools on PATH)
+npm run cargo -- run -p m2k-cli -- devices   # the headless CLI (devices / monitor / simulate)
 ```
+
+`npm run cargo -- <args>` and `npm run tauri -- <args>` are plain `cargo` / `tauri` wrapped by
+`scripts/with-tools.mjs`, which puts `.tools/mingw64/bin` on `PATH` when it exists. The Tauri shell
+(`src-tauri`) is not a default workspace member: it needs the built frontend (`npm run build`) to
+compile, so plain `cargo check` skips it.
 
 ## Working in parallel (multiple agents)
 

@@ -1,0 +1,300 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------------------------------
+   Design tokens. Two semantic hues carry the whole product:
+     midi (teal)  = what comes IN from the controller
+     key  (amber) = what goes OUT to the computer
+   accent (violet) is reserved for interactive / selected UI.
+   ------------------------------------------------------------------------------------------ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --app: #0d0e12;
+  --surface: #14151b;
+  --raised: #1b1d25;
+  --hover: #22242e;
+  --active: #2a2d39;
+  --line: #262933;
+  --line-strong: #363a48;
+  --fg: #e9eaf0;
+  --fg-muted: #9da2b3;
+  --fg-faint: #6b7183;
+  --accent: #8f7fff;
+  --accent-hover: #a295ff;
+  --accent-fg: #0d0e12;
+  --accent-soft: rgb(143 127 255 / 0.14);
+  --accent-line: rgb(143 127 255 / 0.45);
+  --midi: #3ddc97;
+  --midi-soft: rgb(61 220 151 / 0.11);
+  --midi-line: rgb(61 220 151 / 0.32);
+  --key: #ffb454;
+  --key-soft: rgb(255 180 84 / 0.11);
+  --key-line: rgb(255 180 84 / 0.32);
+  --danger: #ff6b6b;
+  --danger-soft: rgb(255 107 107 / 0.12);
+  --warn: #ffcb6b;
+  --warn-soft: rgb(255 203 107 / 0.12);
+  --keycap: #262935;
+  --keycap-edge: #0a0b0e;
+  --overlay: rgb(5 6 9 / 0.6);
+  --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --scroll-thumb: #2f3340;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --app: #f3f4f7;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --hover: #eef0f5;
+  --active: #e4e7ee;
+  --line: #e2e5ec;
+  --line-strong: #cdd2dc;
+  --fg: #1a1c23;
+  --fg-muted: #5b6172;
+  --fg-faint: #8a90a1;
+  --accent: #5b49e0;
+  --accent-hover: #4a39cf;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(91 73 224 / 0.1);
+  --accent-line: rgb(91 73 224 / 0.4);
+  --midi: #0b8f62;
+  --midi-soft: rgb(11 143 98 / 0.1);
+  --midi-line: rgb(11 143 98 / 0.3);
+  --key: #b96b06;
+  --key-soft: rgb(185 107 6 / 0.1);
+  --key-line: rgb(185 107 6 / 0.3);
+  --danger: #d43c3c;
+  --danger-soft: rgb(212 60 60 / 0.1);
+  --warn: #a86a00;
+  --warn-soft: rgb(168 106 0 / 0.1);
+  --keycap: #ffffff;
+  --keycap-edge: #c9ced9;
+  --overlay: rgb(20 22 30 / 0.35);
+  --shadow-pop: 0 12px 32px -10px rgb(20 22 40 / 0.28), 0 0 0 1px rgb(20 22 40 / 0.06);
+  --scroll-thumb: #cfd3dd;
+}
+
+@theme inline {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-midi: var(--midi);
+  --color-midi-soft: var(--midi-soft);
+  --color-midi-line: var(--midi-line);
+  --color-key: var(--key);
+  --color-key-soft: var(--key-soft);
+  --color-key-line: var(--key-line);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-keycap: var(--keycap);
+  --color-keycap-edge: var(--keycap-edge);
+  --color-overlay: var(--overlay);
+
+  --font-sans:
+    "Inter Variable", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", "Noto Sans", system-ui, sans-serif;
+  --font-mono:
+    "Cascadia Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --shadow-pop: var(--shadow-pop);
+
+  --animate-flash: flash 0.5s ease-out;
+  --animate-pop-in: pop-in 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --animate-fade-in: fade-in 0.16s ease-out;
+  --animate-slide-in: slide-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-slide-up: slide-up 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-listen: listen 1.6s ease-out infinite;
+
+  @keyframes flash {
+    0% {
+      opacity: 1;
+      transform: scale(1.35);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1);
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes listen {
+    0% {
+      box-shadow: 0 0 0 0 var(--ring-color, var(--midi-line));
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------------------------------
+   Base
+   ------------------------------------------------------------------------------------------ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  font-size: 13px;
+}
+
+body {
+  margin: 0;
+  background: var(--app);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  cursor: default;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Number inputs: no native spinners (we draw our own steppers). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* A physical-looking key. */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.7rem;
+  padding: 0 0.5rem;
+  border-radius: 6px;
+  background: var(--keycap);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 2px 0 var(--keycap-edge);
+  color: var(--fg);
+  font-size: 0.92rem;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+}
+.keycap-sm {
+  min-width: 1.45rem;
+  height: 1.4rem;
+  padding: 0 0.38rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  box-shadow: 0 1.5px 0 var(--keycap-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

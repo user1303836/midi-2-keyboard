@@ -43,7 +43,13 @@ if (existsSync(localBin)) {
   env[key] = `${localBin}${path.delimiter}${env[key] ?? ""}`;
 }
 
-const child = spawn(command, args, { stdio: "inherit", env, shell: process.platform === "win32" });
+// On Windows the CLIs in node_modules/.bin are .cmd shims, which need a shell. Build the command
+// line ourselves (quoting what needs it) instead of handing an args array to a shell.
+const quote = (value) => (/[\s"&|<>^()]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value);
+const child =
+  process.platform === "win32"
+    ? spawn([command, ...args].map(quote).join(" "), { stdio: "inherit", env, shell: true })
+    : spawn(command, args, { stdio: "inherit", env });
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
   else process.exit(code ?? 1);

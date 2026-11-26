@@ -9,6 +9,8 @@ pub fn run(args: &[String]) -> i32 {
     let dir = PathBuf::from(args.first().map(String::as_str).unwrap_or("src/bindings"));
     let cfg = ts_rs::Config::new().with_out_dir(&dir).with_large_int("number");
     let result = (|| -> Result<(), ts_rs::ExportError> {
+        m2k_core::Snapshot::export_all(&cfg)?;
+        m2k_core::RuntimeEvent::export_all(&cfg)?;
         m2k_core::Config::export_all(&cfg)?;
         m2k_core::EngineEvent::export_all(&cfg)?;
         m2k_core::EngineStatus::export_all(&cfg)?;
