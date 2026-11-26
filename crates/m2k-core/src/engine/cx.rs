@@ -217,6 +217,9 @@ pub struct Cx {
     pub dirty: bool,
     pub launcher: Launcher,
     failures: FailureLog,
+    /// Outbox index of the `Fired` event whose output is being sent right now: a backend
+    /// failure turns that event's outcome into `Failed` instead of adding another event.
+    firing: Option<usize>,
 }
 
 impl Cx {
@@ -238,6 +241,7 @@ impl Cx {
             dirty: true,
             launcher,
             failures: FailureLog::default(),
+            firing: None,
         }
     }
 
@@ -271,13 +275,38 @@ impl Cx {
         self.report(info, description, Outcome::Skipped { reason });
     }
 
-    /// Reports a backend failure, unless the same failure was just reported for this owner.
+    /// Reports a backend failure: as the outcome of the firing being sent right now, or as its
+    /// own event unless the same failure was just reported for this owner.
     pub fn report_failure(&mut self, info: &OwnerInfo, description: String, error: OutputError) {
         let error = error.to_string();
+        if let Some(index) = self.firing
+            && let Some(EngineEvent::Fired(fired)) = self.outbox.get_mut(index)
+        {
+            if fired.outcome == Outcome::Sent {
+                fired.outcome = Outcome::Failed { error };
+            }
+            return;
+        }
         if self.failures.seen(info.owner, &error, self.now) {
             return;
         }
         self.report(info, description, Outcome::Failed { error });
+    }
+
+    /// Reports a firing as sent and runs `send`, which performs its immediate output; a
+    /// backend failure during `send` becomes the firing's outcome.
+    fn report_sent<R>(
+        &mut self,
+        info: &OwnerInfo,
+        description: String,
+        send: impl FnOnce(&mut Cx) -> R,
+    ) -> R {
+        let index = self.outbox.len();
+        self.report(info, description, Outcome::Sent);
+        let outer = self.firing.replace(index);
+        let result = send(self);
+        self.firing = outer;
+        result
     }
 
     pub fn report_failures(&mut self, info: &OwnerInfo, what: &str, errors: Vec<OutputError>) {
@@ -328,8 +357,8 @@ impl Cx {
                     }
                     return false;
                 }
-                self.report(info, description, Outcome::Sent);
-                let queued = self.enqueue(info, action, ctx);
+                let queued =
+                    self.report_sent(info, description, |cx| cx.enqueue(info, action, ctx));
                 debug_assert!(matches!(queued, Enqueued::Queued));
             }
             ActionKind::Layer { layer, op } => {
@@ -363,17 +392,16 @@ impl Cx {
             self.report_skip(info, target.hold_label.clone(), reason);
             return false;
         }
-        self.report(info, target.hold_label.clone(), Outcome::Sent);
-        match &target.what {
+        self.report_sent(info, target.hold_label.clone(), |cx| match &target.what {
             HoldWhat::Keys(keys) => {
-                let emulate = auto_repeat && !self.out.repeats_held_keys();
-                self.hold_keys(info, keys, emulate);
+                let emulate = auto_repeat && !cx.out.repeats_held_keys();
+                cx.hold_keys(info, keys, emulate);
             }
-            HoldWhat::Button(button) => self.press_button(info, *button),
+            HoldWhat::Button(button) => cx.press_button(info, *button),
             HoldWhat::Layer(layer) => {
-                self.layers.hold(layer);
+                cx.layers.hold(layer);
             }
-        }
+        });
         self.dirty = true;
         true
     }
@@ -381,14 +409,13 @@ impl Cx {
     /// Disengages a hold target. Always goes through. `immediate` releases all keys at once
     /// (forced releases); otherwise keys come up in reverse order with the key stagger.
     pub fn disengage(&mut self, info: &OwnerInfo, target: &CHoldTarget, immediate: bool) {
-        self.report(info, target.release_label.clone(), Outcome::Sent);
-        match &target.what {
-            HoldWhat::Keys(_) => self.unhold_keys(info.owner, immediate),
-            HoldWhat::Button(button) => self.release_button(info, *button),
+        self.report_sent(info, target.release_label.clone(), |cx| match &target.what {
+            HoldWhat::Keys(_) => cx.unhold_keys(info.owner, immediate),
+            HoldWhat::Button(button) => cx.release_button(info, *button),
             HoldWhat::Layer(layer) => {
-                self.layers.unhold(layer);
+                cx.layers.unhold(layer);
             }
-        }
+        });
         self.dirty = true;
     }
 

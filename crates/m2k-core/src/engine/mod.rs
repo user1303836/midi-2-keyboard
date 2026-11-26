@@ -39,8 +39,9 @@ mod worker;
 
 use std::sync::{Arc, Mutex};
 use std::thread::{JoinHandle, ThreadId};
+use std::time::Duration;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use m2k_midi::MidiMessage;
 use m2k_output::Injector;
 use m2k_output::platform::ForegroundApp;
@@ -57,12 +58,19 @@ pub struct EngineOptions {
     pub track_foreground: bool,
 }
 
+/// How long [`Engine::stop`] waits for the engine thread. Releasing everything takes
+/// microseconds; the limit only matters if a backend call or the sink never returns, so that
+/// the application can still exit.
+const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Handle to the running engine.
 pub struct Engine {
     tx: Sender<Envelope>,
     shared: Arc<Shared>,
     thread: Mutex<Option<JoinHandle<()>>>,
     thread_id: ThreadId,
+    /// Disconnects when the engine thread has finished (its sender lives on that thread).
+    finished: Receiver<()>,
 }
 
 impl Engine {
@@ -74,17 +82,21 @@ impl Engine {
         sink: impl Fn(EngineEvent) + Send + 'static,
     ) -> Engine {
         let (tx, rx) = crossbeam_channel::unbounded();
+        let (finished_tx, finished) = crossbeam_channel::bounded::<()>(0);
         let shared = Arc::new(Shared::default());
         let handle = {
             let tx = tx.clone();
             let shared = shared.clone();
             std::thread::Builder::new()
                 .name("m2k-engine".into())
-                .spawn(move || worker::run(config, options, Box::new(sink), shared, tx, rx))
+                .spawn(move || {
+                    let _finished = finished_tx;
+                    worker::run(config, options, Box::new(sink), shared, tx, rx);
+                })
                 .expect("could not start the engine thread")
         };
         let thread_id = handle.thread().id();
-        Engine { tx, shared, thread: Mutex::new(Some(handle)), thread_id }
+        Engine { tx, shared, thread: Mutex::new(Some(handle)), thread_id, finished }
     }
 
     fn post(&self, command: Command) {
@@ -171,7 +183,16 @@ impl Engine {
         let mut thread = self.thread.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(handle) = thread.take() {
             self.post(Command::Shutdown);
-            let _ = handle.join();
+            match self.finished.recv_timeout(STOP_TIMEOUT) {
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) | Ok(()) => {
+                    let _ = handle.join();
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    log::error!(
+                        "the engine thread did not stop within {STOP_TIMEOUT:?}; leaving it behind"
+                    );
+                }
+            }
         }
     }
 

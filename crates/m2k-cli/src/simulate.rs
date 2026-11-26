@@ -32,6 +32,7 @@ script lines (a time prefix is optional: +MS = after the previous line, @MS = si
   config <file.json>              hot-swap the config
   run [delay-ms] <action json>    the UI's Test button
   status                          print the engine status snapshot
+  swap-backend                    replace the output backend (set_injector)
   echo <text>                     print a marker line
   # comment
 
@@ -39,9 +40,15 @@ options:
   --json            print engine events as JSON
   --repeats         the backend auto-repeats held keys by itself (like X11 / uinput)
   --fail <Key>      the backend rejects this key (repeatable), e.g. --fail F13
+  --panic <Key>     the backend panics when this key goes down (tests recovery)
   --settle <ms>     wait this long after the script before stopping (default 1000)
   --clock           also show MIDI clock / active sensing messages
   --quiet-status    do not print status events";
+
+fn say(line: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout().lock(), "{line}");
+}
 
 struct Clock(Instant);
 
@@ -50,8 +57,10 @@ impl Clock {
         self.0.elapsed().as_secs_f64() * 1000.0
     }
 
+    /// Prints one line. Write errors are ignored: when the reader goes away (`| head`), the
+    /// simulation still runs to its end and stops the engine cleanly.
     fn print(&self, tag: &str, text: impl Display) {
-        println!("{:>9.1}  {tag:<5}  {text}", self.ms());
+        say(format_args!("{:>9.1}  {tag:<5}  {text}", self.ms()));
     }
 }
 
@@ -80,15 +89,18 @@ struct Tally {
 
 /// The output backend of the simulation: prints and records what it is asked to do.
 struct LogInjector {
+    name: &'static str,
     clock: Arc<Clock>,
     held: Arc<Mutex<Held>>,
     repeats: bool,
     fail: Vec<Key>,
+    /// Pressing this key panics inside the backend (exercises the engine's panic recovery).
+    panic: Option<Key>,
 }
 
 impl Injector for LogInjector {
     fn name(&self) -> &'static str {
-        "simulate"
+        self.name
     }
 
     fn supports(&self, key: Key) -> bool {
@@ -100,12 +112,16 @@ impl Injector for LogInjector {
     }
 
     fn key_down(&mut self, key: Key) -> Result<(), OutputError> {
+        if self.panic == Some(key) {
+            self.clock.print("KEY", format!("down {key:?}  -> backend panics (--panic)"));
+            panic!("simulated backend panic on {key:?}");
+        }
         if self.fail.contains(&key) {
             self.clock.print("KEY", format!("down {key:?}  -> rejected (--fail)"));
             return Err(OutputError::Unsupported(key.code(), "simulate"));
         }
         let again = {
-            let mut held = self.held.lock().unwrap();
+            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
             held.key_downs += 1;
             !held.keys.insert(key)
         };
@@ -115,7 +131,7 @@ impl Injector for LogInjector {
 
     fn key_up(&mut self, key: Key) -> Result<(), OutputError> {
         let was_down = {
-            let mut held = self.held.lock().unwrap();
+            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
             held.key_ups += 1;
             held.keys.remove(&key)
         };
@@ -130,7 +146,7 @@ impl Injector for LogInjector {
 
     fn mouse_button(&mut self, button: MouseButton, down: bool) -> Result<(), OutputError> {
         {
-            let mut held = self.held.lock().unwrap();
+            let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
             if down {
                 held.buttons.insert(button);
             } else {
@@ -173,6 +189,7 @@ enum Step {
     Config(PathBuf),
     Run { delay_ms: u32, action: Box<Action> },
     Status,
+    SwapBackend,
     Echo,
     Wait,
 }
@@ -289,6 +306,7 @@ fn parse_line(rest: &str, now: &mut u64) -> Result<Step, String> {
         "release-all" => Step::ReleaseAll,
         "config" => Step::Config(PathBuf::from(arg(1)?)),
         "status" => Step::Status,
+        "swap-backend" => Step::SwapBackend,
         "echo" => Step::Echo,
         other => return Err(format!("unknown directive \"{other}\"")),
     })
@@ -421,7 +439,7 @@ fn skip_reason(reason: SkipReason) -> &'static str {
 
 fn print_event(clock: &Clock, options: PrintOptions, tally: &Mutex<Tally>, event: &EngineEvent) {
     {
-        let mut tally = tally.lock().unwrap();
+        let mut tally = tally.lock().unwrap_or_else(|e| e.into_inner());
         match event {
             EngineEvent::Fired(fired) => match fired.outcome {
                 Outcome::Sent => tally.sent += 1,
@@ -495,7 +513,10 @@ pub fn run(args: &[String]) -> i32 {
     let mut print = PrintOptions::default();
     let mut repeats = false;
     let mut fail = Vec::new();
+    let mut panic_key = None;
     let mut settle_ms = 1000u64;
+    let parse_key =
+        |k: &String| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -503,10 +524,11 @@ pub fn run(args: &[String]) -> i32 {
             "--clock" => print.clock = true,
             "--quiet-status" => print.quiet_status = true,
             "--repeats" => repeats = true,
-            "--fail" => match iter.next().and_then(|k| serde_json::from_value::<Key>(serde_json::Value::String(k.clone())).ok()) {
-                Some(key) => fail.push(key),
+            "--fail" | "--panic" => match iter.next().and_then(parse_key) {
+                Some(key) if arg == "--fail" => fail.push(key),
+                Some(key) => panic_key = Some(key),
                 None => {
-                    eprintln!("--fail needs a key code such as F13 or KeyA");
+                    eprintln!("{arg} needs a key code such as F13 or KeyA");
                     return 2;
                 }
             },
@@ -518,7 +540,7 @@ pub fn run(args: &[String]) -> i32 {
                 }
             },
             "-h" | "--help" => {
-                println!("{USAGE}");
+                say(format_args!("{USAGE}"));
                 return 0;
             }
             _ => positional.push(arg.clone()),
@@ -561,18 +583,26 @@ pub fn run(args: &[String]) -> i32 {
     };
 
     let mappings: usize = config.profiles.iter().map(|p| p.mappings.len()).sum();
-    println!(
+    say(format_args!(
         "simulating {} ({} profiles, {mappings} mappings), {} script lines{}",
         config_path.display(),
         config.profiles.len(),
         lines.len(),
         if repeats { ", backend repeats held keys" } else { "" }
-    );
+    ));
 
     let clock = Arc::new(Clock(Instant::now()));
     let held = Arc::new(Mutex::new(Held::default()));
     let tally = Arc::new(Mutex::new(Tally::default()));
-    let injector = LogInjector { clock: clock.clone(), held: held.clone(), repeats, fail };
+    let backend = |name: &'static str| LogInjector {
+        name,
+        clock: clock.clone(),
+        held: held.clone(),
+        repeats,
+        fail: fail.clone(),
+        panic: panic_key,
+    };
+    let injector = backend("simulate");
     let engine = {
         let clock = clock.clone();
         let tally = tally.clone();
@@ -613,6 +643,7 @@ pub fn run(args: &[String]) -> i32 {
                 Err(error) => clock.print("ERROR", error),
             },
             Step::Run { delay_ms, action } => engine.run_action((**action).clone(), *delay_ms),
+            Step::SwapBackend => engine.set_injector(Box::new(backend("simulate-2"))),
             Step::Status => {
                 // Commands are asynchronous; give the engine a moment to catch up.
                 std::thread::sleep(Duration::from_millis(5));
@@ -626,17 +657,17 @@ pub fn run(args: &[String]) -> i32 {
     clock.print("END", "stopping the engine");
     engine.stop();
 
-    let held = held.lock().unwrap();
-    let tally = tally.lock().unwrap();
-    println!(
+    let held = held.lock().unwrap_or_else(|e| e.into_inner());
+    let tally = tally.lock().unwrap_or_else(|e| e.into_inner());
+    say(format_args!(
         "summary: {} key downs, {} key ups; fired: {} sent, {} skipped, {} failed; {} errors",
         held.key_downs, held.key_ups, tally.sent, tally.skipped, tally.failed, tally.errors
-    );
+    ));
     if held.keys.is_empty() && held.buttons.is_empty() {
-        println!("RESULT: OK, nothing is left held");
+        say(format_args!("RESULT: OK, nothing is left held"));
         0
     } else {
-        println!("RESULT: STUCK! keys {:?} buttons {:?}", held.keys, held.buttons);
+        say(format_args!("RESULT: STUCK! keys {:?} buttons {:?}", held.keys, held.buttons));
         3
     }
 }
