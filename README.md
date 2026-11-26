@@ -47,8 +47,8 @@ launching programs, opening files and URLs.
 
 **Shaping** — rate limits (throttle, throttle with a final trailing fire, debounce), conditions
 (only in a certain application, only while a layer is on, only while another pad is held, only
-while a knob is in a certain position), hysteresis for jittery pedals and faders, debouncing for
-chattering switches, per-action timing.
+while a knob is in a certain position), a dead zone for jittery pedals and faders, a jitter guard
+for worn knobs that flutter on their own, debouncing for chattering switches, per-action timing.
 
 **Organization** — profiles, always-on (global) profiles, automatic profile switching by
 foreground application (picked from a list of open apps) or by program change, layers with
@@ -94,7 +94,9 @@ Good to know:
 
 - **Windows:** most MIDI drivers allow only one program to open a device at a time. If your DAW has
   the controller open, this app cannot open it (and vice versa) — it will say so and keep retrying.
-  To control windows that run as administrator, run this app as administrator too.
+  To control windows that run as administrator, run this app as administrator too (Settings
+  offers to restart it that way). A controller keeps its name, and with it its mappings, when
+  you move it to another USB port.
 - **macOS:** the app needs the *Accessibility* permission to send keys
   (System Settings → Privacy & Security → Accessibility). It asks on first use.
 - **Linux:** on X11 it works out of the box. On Wayland it needs access to `/dev/uinput`: the deb
