@@ -639,9 +639,6 @@ impl Worker {
         if !before.blocks_os() && after.blocks_os() {
             self.release_outputs(false);
         }
-        if before.paused && !after.paused {
-            self.refresh_feedback();
-        }
         if before.paused != after.paused
             || before.learning != after.learning
             || before.focus_suspended() != after.focus_suspended()

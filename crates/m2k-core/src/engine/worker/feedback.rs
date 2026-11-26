@@ -5,11 +5,13 @@
 //! state it shows (engaged, a layer, the effective profile) with what it last sent, and only a
 //! change goes out. A refresh sends the current state again even when it did not change: when
 //! the set of live mappings changes (a mapping that stops being live sends its `off`, before the
-//! newly live ones send theirs), when output ports (re)appear, on resume and with a new MIDI
-//! sink. A config install sends the state of new mappings and of those whose feedback changed
-//! (the old light's `off` first), and the `off` of lit mappings it removes. Nothing is sent while paused or on exit: lights keep showing the
-//! state. Feedback goes out after the key output of the same event, through the sink (which never
-//! blocks), and before the event's monitor rows are delivered.
+//! newly live ones send theirs), when output ports (re)appear and with a new MIDI sink. A config
+//! install sends the state of new mappings and of those whose feedback changed (the old light's
+//! `off` first), and the `off` of lit mappings it removes. Pausing sends only what it changes (a
+//! toggle or hold it releases goes dark; layers and profiles keep their lights), so the pads stay
+//! truthful. On exit nothing is sent: lights keep showing the state. Feedback goes out after the
+//! key output of the same event, through the sink (which never blocks), and before the event's
+//! monitor rows are delivered.
 
 use std::sync::Arc;
 
@@ -69,8 +71,7 @@ impl Worker {
         if !self.fb_due && !self.cx.dirty {
             return;
         }
-        if !self.fb_enabled || self.cx.gate.paused {
-            // Kept due: resuming refreshes everything anyway.
+        if !self.fb_enabled {
             return;
         }
         self.fb_due = false;

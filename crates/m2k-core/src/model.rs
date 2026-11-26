@@ -276,9 +276,10 @@ pub struct Mapping {
 ///
 /// `on` is sent when the state described by `when` becomes true, `off` when it becomes false.
 /// Both are also sent to bring a controller up to date: when the output port (re)appears or the
-/// connected inputs change, on resume, and when the set of live profiles changes (a mapping that
-/// stops being live gets its `off`). A config change sends the state of new mappings and of
-/// those whose feedback changed, and the `off` of lit mappings it removes. On exit and on pause
+/// connected inputs change, and when the set of live profiles changes (a mapping that stops being
+/// live gets its `off`). A config change sends the state of new mappings and of those whose
+/// feedback changed, and the `off` of lit mappings it removes. Pausing sends only what it changes
+/// (a toggle or hold it releases goes dark; layers and profiles keep their lights). On exit
 /// nothing is sent: lights keep showing the state. Sending never blocks and never delays key
 /// output; a missing port is reported once, not per message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
