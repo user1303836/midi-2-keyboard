@@ -609,6 +609,10 @@ impl Worker {
     // -----------------------------------------------------------------------------------------
 
     fn run_action(&mut self, action: &Action, delay_ms: u32) {
+        // An empty action is no action (the Test button of a slot left blank).
+        if action.is_empty() {
+            return;
+        }
         let compiled = compile::action(action, &self.cfg.settings, &self.cfg.profiles);
         if delay_ms == 0 {
             self.run_test(&compiled);

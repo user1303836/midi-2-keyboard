@@ -700,6 +700,17 @@ pub enum HoldTarget {
     Layer { layer: String },
 }
 
+impl HoldTarget {
+    /// Nothing to hold (no keys, or a layer left blank): the engine treats it as no target.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            HoldTarget::Keys { keys } => keys.is_empty(),
+            HoldTarget::MouseButton { .. } => false,
+            HoldTarget::Layer { layer } => layer.trim().is_empty(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------------------------
@@ -774,6 +785,28 @@ fn default_layer_op() -> LayerOp {
     LayerOp::Toggle
 }
 
+impl Action {
+    /// Does nothing when fired: no keys, no text, a macro without a step that does something,
+    /// a scroll or relative move of 0, a program, file, profile or layer left blank. A slot
+    /// holding an empty action counts as empty: the engine never fires or reports it.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Action::Keys { keys, .. } => keys.is_empty(),
+            Action::Text { text, .. } => text.is_empty(),
+            Action::MouseClick { .. } | Action::Engine { .. } => false,
+            Action::MouseScroll { dx, dy } => *dx == 0 && *dy == 0,
+            Action::MouseMove { x, y, absolute } => !absolute && *x == 0 && *y == 0,
+            Action::Sequence { steps } => !steps.iter().any(SequenceStep::has_effect),
+            Action::SwitchProfile { target } => {
+                matches!(target, ProfileTarget::Profile { id } if id.trim().is_empty())
+            }
+            Action::Layer { layer, .. } => layer.trim().is_empty(),
+            Action::Run { command, .. } => command.trim().is_empty(),
+            Action::Open { target } => target.trim().is_empty(),
+        }
+    }
+}
+
 /// One step of an [`Action::Sequence`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -809,6 +842,25 @@ pub enum SequenceStep {
         #[serde(default)]
         absolute: bool,
     },
+}
+
+impl SequenceStep {
+    /// Produces some input. Empty keys or text, a scroll or relative move of 0 and waits do not
+    /// (a macro made only of those is an empty action).
+    pub fn has_effect(&self) -> bool {
+        match self {
+            SequenceStep::Keys { keys, .. } => !keys.is_empty(),
+            SequenceStep::Text { text } => !text.is_empty(),
+            SequenceStep::Delay { .. } => false,
+            SequenceStep::MouseScroll { dx, dy } => *dx != 0 || *dy != 0,
+            SequenceStep::MouseMove { x, y, absolute } => *absolute || *x != 0 || *y != 0,
+            SequenceStep::KeyDown { .. }
+            | SequenceStep::KeyUp { .. }
+            | SequenceStep::MouseClick { .. }
+            | SequenceStep::MouseDown { .. }
+            | SequenceStep::MouseUp { .. } => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

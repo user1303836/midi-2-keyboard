@@ -142,7 +142,7 @@ impl State {
                 long: None,
                 held: false,
             },
-            CBehavior::Change { .. } | CBehavior::Step { .. } => State::Plain,
+            CBehavior::Change { .. } | CBehavior::Step { .. } | CBehavior::Inert => State::Plain,
         }
     }
 }
@@ -718,6 +718,8 @@ pub fn on_edge(
             }
             fire(rt, def, cx, Slot::Change, ctx, false);
         }
+
+        CBehavior::Inert => {}
 
         CBehavior::Step { up, down, step, max_burst, invert, fast } => {
             let moved = match edge {

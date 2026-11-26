@@ -212,6 +212,8 @@ pub enum CBehavior {
         action: CAction,
         min_change: u16,
     },
+    /// The mapping's only action or target is empty: it matches, but never does anything.
+    Inert,
     Step {
         up: Option<CAction>,
         down: Option<CAction>,
@@ -406,6 +408,8 @@ fn compile_mapping(
 ) -> CMapping {
     let label = if mapping.name.trim().is_empty() { &mapping.id } else { &mapping.name };
     let act = |a: &Action| action(a, settings, profiles);
+    // An empty action (no keys, no text, ...) is no action: the slot means "nothing".
+    let act_opt = |a: &Option<Action>| a.as_ref().filter(|a| !a.is_empty()).map(act);
     let kind = match &mapping.source.event {
         SourceEvent::Note { notes, velocity } => {
             CSourceKind::Note { notes: *notes, velocity: *velocity }
@@ -494,10 +498,13 @@ fn compile_mapping(
 
     let behavior = match &mapping.behavior {
         Behavior::Trigger { on_press, on_release, repeat } => CBehavior::Trigger {
-            on_press: on_press.as_ref().map(act),
-            on_release: on_release.as_ref().map(act),
+            on_press: act_opt(on_press),
+            on_release: act_opt(on_release),
             repeat: *repeat,
         },
+        Behavior::Hold { target, .. } | Behavior::Toggle { target } if target.is_empty() => {
+            CBehavior::Inert
+        }
         Behavior::Hold { target, auto_repeat } => {
             let pulse = match target {
                 HoldTarget::Keys { keys } => {
@@ -512,38 +519,43 @@ fn compile_mapping(
         }
         Behavior::Toggle { target } => CBehavior::Toggle { target: hold_target(target) },
         Behavior::Cycle { actions, reset_after_ms } => CBehavior::Cycle {
-            actions: actions.iter().map(act).collect(),
+            // An empty entry is skipped rather than spending a press on nothing.
+            actions: actions.iter().filter(|a| !a.is_empty()).map(act).collect(),
             reset_after_ms: *reset_after_ms,
         },
         Behavior::TapHold { tap, hold, hold_target: target, hold_ms } => CBehavior::TapHold {
-            tap: tap.as_ref().map(act),
-            hold: hold.as_ref().map(act),
-            hold_target: target.as_ref().map(hold_target),
+            tap: act_opt(tap),
+            hold: act_opt(hold),
+            hold_target: target.as_ref().filter(|t| !t.is_empty()).map(hold_target),
             hold_ms: *hold_ms,
         },
         Behavior::MultiTap { single, double, triple, window_ms, hold, hold_ms } => {
-            let actions =
-                [single.as_ref().map(act), double.as_ref().map(act), triple.as_ref().map(act)];
+            let actions = [act_opt(single), act_opt(double), act_opt(triple)];
             let highest = actions.iter().rposition(Option::is_some).map_or(0, |i| i as u8 + 1);
             CBehavior::MultiTap {
                 actions,
                 highest,
                 window_ms: *window_ms,
-                hold: hold.as_ref().map(act),
+                hold: act_opt(hold),
                 hold_ms: (*hold_ms).max(1),
             }
         }
+        Behavior::Change { action, .. } if action.is_empty() => CBehavior::Inert,
         Behavior::Change { action, min_change } => {
             CBehavior::Change { action: act(action), min_change: *min_change }
         }
         Behavior::Step { up, down, step, max_burst, invert, fast } => CBehavior::Step {
-            up: up.as_ref().map(act),
-            down: down.as_ref().map(act),
-            fast: fast.as_ref().map(|fast| CFastStep {
-                ticks: u32::from(fast.ticks.max(2)),
-                up: fast.up.as_ref().map(act),
-                down: fast.down.as_ref().map(act),
-            }),
+            up: act_opt(up),
+            down: act_opt(down),
+            // A direction without a fast action (or with an empty one) keeps its normal steps.
+            fast: fast
+                .as_ref()
+                .map(|fast| CFastStep {
+                    ticks: u32::from(fast.ticks.max(2)),
+                    up: act_opt(&fast.up),
+                    down: act_opt(&fast.down),
+                })
+                .filter(|fast| fast.up.is_some() || fast.down.is_some()),
             step: (*step).max(1),
             max_burst: *max_burst,
             invert: *invert,
@@ -552,6 +564,7 @@ fn compile_mapping(
 
     for action in behavior_actions(&mapping.behavior) {
         if let Action::SwitchProfile { target: ProfileTarget::Profile { id } } = action
+            && !action.is_empty()
             && !profiles.iter().any(|p| &*p.id == id)
         {
             errors.push(format!(
