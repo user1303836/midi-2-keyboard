@@ -154,7 +154,8 @@ switch it off for velocity 0. [`examples/pad-lights.json`](examples/pad-lights.j
   devices*). Windows' one-program-per-device rule applies to them too: while a DAW holds the
   controller's output, lights cannot reach it; the output says so and is retried.
 - Lights are sent when their state changes, and all of them again when the controller
-  (re)connects and when output resumes after a pause. While paused, and on exit, nothing is sent.
+  (re)connects. Pausing turns off the lights of what it releases (toggles and holds); layer and
+  profile lights stay as they are. On exit nothing is sent: the lights keep their last state.
 
 Good to know:
 
