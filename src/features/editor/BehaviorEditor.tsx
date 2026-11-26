@@ -1,0 +1,433 @@
+import {
+  Activity,
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpDown,
+  Hourglass,
+  MousePointerClick,
+  Plus,
+  Repeat,
+  ToggleLeft,
+  X,
+  Zap,
+} from "lucide-react";
+import type { ReactNode } from "react";
+
+import type { Action } from "@/bindings/Action";
+import type { Behavior } from "@/bindings/Behavior";
+import { Button, IconButton } from "@/components/ui/button";
+import { NumberInput, Segmented } from "@/components/ui/inputs";
+import { Tooltip } from "@/components/ui/overlays";
+import {
+  BEHAVIOR_TYPES,
+  behaviorTypeInfo,
+  defaultBehavior,
+  emptyKeys,
+  type BehaviorType,
+  type SourceShape,
+} from "@/lib/model";
+import { useApp } from "@/lib/store";
+import { cn } from "@/lib/utils";
+
+import { ActionEditor, InlineSwitch, TargetEditor } from "./ActionEditor";
+
+const ICONS: Record<BehaviorType, ReactNode> = {
+  trigger: <Zap size={15} />,
+  hold: <ArrowDownToLine size={15} />,
+  toggle: <ToggleLeft size={15} />,
+  change: <Activity size={15} />,
+  step: <ArrowUpDown size={15} />,
+  tap_hold: <Hourglass size={15} />,
+  multi_tap: <MousePointerClick size={15} />,
+  cycle: <Repeat size={15} />,
+};
+
+export function BehaviorIcon({ type }: { type: BehaviorType }) {
+  return <>{ICONS[type]}</>;
+}
+
+/** The behavior chooser: the ones that suit the source come first and are highlighted. */
+export function BehaviorPicker({
+  value,
+  shape,
+  onChange,
+}: {
+  value: BehaviorType;
+  shape: SourceShape;
+  onChange: (type: BehaviorType) => void;
+}) {
+  const sorted = [...BEHAVIOR_TYPES].sort(
+    (a, b) => Number(b.fits.includes(shape)) - Number(a.fits.includes(shape)),
+  );
+  return (
+    <div className="grid grid-cols-4 gap-1.5">
+      {sorted.map((info) => {
+        const selected = info.type === value;
+        const fits = info.fits.includes(shape);
+        return (
+          <Tooltip key={info.type} content={info.hint} side="top">
+            <button
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(info.type)}
+              className={cn(
+                "flex h-[50px] flex-col items-center justify-center gap-1 rounded-lg border text-sm transition-colors",
+                selected
+                  ? "border-accent bg-accent-soft font-medium text-fg"
+                  : "border-line-strong bg-app text-fg-muted hover:border-fg-faint hover:text-fg",
+                !fits && !selected && "opacity-55",
+              )}
+            >
+              <span className={selected ? "text-accent" : undefined}>{ICONS[info.type]}</span>
+              {info.label}
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One labelled action row inside a behavior form. */
+function Slot({
+  label,
+  children,
+  onRemove,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="flex h-[34px] w-[62px] shrink-0 items-center text-fg-muted">{label}</div>
+      <div className="min-w-0 flex-1">{children}</div>
+      {onRemove && (
+        <IconButton label="Remove" size="sm" className="mt-[5px]" onClick={onRemove}>
+          <X size={13} />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+
+function AddSlot({ label, onAdd }: { label: string; onAdd: () => void }) {
+  return (
+    <Button size="sm" variant="ghost" className="self-start" icon={<Plus size={13} />} onClick={onAdd}>
+      {label}
+    </Button>
+  );
+}
+
+function Ms({
+  value,
+  onChange,
+  min = 1,
+  max = 60000,
+  label,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  label: string;
+}) {
+  return <NumberInput aria-label={label} suffix="ms" className="w-[88px]" min={min} max={max} value={value} onChange={onChange} />;
+}
+
+export function BehaviorEditor({
+  behavior,
+  shape,
+  onChange,
+  autoCapture = false,
+  onCaptured,
+}: {
+  behavior: Behavior;
+  shape: SourceShape;
+  onChange: (behavior: Behavior, coalesceKey?: string) => void;
+  /** Arm the first key field immediately (quick-add flow). */
+  autoCapture?: boolean;
+  onCaptured?: () => void;
+}) {
+  const settings = useApp((state) => state.config.settings);
+  const b = behavior;
+  const info = behaviorTypeInfo(b.type);
+  const pulse = shape === "pulse";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <BehaviorPicker value={b.type} shape={shape} onChange={(type) => onChange(defaultBehavior(type, b))} />
+      <div className="text-sm text-fg-faint">{info.hint}.</div>
+
+      {b.type === "trigger" && (
+        <div className="flex flex-col gap-2.5">
+          {b.on_press ? (
+            <Slot label={b.on_release ? "Press" : "Send"} onRemove={b.on_release ? () => onChange({ ...b, on_press: null }) : undefined}>
+              <ActionEditor
+                action={b.on_press}
+                autoCapture={autoCapture}
+                onCaptured={onCaptured}
+                onChange={(on_press, key) => onChange({ ...b, on_press }, key && `press:${key}`)}
+              />
+            </Slot>
+          ) : (
+            <AddSlot label="Do something on press" onAdd={() => onChange({ ...b, on_press: emptyKeys() })} />
+          )}
+          {b.on_release ? (
+            <Slot label="Release" onRemove={() => onChange({ ...b, on_release: null })}>
+              <ActionEditor
+                action={b.on_release}
+                onChange={(on_release, key) => onChange({ ...b, on_release }, key && `release:${key}`)}
+              />
+            </Slot>
+          ) : (
+            !pulse && <AddSlot label="Also do something on release" onAdd={() => onChange({ ...b, on_release: emptyKeys() })} />
+          )}
+          {!pulse && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <InlineSwitch
+                label="Repeat while held"
+                hint="Auto-fire: keep sending the press action for as long as the control stays pressed"
+                checked={b.repeat !== null}
+                onChange={(on) => onChange({ ...b, repeat: on ? { delay_ms: 400, interval_ms: 100 } : null })}
+              />
+              {b.repeat && (
+                <div className="flex items-center gap-2 text-sm text-fg-muted">
+                  after
+                  <Ms label="Delay before repeating" min={0} value={b.repeat.delay_ms} onChange={(delay_ms) => onChange({ ...b, repeat: { ...b.repeat!, delay_ms } }, "rdelay")} />
+                  every
+                  <Ms label="Repeat interval" min={5} value={b.repeat.interval_ms} onChange={(interval_ms) => onChange({ ...b, repeat: { ...b.repeat!, interval_ms } }, "rint")} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {b.type === "hold" && (
+        <div className="flex flex-col gap-2.5">
+          <Slot label="Hold">
+            <TargetEditor
+              target={b.target}
+              autoCapture={autoCapture}
+              onCaptured={onCaptured}
+              onChange={(target, key) => onChange({ ...b, target }, key && `target:${key}`)}
+            />
+          </Slot>
+          {b.target.type === "keys" && (
+            <InlineSwitch
+              label="Auto-repeat like a real keyboard"
+              hint={`While held, the key repeats after ${settings.repeat_delay_ms} ms, every ${settings.repeat_interval_ms} ms (change in Settings)`}
+              checked={b.auto_repeat}
+              onChange={(auto_repeat) => onChange({ ...b, auto_repeat })}
+            />
+          )}
+          {pulse && (
+            <div className="rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
+              This message has no “release”, so there is nothing to hold. Try Press or Toggle.
+            </div>
+          )}
+        </div>
+      )}
+
+      {b.type === "toggle" && (
+        <Slot label="Latch">
+          <TargetEditor
+            target={b.target}
+            autoCapture={autoCapture}
+            onCaptured={onCaptured}
+            onChange={(target, key) => onChange({ ...b, target }, key && `target:${key}`)}
+          />
+        </Slot>
+      )}
+
+      {b.type === "change" && (
+        <Slot label="Send">
+          <ActionEditor
+            action={b.action}
+            autoCapture={autoCapture}
+            onCaptured={onCaptured}
+            onChange={(action, key) => onChange({ ...b, action }, key && `action:${key}`)}
+          />
+        </Slot>
+      )}
+
+      {b.type === "step" && (
+        <div className="flex flex-col gap-2.5">
+          <StepSlot
+            label={<><ArrowUp size={14} /> Up</>}
+            action={b.up}
+            autoCapture={autoCapture}
+            onCaptured={onCaptured}
+            onChange={(up, key) => onChange({ ...b, up }, key && `up:${key}`)}
+          />
+          <StepSlot
+            label={<><ArrowDown size={14} /> Down</>}
+            action={b.down}
+            onChange={(down, key) => onChange({ ...b, down }, key && `down:${key}`)}
+          />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-fg-muted">
+            <span className="flex items-center gap-2">
+              One action per
+              <NumberInput aria-label="Step size" className="w-[60px]" min={1} max={16383} value={b.step} onChange={(step) => onChange({ ...b, step }, "step")} />
+              {shape === "relative" ? "ticks" : "units of movement"}
+            </span>
+            <InlineSwitch label="Reverse direction" checked={b.invert} onChange={(invert) => onChange({ ...b, invert })} />
+          </div>
+          <div className="flex items-center gap-2 text-sm text-fg-faint">
+            At most
+            <NumberInput aria-label="Maximum actions per message" className="w-[60px]" min={0} max={1000} value={b.max_burst} onChange={(max_burst) => onChange({ ...b, max_burst }, "burst")} />
+            actions from a single message (0 = no limit). Protects against sudden jumps.
+          </div>
+        </div>
+      )}
+
+      {b.type === "tap_hold" && (
+        <div className="flex flex-col gap-2.5">
+          {b.tap ? (
+            <Slot label="Tap" onRemove={() => onChange({ ...b, tap: null })}>
+              <ActionEditor
+                action={b.tap}
+                autoCapture={autoCapture}
+                onCaptured={onCaptured}
+                onChange={(tap, key) => onChange({ ...b, tap }, key && `tap:${key}`)}
+              />
+            </Slot>
+          ) : (
+            <AddSlot label="Do something on a quick tap" onAdd={() => onChange({ ...b, tap: emptyKeys() })} />
+          )}
+          <Slot label="Hold">
+            <div className="flex flex-col gap-2">
+              <Segmented
+                className="self-start"
+                value={b.hold_target ? "target" : "action"}
+                options={[
+                  { value: "action", label: "Fire once", title: "Run an action the moment the hold time is reached" },
+                  { value: "target", label: "Keep held", title: "Hold keys down from then until release (dual-role key)" },
+                ]}
+                onChange={(mode) =>
+                  onChange(
+                    mode === "target"
+                      ? { ...b, hold: null, hold_target: { type: "keys", keys: b.hold?.type === "keys" ? b.hold.keys : [] } }
+                      : {
+                          ...b,
+                          hold_target: null,
+                          hold: { type: "keys", keys: b.hold_target?.type === "keys" ? b.hold_target.keys : [], tap_ms: null },
+                        },
+                  )
+                }
+              />
+              {b.hold_target ? (
+                <TargetEditor target={b.hold_target} onChange={(hold_target, key) => onChange({ ...b, hold_target }, key && `ht:${key}`)} />
+              ) : (
+                <ActionEditor action={b.hold ?? emptyKeys()} onChange={(hold, key) => onChange({ ...b, hold }, key && `hold:${key}`)} />
+              )}
+            </div>
+          </Slot>
+          <div className="flex items-center gap-2 text-sm text-fg-muted">
+            Counts as a hold after
+            <Ms label="Hold time" min={50} max={10000} value={b.hold_ms} onChange={(hold_ms) => onChange({ ...b, hold_ms }, "holdms")} />
+          </div>
+        </div>
+      )}
+
+      {b.type === "multi_tap" && (
+        <div className="flex flex-col gap-2.5">
+          {(
+            [
+              ["single", "Single"],
+              ["double", "Double"],
+              ["triple", "Triple"],
+            ] as const
+          ).map(([field, label], index) => {
+            const action = b[field];
+            return action ? (
+              <Slot key={field} label={label} onRemove={() => onChange({ ...b, [field]: null })}>
+                <ActionEditor
+                  action={action}
+                  autoCapture={autoCapture && index === 0}
+                  onCaptured={onCaptured}
+                  onChange={(next, key) => onChange({ ...b, [field]: next }, key && `${field}:${key}`)}
+                />
+              </Slot>
+            ) : (
+              <AddSlot key={field} label={`${label} press`} onAdd={() => onChange({ ...b, [field]: emptyKeys() })} />
+            );
+          })}
+          <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+            Presses count together when they are within
+            <Ms label="Multi-tap window" min={50} max={5000} value={b.window_ms} onChange={(window_ms) => onChange({ ...b, window_ms }, "window")} />
+          </div>
+          <div className="text-sm text-fg-faint">
+            A single press has to wait that long to be sure a second one is not coming.
+          </div>
+        </div>
+      )}
+
+      {b.type === "cycle" && (
+        <div className="flex flex-col gap-2.5">
+          {b.actions.map((action, index) => (
+            <Slot
+              key={index}
+              label={`Press ${index + 1}`}
+              onRemove={b.actions.length > 1 ? () => onChange({ ...b, actions: b.actions.filter((_, i) => i !== index) }) : undefined}
+            >
+              <ActionEditor
+                action={action}
+                autoCapture={autoCapture && index === 0}
+                onCaptured={onCaptured}
+                onChange={(next, key) =>
+                  onChange({ ...b, actions: b.actions.map((a, i) => (i === index ? next : a)) }, key && `c${index}:${key}`)
+                }
+              />
+            </Slot>
+          ))}
+          <AddSlot label="Add another" onAdd={() => onChange({ ...b, actions: [...b.actions, emptyKeys()] })} />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <InlineSwitch
+              label="Start over after a pause"
+              checked={b.reset_after_ms !== null}
+              onChange={(on) => onChange({ ...b, reset_after_ms: on ? 2000 : null })}
+            />
+            {b.reset_after_ms !== null && (
+              <span className="flex items-center gap-2 text-sm text-fg-muted">
+                of
+                <Ms label="Idle time before restarting" min={100} max={600000} value={b.reset_after_ms} onChange={(reset_after_ms) => onChange({ ...b, reset_after_ms }, "reset")} />
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepSlot({
+  label,
+  action,
+  onChange,
+  autoCapture,
+  onCaptured,
+}: {
+  label: ReactNode;
+  action: Action | null;
+  onChange: (action: Action | null, coalesceKey?: string) => void;
+  autoCapture?: boolean;
+  onCaptured?: () => void;
+}) {
+  if (!action) {
+    return (
+      <Slot label={<span className="inline-flex items-center gap-1">{label}</span>}>
+        <Button size="sm" variant="ghost" className="mt-[5px]" icon={<Plus size={13} />} onClick={() => onChange(emptyKeys())}>
+          Add action
+        </Button>
+      </Slot>
+    );
+  }
+  return (
+    <Slot label={<span className="inline-flex items-center gap-1">{label}</span>} onRemove={() => onChange(null)}>
+      <ActionEditor action={action} autoCapture={autoCapture} onCaptured={onCaptured} onChange={onChange} />
+    </Slot>
+  );
+}

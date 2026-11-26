@@ -1,0 +1,265 @@
+import { Keyboard, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import type { Key } from "@/bindings/Key";
+import { Popover, PopoverContent, PopoverTrigger, Tooltip } from "@/components/ui/overlays";
+import { KeyCombo } from "@/components/ui/misc";
+import { allKeys, KEY_GROUPS, keyFromEvent, normalizeCombo, type KeyInfo } from "@/lib/keys";
+import { cn } from "@/lib/utils";
+
+/**
+ * Captures a key combination by pressing it.
+ *
+ * Click (or focus + Enter) arms the field; every key pressed until all keys are released again
+ * becomes the combination, then the field disarms itself — so Esc, Tab and Enter can be bound
+ * like any other key and the field never traps keyboard focus. Keys the browser cannot see
+ * (media keys, OS-reserved shortcuts) can be added from the picker.
+ */
+export function KeyComboInput({
+  keys,
+  onChange,
+  autoCapture = false,
+  onCaptured,
+  placeholder = "Click, then press a key or shortcut",
+  single = false,
+  className,
+}: {
+  keys: readonly Key[];
+  onChange: (keys: Key[]) => void;
+  /** Start capturing as soon as the field mounts. */
+  autoCapture?: boolean;
+  /** Called after a capture completed (not for picker edits). */
+  onCaptured?: (keys: Key[]) => void;
+  placeholder?: string;
+  /** Capture exactly one key (for key-down / key-up macro steps). */
+  single?: boolean;
+  className?: string;
+}) {
+  const [capturing, setCapturing] = useState(autoCapture);
+  const [live, setLive] = useState<Key[]>([]);
+  const [unknown, setUnknown] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const latest = useRef({ onChange, onCaptured });
+  latest.current = { onChange, onCaptured };
+
+  const finish = useCallback((combo: Key[]) => {
+    setCapturing(false);
+    setLive([]);
+    if (combo.length === 0) return;
+    const result = normalizeCombo(combo);
+    latest.current.onChange(result);
+    latest.current.onCaptured?.(result);
+  }, []);
+
+  useEffect(() => {
+    if (!capturing) return;
+    const pressed = new Set<Key>();
+    const combo: Key[] = [];
+    setLive([]);
+    setUnknown(false);
+
+    const down = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = keyFromEvent(event);
+      if (!key) {
+        setUnknown(true);
+        return;
+      }
+      setUnknown(false);
+      pressed.add(key);
+      if (!combo.includes(key)) {
+        combo.push(key);
+        setLive(normalizeCombo(combo));
+      }
+      if (single) finish([key]);
+    };
+    const up = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = keyFromEvent(event);
+      if (key) {
+        // Some keys (Print Screen) only ever produce a key-up.
+        if (!combo.includes(key)) combo.push(key);
+        pressed.delete(key);
+      }
+      if (pressed.size === 0 && combo.length > 0) finish(combo);
+    };
+    // Losing focus (the OS swallowed a shortcut, the user clicked away) ends the capture with
+    // whatever was pressed so far.
+    const blur = () => finish(combo);
+    const pointer = (event: PointerEvent) => {
+      if (!fieldRef.current?.contains(event.target as Node)) finish(combo);
+    };
+
+    window.addEventListener("keydown", down, true);
+    window.addEventListener("keyup", up, true);
+    window.addEventListener("blur", blur);
+    window.addEventListener("pointerdown", pointer, true);
+    return () => {
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("blur", blur);
+      window.removeEventListener("pointerdown", pointer, true);
+    };
+  }, [capturing, finish, single]);
+
+  const shown = capturing && live.length > 0 ? live : keys;
+
+  return (
+    <div className={cn("flex items-stretch gap-1", className)}>
+      <div
+        ref={fieldRef}
+        role="button"
+        tabIndex={0}
+        aria-label={capturing ? "Press a key or shortcut" : "Shortcut. Press Enter to change"}
+        onClick={() => setCapturing(true)}
+        onKeyDown={(event) => {
+          if (capturing) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setCapturing(true);
+          } else if (event.key === "Backspace" || event.key === "Delete") {
+            event.preventDefault();
+            onChange([]);
+          }
+        }}
+        className={cn(
+          "flex min-h-[34px] min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 rounded-md border bg-app px-2 py-[4px] transition-colors",
+          capturing
+            ? "animate-listen border-key ring-2 ring-key-soft [--ring-color:var(--key-line)]"
+            : "border-line-strong hover:border-fg-faint",
+        )}
+      >
+        {shown.length > 0 ? (
+          <KeyCombo keys={shown} />
+        ) : (
+          <span className={cn("text-fg-faint", capturing && "text-key")}>
+            {capturing ? "Press a key or shortcut…" : placeholder}
+          </span>
+        )}
+        {capturing && shown.length > 0 && live.length === 0 && (
+          <span className="ml-1 text-sm text-key">press new keys…</span>
+        )}
+        {capturing && unknown && (
+          <span className="ml-1 text-sm text-warn">That key can’t be captured — add it from the list →</span>
+        )}
+      </div>
+
+      <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+        <Tooltip content="Pick keys from a list">
+          <PopoverTrigger
+            aria-label="Pick keys from a list"
+            className="inline-flex w-[30px] shrink-0 items-center justify-center rounded-md border border-line-strong bg-app text-fg-muted hover:border-fg-faint hover:text-fg data-[state=open]:border-accent"
+          >
+            {keys.length > 0 ? <Plus size={15} /> : <Keyboard size={15} />}
+          </PopoverTrigger>
+        </Tooltip>
+        <PopoverContent align="end" className="w-[440px] p-0">
+          <KeyPicker
+            selected={keys}
+            single={single}
+            onToggle={(key) => {
+              if (single) {
+                onChange([key]);
+                setPickerOpen(false);
+                return;
+              }
+              onChange(keys.includes(key) ? keys.filter((k) => k !== key) : normalizeCombo([...keys, key]));
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+
+      {keys.length > 0 && !single && (
+        <Tooltip content="Clear">
+          <button
+            type="button"
+            aria-label="Clear shortcut"
+            onClick={() => onChange([])}
+            className="inline-flex w-[26px] shrink-0 items-center justify-center rounded-md text-fg-faint hover:bg-hover hover:text-fg"
+          >
+            <X size={14} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+function KeyPicker({
+  selected,
+  onToggle,
+  single,
+}: {
+  selected: readonly Key[];
+  onToggle: (key: Key) => void;
+  single: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const keys = useMemo(() => allKeys(), []);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return keys;
+    return keys.filter((info) =>
+      `${info.label} ${info.name} ${info.key} ${info.aliases ?? ""}`.toLowerCase().includes(q),
+    );
+  }, [keys, query]);
+  const byGroup = useMemo(() => {
+    const map = new Map<string, KeyInfo[]>();
+    for (const info of filtered) {
+      const list = map.get(info.group) ?? [];
+      list.push(info);
+      map.set(info.group, list);
+    }
+    return map;
+  }, [filtered]);
+
+  return (
+    <div className="flex max-h-[380px] flex-col">
+      <div className="border-b p-2">
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search keys…  (F13, volume, numpad, play…)"
+          className="h-[28px] w-full rounded-md border border-line-strong bg-app px-2 outline-hidden placeholder:text-fg-faint focus:border-accent"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {filtered.length === 0 && <div className="p-4 text-center text-fg-faint">No key matches “{query}”.</div>}
+        {KEY_GROUPS.filter((group) => byGroup.has(group)).map((group) => (
+          <div key={group} className="mb-2 last:mb-0">
+            <div className="px-1 pb-1 text-xs font-semibold tracking-wide text-fg-faint uppercase">{group}</div>
+            <div className="flex flex-wrap gap-1">
+              {byGroup.get(group)!.map((info) => {
+                const active = selected.includes(info.key);
+                return (
+                  <button
+                    key={info.key}
+                    type="button"
+                    title={info.name}
+                    aria-pressed={active}
+                    onClick={() => onToggle(info.key)}
+                    className={cn(
+                      "keycap keycap-sm font-sans transition-colors hover:border-accent",
+                      active && "border-accent bg-accent-soft text-accent",
+                    )}
+                  >
+                    {info.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      {!single && (
+        <div className="border-t px-3 py-1.5 text-sm text-fg-faint">
+          Click keys to add or remove them. Modifiers are always pressed first.
+        </div>
+      )}
+    </div>
+  );
+}

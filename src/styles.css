@@ -180,6 +180,32 @@
   }
 }
 
+/* A denser type scale for a desktop tool (1rem = 13px, see `html` below). */
+@theme {
+  --text-2xs: 0.77rem;
+  --text-2xs--line-height: 1.3;
+  --text-xs: 0.846rem;
+  --text-xs--line-height: 1.35;
+  --text-sm: 0.923rem;
+  --text-sm--line-height: 1.4;
+  --text-base: 1rem;
+  --text-base--line-height: 1.45;
+  --text-lg: 1.154rem;
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.385rem;
+  --text-xl--line-height: 1.3;
+  --text-2xl: 1.7rem;
+  --text-2xl--line-height: 1.25;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+}
+
 /* ------------------------------------------------------------------------------------------
    Base
    ------------------------------------------------------------------------------------------ */
