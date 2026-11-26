@@ -21,6 +21,9 @@ use super::source::{DeviceId, InstKey, Obs};
 use super::timers::TimerId;
 use crate::events::SkipReason;
 
+/// Upper bound on the actions one message can fire through a `Step` with `max_burst: 0`.
+const MAX_STEPS_PER_MESSAGE: u32 = 256;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Press,
@@ -467,6 +470,14 @@ pub fn on_edge(
             let active = !rt.instances.is_empty();
             match edge {
                 Edge::Press if !was_active => {
+                    // A release always ends a hold before the next press; should that ever not
+                    // be the case, never leak the engaged target.
+                    if let State::TapHold { phase: TapPhase::Holding { engaged: true }, .. } =
+                        rt.state
+                        && let Some(target) = hold_target
+                    {
+                        cx.disengage(&rt.info, target, true);
+                    }
                     let timer = cx.after(*hold_ms, TimerKind::TapHold(rt.key));
                     if let State::TapHold { phase, press } = &mut rt.state {
                         if let TapPhase::Pending(old) = *phase {
@@ -570,6 +581,9 @@ pub fn on_edge(
             if *max_burst > 0 {
                 count = count.min(u32::from(*max_burst));
             }
+            // "Unlimited" still has to end somewhere: a 14-bit jump with step 1 would otherwise
+            // queue thousands of firings for one message (the action queue keeps 64 anyway).
+            count = count.min(MAX_STEPS_PER_MESSAGE);
             let slot = if up { Slot::Up } else { Slot::Down };
             for _ in 0..count {
                 fire(rt, def, cx, slot, ctx, false);

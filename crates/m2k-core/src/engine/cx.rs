@@ -375,6 +375,10 @@ impl Cx {
                 self.requests.push(Request::SwitchProfile(target.clone(), info.clone()));
                 self.report(info, description, Outcome::Sent);
             }
+            ActionKind::Unavailable(error) => {
+                self.report(info, description, Outcome::Failed { error: error.clone() });
+                return false;
+            }
             ActionKind::Engine(op) => {
                 self.requests.push(Request::Engine(*op));
                 self.report(info, description, Outcome::Sent);

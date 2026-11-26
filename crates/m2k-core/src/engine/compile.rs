@@ -250,6 +250,9 @@ pub enum ActionKind {
     /// OS input, played step by step through the owner's action queue.
     Output(Vec<Prim>),
     SwitchProfile(ProfileTarget),
+    /// Cannot be performed with this config (switch to a profile that does not exist): firing it
+    /// reports this error.
+    Unavailable(String),
     Layer {
         layer: Arc<str>,
         op: LayerOp,
@@ -476,6 +479,17 @@ fn compile_mapping(
         },
     };
 
+    for action in behavior_actions(&mapping.behavior) {
+        if let Action::SwitchProfile { target: ProfileTarget::Profile { id } } = action
+            && !profiles.iter().any(|p| &*p.id == id)
+        {
+            errors.push(format!(
+                "Mapping \"{label}\" in profile \"{}\" switches to a profile that does not exist (id \"{id}\").",
+                profiles[pi].name
+            ));
+        }
+    }
+
     let conditions = mapping
         .conditions
         .iter()
@@ -506,6 +520,23 @@ fn compile_mapping(
         behavior,
         conditions,
         rate_limit: mapping.rate_limit,
+    }
+}
+
+/// Every action a behavior can fire.
+fn behavior_actions(behavior: &Behavior) -> Vec<&Action> {
+    match behavior {
+        Behavior::Trigger { on_press, on_release, .. } => {
+            on_press.iter().chain(on_release).collect()
+        }
+        Behavior::Hold { .. } | Behavior::Toggle { .. } => Vec::new(),
+        Behavior::Cycle { actions, .. } => actions.iter().collect(),
+        Behavior::TapHold { tap, hold, .. } => tap.iter().chain(hold).collect(),
+        Behavior::MultiTap { single, double, triple, .. } => {
+            single.iter().chain(double).chain(triple).collect()
+        }
+        Behavior::Change { action } => vec![action],
+        Behavior::Step { up, down, .. } => up.iter().chain(down).collect(),
     }
 }
 
@@ -564,7 +595,12 @@ pub fn action(action: &Action, settings: &Settings, profiles: &[CProfile]) -> CA
             (ActionKind::Output(sequence(steps, settings, gap)), Class::Os, sequence_label(steps))
         }
         Action::SwitchProfile { target } => (
-            ActionKind::SwitchProfile(target.clone()),
+            match target {
+                ProfileTarget::Profile { id } if !profiles.iter().any(|p| &*p.id == id) => {
+                    ActionKind::Unavailable(format!("there is no profile with id \"{id}\""))
+                }
+                _ => ActionKind::SwitchProfile(target.clone()),
+            },
             Class::Internal,
             match target {
                 ProfileTarget::Next => "next profile".to_string(),
