@@ -49,6 +49,9 @@ export function KeyComboInput({
 
   // Armed by the quick-add flow rather than by the user: there, Esc also closes the quick-add.
   const autoArmed = useRef(autoCapture);
+  // The key (Enter / Space) that armed the field from the keyboard and is still down: neither
+  // its auto-repeat nor its release is part of the shortcut being captured.
+  const armedBy = useRef<string | null>(null);
 
   useEffect(() => {
     if (!escNote) return;
@@ -108,6 +111,7 @@ export function KeyComboInput({
       }
       event.preventDefault();
       event.stopPropagation();
+      if (event.repeat && event.code === armedBy.current) return;
       const key = keyFromEvent(event);
       if (!key) {
         setUnknown(true);
@@ -124,6 +128,10 @@ export function KeyComboInput({
     const up = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
+      if (armedBy.current !== null && event.code === armedBy.current && combo.length === 0) {
+        armedBy.current = null;
+        return;
+      }
       const key = keyFromEvent(event);
       if (key) {
         // Some keys (Print Screen) only ever produce a key-up.
@@ -162,6 +170,7 @@ export function KeyComboInput({
         aria-label={capturing ? "Press a key or shortcut" : "Shortcut. Press Enter to change"}
         onClick={() => {
           autoArmed.current = false;
+          armedBy.current = null;
           setCapturing(true);
         }}
         onKeyDown={(event) => {
@@ -169,6 +178,7 @@ export function KeyComboInput({
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             autoArmed.current = false;
+            armedBy.current = event.code;
             setCapturing(true);
           } else if (event.key === "Backspace" || event.key === "Delete") {
             event.preventDefault();
