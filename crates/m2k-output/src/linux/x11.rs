@@ -349,6 +349,10 @@ impl XTestInjector {
 
     /// Whether layout keys can type right now (`None`: spare keycodes only): the layout has a
     /// single group and no modifier other than Caps Lock and Num Lock is in effect.
+    ///
+    /// The core QueryPointer, not XKB's GetState: once a connection enables XKB, the server no
+    /// longer sends it the core MappingNotify when a new keymap is loaded (setxkbmap), which
+    /// `refresh_mapping` depends on.
     fn layout_typing(&mut self) -> Result<Option<Typing>> {
         if self.layout.is_empty() || self.down.iter().any(|key| key.is_modifier()) {
             return Ok(None);
