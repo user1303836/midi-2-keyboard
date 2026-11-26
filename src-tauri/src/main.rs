@@ -12,7 +12,7 @@ use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBui
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
-use tauri_plugin_dialog::DialogExt as _;
+use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 
 const EVENT: &str = "m2k:event";
 const MAIN_WINDOW: &str = "main";
@@ -198,6 +198,27 @@ fn hide_main_window(app: &AppHandle) {
     }
 }
 
+/// The first time the window is closed to the tray, say so: otherwise "I closed it and my
+/// controller still types" (or "where did it go?") is a nasty surprise.
+fn explain_tray_once(app: &AppHandle, runtime: &Runtime) {
+    let marker = runtime.config_path().with_file_name("tray-hint-shown");
+    if marker.exists() {
+        return;
+    }
+    let _ = std::fs::write(&marker, b"shown\n");
+    app.dialog()
+        .message(
+            "MIDI 2 Keyboard keeps running in the background so your mappings stay active.\n\n\
+             Click its icon in the notification area to open it again, or right-click the icon \
+             and choose Quit to exit.\n\n\
+             To make closing the window quit the app instead, turn off \"Keep running when the \
+             window is closed\" in Settings.",
+        )
+        .title("MIDI 2 Keyboard is still running")
+        .kind(MessageDialogKind::Info)
+        .show(|_| {});
+}
+
 fn quit_app(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         state.runtime.shutdown();
@@ -279,6 +300,9 @@ fn refresh_tray(app: &AppHandle) {
         if let Ok(menu) = build_tray_menu(&handle, &view) {
             let _ = tray.set_menu(Some(menu));
         }
+        if let Some(icon) = tray_icon(view.paused) {
+            let _ = tray.set_icon(Some(icon));
+        }
         let profile = view
             .profiles
             .iter()
@@ -288,6 +312,17 @@ fn refresh_tray(app: &AppHandle) {
         let state_text = if view.paused { "Paused" } else { "Active" };
         let _ = tray.set_tooltip(Some(format!("MIDI 2 Keyboard — {state_text} · {profile}")));
     });
+}
+
+/// The tray icon doubles as a status light: the normal icon while live, a greyed "pause" one
+/// while output is paused.
+fn tray_icon(paused: bool) -> Option<tauri::image::Image<'static>> {
+    let bytes: &[u8] = if paused {
+        include_bytes!("../icons/tray-paused.png")
+    } else {
+        include_bytes!("../icons/tray-active.png")
+    };
+    tauri::image::Image::from_bytes(bytes).ok()
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -325,8 +360,8 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_main_window(tray.app_handle());
             }
         });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
+    if let Some(icon) = tray_icon(false).or_else(|| app.default_window_icon().cloned()) {
+        builder = builder.icon(icon);
     }
     builder.build(app)?;
     Ok(())
@@ -393,6 +428,7 @@ fn main() {
                     if state.runtime.config().settings.close_to_tray {
                         api.prevent_close();
                         hide_main_window(app);
+                        explain_tray_once(app, &state.runtime);
                     } else {
                         quit_app(app);
                     }

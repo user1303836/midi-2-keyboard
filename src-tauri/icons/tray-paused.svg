@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#262833"/>
+      <stop offset="1" stop-color="#0F1015"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="url(#bg)"/>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="none" stroke="#3A3D4D" stroke-width="8"/>
+  <!-- keycap, greyed out -->
+  <rect x="216" y="216" width="592" height="592" rx="132" fill="none" stroke="#6F7486" stroke-width="60"/>
+  <!-- pause bars instead of the DIN pins -->
+  <g fill="#9BA0B2">
+    <rect x="392" y="372" width="88" height="280" rx="28"/>
+    <rect x="544" y="372" width="88" height="280" rx="28"/>
+  </g>
+</svg>

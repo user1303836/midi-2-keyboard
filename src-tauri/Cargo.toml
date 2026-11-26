@@ -17,7 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 # Keep in step with @tauri-apps/api in package.json (the CLI refuses mismatched minor versions).
-tauri = { version = "2.12", features = ["tray-icon"] }
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
