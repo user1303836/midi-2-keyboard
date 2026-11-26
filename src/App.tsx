@@ -9,7 +9,6 @@ import { MonitorPanel } from "@/features/monitor/Monitor";
 import { StatusBar, TopBar } from "@/features/shell/Bars";
 import { DevicesDialog, ProfileDialog, SettingsDialog } from "@/features/shell/Dialogs";
 import { Sidebar } from "@/features/shell/Sidebar";
-import { newMapping } from "@/lib/model";
 import { isTauri } from "@/lib/platform";
 import { useApp, useSelectedMapping, useViewedProfile } from "@/lib/store";
 
@@ -70,7 +69,7 @@ function useShortcuts() {
         state.cloneMapping(state.selectedMappingId);
       } else if (!mod && !event.altKey && key === "n" && !typing && state.panel === "none") {
         event.preventDefault();
-        state.addMapping(newMapping(), { wizard: true });
+        state.startWizard();
       } else if ((key === "delete" || key === "backspace") && state.selectedMappingId && !typing && state.panel === "none") {
         if ((event.target as HTMLElement | null)?.closest("[data-radix-popper-content-wrapper],[role=dialog]")) return;
         event.preventDefault();

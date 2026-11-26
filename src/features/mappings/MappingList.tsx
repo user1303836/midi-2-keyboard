@@ -8,7 +8,6 @@ import { Switch } from "@/components/ui/inputs";
 import { Badge, Kbd } from "@/components/ui/misc";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tooltip } from "@/components/ui/overlays";
 import { conditionText, mappingSentence, rateLimitText, sourceNickname, sourceQualifiers, sourceTitle } from "@/lib/describe";
-import { newMapping } from "@/lib/model";
 import { onMappingActivity, type ActivityKind } from "@/lib/monitor";
 import { useApp, useOctave } from "@/lib/store";
 import { cn, plural } from "@/lib/utils";
@@ -116,7 +115,7 @@ const MappingRow = memo(function MappingRow({
       <ActivityLed mappingId={mapping.id} />
 
       {/* When */}
-      <div className={cn("flex w-[236px] shrink-0 items-center gap-2", !mapping.enabled && "opacity-45")}>
+      <div className={cn("flex w-[150px] shrink-0 items-center gap-2 @min-[700px]:w-[236px]", !mapping.enabled && "opacity-45")}>
         <span className="flex h-[26px] shrink-0 items-center gap-1.5 rounded-md border border-midi-line bg-midi-soft px-2 font-semibold text-midi">
           <SourceIcon event={event} size={14} />
           <span className="whitespace-nowrap">{sourceTitle(event, octave)}</span>
@@ -141,15 +140,17 @@ const MappingRow = memo(function MappingRow({
       <div className="flex shrink-0 items-center gap-1.5">
         {engaged && <Badge tone="key">ON</Badge>}
         {mapping.rate_limit && (
-          <Badge tone="accent" title="Rate limit">
+          <Badge tone="accent" title={`Rate limit: ${rateLimitText(mapping.rate_limit)}`}>
             <Timer size={11} />
-            {rateLimitText(mapping.rate_limit)}
+            <span className="hidden @min-[700px]:inline">{rateLimitText(mapping.rate_limit)}</span>
           </Badge>
         )}
         {mapping.conditions.length > 0 && (
           <Badge tone="neutral" title={mapping.conditions.map((c) => conditionText(c, config, octave)).join("\n")}>
             <Filter size={11} />
-            {mapping.conditions.length === 1 ? conditionText(mapping.conditions[0], config, octave) : `${mapping.conditions.length} conditions`}
+            <span className="hidden @min-[700px]:inline">
+              {mapping.conditions.length === 1 ? conditionText(mapping.conditions[0], config, octave) : `${mapping.conditions.length} conditions`}
+            </span>
           </Badge>
         )}
       </div>
@@ -207,7 +208,7 @@ export function MappingList({ profile }: { profile: Profile }) {
   const engaged = useApp((state) => state.engine.engaged_mappings);
   const search = useApp((state) => state.search);
   const setSearch = useApp((state) => state.setSearch);
-  const addMapping = useApp((state) => state.addMapping);
+  const startWizard = useApp((state) => state.startWizard);
   const moveMapping = useApp((state) => state.moveMapping);
   const config = useApp((state) => state.config);
   const octave = useOctave();
@@ -220,7 +221,7 @@ export function MappingList({ profile }: { profile: Profile }) {
     [profile.mappings, search, config, octave],
   );
 
-  const quickAdd = () => addMapping(newMapping(), { wizard: true });
+  const quickAdd = startWizard;
   const reorderable = search === "";
 
   return (
@@ -262,7 +263,7 @@ export function MappingList({ profile }: { profile: Profile }) {
         <div
           role="grid"
           aria-label="Mappings"
-          className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          className="@container min-h-0 flex-1 overflow-y-auto px-2 py-2"
           onDragOver={(e) => {
             if (dragId) e.preventDefault();
           }}

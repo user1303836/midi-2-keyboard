@@ -15,7 +15,7 @@ import type { RuntimeEvent } from "@/bindings/RuntimeEvent";
 import type { Settings } from "@/bindings/Settings";
 
 import { getBackend, type Backend } from "./api";
-import { duplicateMapping, duplicateProfile, newProfile } from "./model";
+import { duplicateMapping, duplicateProfile, newMapping, newProfile } from "./model";
 import { pushEngineEvents } from "./monitor";
 import { setPlatform } from "./platform";
 import { deepEqual, move } from "./utils";
@@ -47,8 +47,10 @@ interface State {
   viewProfileId: string | null;
   /** The mapping open in the editor. */
   selectedMappingId: string | null;
-  /** A mapping that was just created through the quick-add flow and is still being set up. */
+  /** The mapping currently going through the quick-add flow. */
   wizardMappingId: string | null;
+  /** A quick-add mapping that is not part of the config yet (nothing learned so far). */
+  draft: Mapping | null;
   panel: Panel;
   monitorOpen: boolean;
   search: string;
@@ -74,6 +76,10 @@ interface State {
   moveMapping(id: string, toIndex: number): void;
   moveMappingToProfile(id: string, profileId: string): void;
   selectMapping(id: string | null): void;
+  /** Opens the quick-add flow with a fresh draft mapping. */
+  startWizard(): void;
+  /** Moves the draft into the viewed profile (it becomes a real, saved mapping). */
+  commitDraft(): void;
   finishWizard(): void;
 
   updateSettings(change: (settings: Settings) => Settings, coalesceKey?: string): void;
@@ -113,6 +119,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let lastEditKey: string | null = null;
 let lastEditAt = 0;
 let toastId = 1;
+let initStarted = false;
 
 function mapProfile(config: Config, id: string, change: (profile: Profile) => Profile): Config {
   let touched = false;
@@ -224,12 +231,16 @@ export const useApp = create<State>((set, get) => {
     viewProfileId: null,
     selectedMappingId: null,
     wizardMappingId: null,
+    draft: null,
     panel: "none",
     monitorOpen: false,
     search: "",
     toasts: [],
 
     async init() {
+      // React's strict mode runs effects twice in development; start only once.
+      if (initStarted) return;
+      initStarted = true;
       try {
         backend = await getBackend();
         await backend.subscribe(onRuntimeEvent);
@@ -291,7 +302,7 @@ export const useApp = create<State>((set, get) => {
     viewProfile(id) {
       const profile = get().config.profiles.find((p) => p.id === id);
       if (!profile) return;
-      set({ viewProfileId: id, selectedMappingId: null, wizardMappingId: null, search: "" });
+      set({ viewProfileId: id, selectedMappingId: null, wizardMappingId: null, draft: null, search: "" });
       if (!profile.always_on && get().config.selected_profile !== id) {
         // Selecting is not an undoable edit.
         set((state) => ({ config: { ...state.config, selected_profile: id } }));
@@ -364,10 +375,19 @@ export const useApp = create<State>((set, get) => {
     },
 
     updateMapping(id, change, coalesceKey) {
+      const draft = get().draft;
+      if (draft && draft.id === id) {
+        set({ draft: change(draft) });
+        return;
+      }
       get().edit((config) => mapMapping(config, id, change), coalesceKey ? `${id}:${coalesceKey}` : undefined);
     },
 
     removeMapping(id) {
+      if (get().draft?.id === id) {
+        set({ draft: null, selectedMappingId: null, wizardMappingId: null });
+        return;
+      }
       const before = get().config;
       const owner = profileOfMapping(before, id);
       if (!owner) return;
@@ -425,14 +445,34 @@ export const useApp = create<State>((set, get) => {
     },
 
     selectMapping(id) {
+      const draft = get().draft;
+      if (draft && draft.id === id) return;
       const exists = id !== null && profileOfMapping(get().config, id) !== null;
       set((state) => ({
         selectedMappingId: exists ? id : null,
         wizardMappingId: exists && state.wizardMappingId === id ? id : null,
+        // Moving on abandons a quick-add that never got as far as learning a control.
+        draft: null,
       }));
     },
 
+    startWizard() {
+      if (!get().viewProfileId) return;
+      const draft = newMapping();
+      set({ draft, selectedMappingId: draft.id, wizardMappingId: draft.id, search: "" });
+    },
+
+    commitDraft() {
+      const { draft, viewProfileId } = get();
+      if (!draft || !viewProfileId) return;
+      set({ draft: null });
+      get().edit((config) =>
+        mapProfile(config, viewProfileId, (profile) => ({ ...profile, mappings: [...profile.mappings, draft] })),
+      );
+    },
+
     finishWizard() {
+      get().commitDraft();
       set({ wizardMappingId: null });
     },
 
@@ -507,9 +547,7 @@ function applyDevParams(): void {
   if (profile) useApp.setState({ viewProfileId: profile });
   const select = params.get("select");
   if (select) useApp.getState().selectMapping(select);
-  if (params.has("wizard")) {
-    void import("./model").then(({ newMapping }) => useApp.getState().addMapping(newMapping(), { wizard: true }));
-  }
+  if (params.has("wizard")) useApp.getState().startWizard();
   if (params.has("monitor")) useApp.setState({ monitorOpen: true });
   const panel = params.get("panel");
   if (panel === "settings" || panel === "devices") useApp.setState({ panel });
@@ -529,6 +567,7 @@ export function useViewedProfile(): Profile | null {
 export function useSelectedMapping(): Mapping | null {
   return useApp((state) => {
     if (!state.selectedMappingId) return null;
+    if (state.draft?.id === state.selectedMappingId) return state.draft;
     for (const profile of state.config.profiles) {
       const mapping = profile.mappings.find((m) => m.id === state.selectedMappingId);
       if (mapping) return mapping;

@@ -1,4 +1,15 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, Info, X, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  CheckCircle2,
+  ChevronRight,
+  Info,
+  X,
+  XCircle,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Key } from "@/bindings/Key";
@@ -143,12 +154,22 @@ export function Badge({
   );
 }
 
+const ARROWS: Partial<Record<Key, typeof ArrowUp>> = {
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+};
+
 /** One keycap. */
 export function Keycap({ k, small }: { k: Key; small?: boolean }) {
   const info = keyInfo(k);
+  const Arrow = ARROWS[k];
   return (
     <Tooltip content={info.name !== info.label ? info.name : null} side="top">
-      <kbd className={cn("keycap font-sans", small && "keycap-sm")}>{info.label}</kbd>
+      <kbd className={cn("keycap font-sans", small && "keycap-sm")}>
+        {Arrow ? <Arrow size={small ? 12 : 14} strokeWidth={2.6} aria-label={info.name} /> : info.label}
+      </kbd>
     </Tooltip>
   );
 }

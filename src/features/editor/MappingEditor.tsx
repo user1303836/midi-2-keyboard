@@ -1,5 +1,5 @@
 import { ArrowRight, Check, Copy, FolderInput, MoreHorizontal, Play, Radio, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
@@ -83,10 +83,6 @@ function reconcile(previous: Mapping, next: Mapping): Mapping {
   return result;
 }
 
-function isPristine(mapping: Mapping): boolean {
-  return isEmptyAction(primaryAction(mapping.behavior)) && mapping.name === "" && mapping.conditions.length === 0;
-}
-
 export function MappingEditor({ mapping }: { mapping: Mapping }) {
   const updateMapping = useApp((state) => state.updateMapping);
   const removeMapping = useApp((state) => state.removeMapping);
@@ -101,17 +97,13 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
   const undo = useApp((state) => state.undo);
   const octave = useOctave();
 
-  const latest = useRef(mapping);
-  latest.current = mapping;
+  const commitDraft = useApp((state) => state.commitDraft);
 
   const update = (change: (m: Mapping) => Mapping, key?: string) =>
     updateMapping(mapping.id, (current) => reconcile(current, change(current)), key);
 
-  const close = () => {
-    // An untouched quick-add mapping is not worth keeping.
-    if (wizard && isPristine(latest.current)) removeMapping(mapping.id);
-    else selectMapping(null);
-  };
+  // Closing a quick-add that has not learned anything yet simply discards the draft.
+  const close = () => selectMapping(null);
 
   const remove = () => {
     removeMapping(mapping.id);
@@ -185,13 +177,15 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
       {wizard ? (
         <Wizard
           mapping={mapping}
-          onSource={(result) =>
+          onSource={(result) => {
             update((m) => ({
               ...m,
               source: result.source,
               behavior: defaultBehavior(suggestedBehavior(result.shape), m.behavior),
-            }))
-          }
+            }));
+            // It has a real source now: make it a real mapping (it appears in the list).
+            commitDraft();
+          }}
           onBehavior={(behavior, key) => update((m) => ({ ...m, behavior }), key)}
           onDone={finishWizard}
         />

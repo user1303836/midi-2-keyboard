@@ -44,22 +44,28 @@ function EngineSwitch() {
         aria-pressed={!paused}
         onClick={() => setPaused(!paused)}
         className={cn(
-          "flex h-[28px] items-center gap-2 rounded-full border pr-3 pl-2.5 font-semibold transition-colors",
+          "group/engine flex h-[28px] min-w-[92px] items-center justify-center gap-2 rounded-full border px-3 font-semibold transition-colors",
           paused
             ? "border-warn/40 bg-warn-soft text-warn hover:bg-warn/20"
             : "border-midi-line bg-midi-soft text-midi hover:bg-midi/20",
         )}
       >
-        {paused ? (
-          <Play size={13} fill="currentColor" />
-        ) : (
-          <span className="relative flex size-[9px]">
-            <span className={cn("absolute inset-0 rounded-full bg-midi", learning && "animate-ping")} />
-            <span className="absolute inset-0 rounded-full bg-midi shadow-[0_0_8px_var(--midi)]" />
-          </span>
-        )}
-        {paused ? "Paused" : learning ? "Learning" : "Active"}
-        {!paused && <Pause size={12} className="opacity-60" />}
+        {/* Resting state says what is; hovering says what a click will do. */}
+        <span className="flex items-center gap-2 group-hover/engine:hidden">
+          {paused ? (
+            <Pause size={12} fill="currentColor" />
+          ) : (
+            <span className="relative flex size-[9px]">
+              <span className={cn("absolute inset-0 rounded-full bg-midi", learning && "animate-ping")} />
+              <span className="absolute inset-0 rounded-full bg-midi shadow-[0_0_8px_var(--midi)]" />
+            </span>
+          )}
+          {paused ? "Paused" : learning ? "Learning" : "Active"}
+        </span>
+        <span className="hidden items-center gap-1.5 group-hover/engine:flex">
+          {paused ? <Play size={12} fill="currentColor" /> : <Pause size={12} fill="currentColor" />}
+          {paused ? "Resume" : "Pause"}
+        </span>
       </button>
     </Tooltip>
   );
