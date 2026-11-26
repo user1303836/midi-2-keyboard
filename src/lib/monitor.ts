@@ -35,10 +35,20 @@ function pulse(mappingId: string, kind: ActivityKind) {
   activityListeners.get(mappingId)?.forEach((listener) => listener(kind));
 }
 
+const PULSE_RANK: Record<ActivityKind, number> = { matched: 0, skipped: 1, sent: 2, failed: 3 };
+
 /** Feeds a batch of engine events (status events are handled by the main store). */
 export function pushEngineEvents(events: EngineEvent[]): void {
   const added: LogEntry[] = [];
   let lastTime = 0;
+  // A busy controller can touch the same mapping hundreds of times in one batch; every light
+  // flashes at most once per batch, showing the most significant thing that happened.
+  const pulses = new Map<string, ActivityKind>();
+  const devices = new Set<string>();
+  const notePulse = (id: string, kind: ActivityKind) => {
+    const current = pulses.get(id);
+    if (current === undefined || PULSE_RANK[kind] > PULSE_RANK[current]) pulses.set(id, kind);
+  };
   for (const event of events) {
     switch (event.type) {
       case "midi": {
@@ -46,8 +56,8 @@ export function pushEngineEvents(events: EngineEvent[]): void {
         lastMidi = log;
         lastTime = log.time_us;
         midiListeners.forEach((listener) => listener(log));
-        deviceListeners.get(log.device)?.forEach((listener) => listener());
-        for (const id of log.mappings) pulse(id, "matched");
+        devices.add(log.device);
+        for (const id of log.mappings) notePulse(id, "matched");
         added.push({ kind: "midi", id: nextId++, ...log });
         break;
       }
@@ -55,7 +65,7 @@ export function pushEngineEvents(events: EngineEvent[]): void {
         const { type: _type, ...log } = event;
         lastTime = log.time_us;
         firedListeners.forEach((listener) => listener(log));
-        pulse(
+        notePulse(
           log.mapping_id,
           log.outcome.type === "sent" ? "sent" : log.outcome.type === "failed" ? "failed" : "skipped",
         );
@@ -69,6 +79,8 @@ export function pushEngineEvents(events: EngineEvent[]): void {
         break;
     }
   }
+  pulses.forEach((kind, id) => pulse(id, kind));
+  devices.forEach((device) => deviceListeners.get(device)?.forEach((listener) => listener()));
   if (added.length === 0 || frozen) return;
   entries = entries.concat(added);
   if (entries.length > MAX_ENTRIES) entries = entries.slice(entries.length - MAX_ENTRIES);

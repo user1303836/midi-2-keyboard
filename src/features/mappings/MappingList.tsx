@@ -16,24 +16,32 @@ import { cn, plural } from "@/lib/utils";
 
 import { BehaviorSummary, SourceIcon } from "./tokens";
 
+const FLASH: Keyframe[] = [
+  { opacity: 1, transform: "scale(1.35)" },
+  { opacity: 0, transform: "scale(1)" },
+];
+
 /** The little light on each row: teal when its source matched, amber when its action went out. */
 function ActivityLed({ mappingId }: { mappingId: string }) {
   const ref = useRef<HTMLSpanElement>(null);
-  useEffect(
-    () =>
-      onMappingActivity(mappingId, (kind: ActivityKind) => {
-        const element = ref.current;
-        if (!element) return;
+  useEffect(() => {
+    let shown: ActivityKind | null = null;
+    let animation: Animation | null = null;
+    return onMappingActivity(mappingId, (kind: ActivityKind) => {
+      const element = ref.current;
+      if (!element) return;
+      if (kind !== shown) {
+        shown = kind;
         const color =
           kind === "sent" ? "var(--key)" : kind === "failed" ? "var(--danger)" : kind === "matched" ? "var(--midi)" : "var(--fg-faint)";
         element.style.background = color;
         element.style.boxShadow = `0 0 8px ${color}`;
-        element.classList.remove("animate-flash");
-        void element.offsetWidth; // restart the animation
-        element.classList.add("animate-flash");
-      }),
-    [mappingId],
-  );
+      }
+      // The Web Animations API restarts cleanly without forcing a layout (unlike toggling a class).
+      animation?.cancel();
+      animation = element.animate(FLASH, { duration: 500, easing: "ease-out" });
+    });
+  }, [mappingId]);
   return (
     <span className="relative flex size-[8px] items-center justify-center">
       <span className="absolute size-[6px] rounded-full bg-line-strong" />

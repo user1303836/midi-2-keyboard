@@ -168,17 +168,19 @@ function ProfileItem({ profile, onEdit }: { profile: Profile; onEdit: (profile: 
 
 function DeviceLed({ name, connected }: { name: string; connected: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
-  useEffect(
-    () =>
-      onDeviceActivity(name, () => {
-        const element = ref.current;
-        if (!element) return;
-        element.classList.remove("animate-flash");
-        void element.offsetWidth;
-        element.classList.add("animate-flash");
-      }),
-    [name],
-  );
+  useEffect(() => {
+    let animation: Animation | null = null;
+    return onDeviceActivity(name, () => {
+      animation?.cancel();
+      animation = ref.current?.animate(
+        [
+          { opacity: 1, transform: "scale(1.35)" },
+          { opacity: 0, transform: "scale(1)" },
+        ],
+        { duration: 500, easing: "ease-out" },
+      ) ?? null;
+    });
+  }, [name]);
   return (
     <span className="relative flex size-[14px] shrink-0 items-center justify-center">
       <span className={cn("size-[7px] rounded-full", connected ? "bg-midi/45" : "bg-line-strong")} />
