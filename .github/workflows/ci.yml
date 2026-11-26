@@ -5,10 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Several agents push to main in quick succession; only the newest commit needs checking.
+# Several agents push to main in quick succession. Let a running check finish (so there is always
+# a recent verdict) and keep only the newest commit waiting behind it.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
