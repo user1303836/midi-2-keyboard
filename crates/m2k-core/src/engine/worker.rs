@@ -366,7 +366,7 @@ impl Worker {
                 .map(|m| {
                     old.get(&*m.id).copied().filter(|&j| {
                         let previous = &self.cfg.mappings[j];
-                        previous.profile_id == m.profile_id && previous.def == m.def
+                        previous.profile_id == m.profile_id && same_behavior(&previous.def, &m.def)
                     })
                 })
                 .collect()
@@ -803,6 +803,19 @@ impl Worker {
             self.flush(true);
         }));
     }
+}
+
+/// Whether two definitions of a mapping behave the same (its label does not matter). Destructured
+/// exhaustively so a field added to `Mapping` later has to be considered here.
+fn same_behavior(a: &crate::model::Mapping, b: &crate::model::Mapping) -> bool {
+    let crate::model::Mapping { id, name: _, enabled, source, behavior, conditions, rate_limit } =
+        a;
+    *id == b.id
+        && *enabled == b.enabled
+        && *source == b.source
+        && *behavior == b.behavior
+        && *conditions == b.conditions
+        && *rate_limit == b.rate_limit
 }
 
 /// The selected profile: `wanted` if it exists, else the first non-always-on profile, else the

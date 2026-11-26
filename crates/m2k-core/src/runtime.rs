@@ -92,6 +92,12 @@ struct Inner {
     /// The config file as we know it. Held while saving and while checking for outside
     /// changes, so the two never interleave.
     file: Mutex<ConfigFile>,
+    /// Serializes applying configs (a hand edit and a UI change must not interleave).
+    applying: Mutex<()>,
+    /// The running config must be written to disk (set off the engine thread, written by the
+    /// config watcher thread, which `save_wake` wakes).
+    save_pending: Mutex<bool>,
+    save_wake: Condvar,
     wake: Condvar,
     /// Forward monitor events (MIDI / fired). Off while no window is showing them.
     monitoring: AtomicBool,
@@ -196,6 +202,9 @@ impl Runtime {
                 warnings: Mutex::new(loaded.warnings),
                 pending: Mutex::new(Pending::default()),
                 file: Mutex::new(ConfigFile::default()),
+                applying: Mutex::new(()),
+                save_pending: Mutex::new(false),
+                save_wake: Condvar::new(),
                 wake: Condvar::new(),
                 monitoring: AtomicBool::new(true),
                 stopping: AtomicBool::new(false),
@@ -238,12 +247,18 @@ impl Runtime {
             }
         });
 
-        // Config file watcher (hand edits).
+        // Config file watcher (hand edits) and writer of saves requested from the engine thread.
         let for_files = Arc::downgrade(&inner);
         let _ = thread::Builder::new().name("m2k-config-watch".into()).spawn(move || {
             loop {
-                thread::sleep(CONFIG_POLL);
                 let Some(inner) = for_files.upgrade() else { break };
+                {
+                    let pending = lock(&inner.save_pending);
+                    if !*pending && !inner.stopping.load(Ordering::Relaxed) {
+                        drop(inner.save_wake.wait_timeout(pending, CONFIG_POLL));
+                    }
+                }
+                inner.flush_pending_save();
                 if inner.stopping.load(Ordering::Relaxed) {
                     break;
                 }
@@ -371,7 +386,9 @@ impl Runtime {
         }
         drop(lock(&inner.input).take());
         inner.engine.stop();
+        inner.flush_pending_save();
         inner.wake.notify_all();
+        inner.save_wake.notify_all();
     }
 }
 
@@ -387,6 +404,7 @@ impl Inner {
     /// Makes `config` (already sanitized) the running configuration: engine, output backend
     /// options, MIDI input policy. Does not save. `false` when nothing changed.
     fn apply(&self, config: &Config) -> bool {
+        let _applying = lock(&self.applying);
         let previous = std::mem::replace(&mut *lock(&self.config), config.clone());
         if previous == *config {
             return false;
@@ -413,6 +431,23 @@ impl Inner {
         file.bytes = fs::read(&self.path).unwrap_or_default();
         file.settling = None;
         result
+    }
+
+    /// Writes the running config if the engine thread asked for it (it must never wait for the
+    /// disk itself). The config is taken as it is at the moment of writing, under the file
+    /// lock, so a newer save can never be overwritten by an older snapshot.
+    fn flush_pending_save(&self) {
+        if !std::mem::take(&mut *lock(&self.save_pending)) {
+            return;
+        }
+        let mut file = lock(&self.file);
+        let config = lock(&self.config).clone();
+        if let Err(error) = store::save(&self.path, &config) {
+            log::warn!("could not persist the selected profile: {error}");
+        }
+        file.stamp = FileStamp::of(&self.path);
+        file.bytes = fs::read(&self.path).unwrap_or_default();
+        file.settling = None;
     }
 
     /// Records the file as it is now (after loading it).
@@ -515,11 +550,10 @@ impl Inner {
             return;
         }
         config.selected_profile = Some(selected.clone());
-        let snapshot = config.clone();
         drop(config);
-        if let Err(error) = self.save(&snapshot) {
-            log::warn!("could not persist the selected profile: {error}");
-        }
+        // This runs on the engine thread: hand the write to the config watcher thread.
+        *lock(&self.save_pending) = true;
+        self.save_wake.notify_one();
     }
 
     /// Waits for events and pushes one batch. Returns `false` when the runtime is stopping.
