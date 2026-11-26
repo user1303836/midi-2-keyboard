@@ -150,6 +150,13 @@ pub struct Settings {
     /// Output backend selection / tuning.
     #[serde(default)]
     pub injector: InjectorOptions,
+    /// System-wide shortcut that pauses / resumes all output, also while another application
+    /// has focus: a safety valve when a mapping misbehaves. Modifier keys plus exactly one other
+    /// key, e.g. `["ControlLeft", "AltLeft", "Pause"]`; left and right modifiers count the same.
+    /// Empty: no shortcut. While registered, the OS hands the combination to midi-2-keyboard
+    /// instead of the focused application.
+    #[serde(default)]
+    pub pause_hotkey: Vec<Key>,
 }
 
 fn default_middle_c_octave() -> i8 {
@@ -181,6 +188,7 @@ impl Default for Settings {
             repeat_delay_ms: default_repeat_delay_ms(),
             repeat_interval_ms: default_repeat_interval_ms(),
             injector: InjectorOptions::default(),
+            pause_hotkey: Vec::new(),
         }
     }
 }

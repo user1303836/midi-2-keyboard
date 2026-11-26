@@ -36,6 +36,7 @@ function sampleConfig(): Config {
       repeat_delay_ms: 400,
       repeat_interval_ms: 33,
       injector: { windows_key_mode: "auto", linux_backend: "auto" },
+      pause_hotkey: [],
     },
     devices: [{ name: "Launchkey Mini MK3", alias: "Launchkey", enabled: true }],
     selected_profile: "default",
