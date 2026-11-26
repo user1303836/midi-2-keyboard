@@ -83,6 +83,8 @@ pub struct CSource {
     pub presses_on_repeat: bool,
     /// [`Source::debounce_ms`] (0 for sources it does not apply to).
     pub debounce_ms: u32,
+    /// A ranged, absolute value (what a `Change` jitter guard applies to).
+    pub ranged: bool,
 }
 
 impl CSource {
@@ -205,8 +207,10 @@ pub enum CBehavior {
         hold: Option<CAction>,
         hold_ms: u32,
     },
+    /// `min_change` > 1: jitter guard for ranged absolute sources.
     Change {
         action: CAction,
+        min_change: u16,
     },
     Step {
         up: Option<CAction>,
@@ -485,6 +489,7 @@ fn compile_mapping(
         hysteresis: if ranged { mapping.source.hysteresis } else { 0 },
         presses_on_repeat,
         debounce_ms: if gated { mapping.source.debounce_ms } else { 0 },
+        ranged,
     };
 
     let behavior = match &mapping.behavior {
@@ -528,8 +533,9 @@ fn compile_mapping(
                 hold_ms: (*hold_ms).max(1),
             }
         }
-        // TODO(engine): `min_change` (jitter guard) is new in the model.
-        Behavior::Change { action, .. } => CBehavior::Change { action: act(action) },
+        Behavior::Change { action, min_change } => {
+            CBehavior::Change { action: act(action), min_change: *min_change }
+        }
         Behavior::Step { up, down, step, max_burst, invert, fast } => CBehavior::Step {
             up: up.as_ref().map(act),
             down: down.as_ref().map(act),

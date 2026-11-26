@@ -340,6 +340,11 @@ impl MappingRt {
         self.step_refs.iter_mut().find(|(k, _)| *k == key).map(|(_, r)| r)
     }
 
+    /// The reference value of an instance (Step position, Change jitter guard).
+    fn reference(&self, key: InstKey) -> Option<i32> {
+        self.step_refs.iter().find(|(k, _)| *k == key).map(|(_, r)| r.last)
+    }
+
     fn set_ref(&mut self, key: InstKey, value: i32) {
         match self.step_ref(key) {
             Some(r) => *r = StepRef { last: value, acc: 0 },
@@ -425,7 +430,7 @@ fn slot_action(def: &CMapping, state: &State, slot: Slot) -> Option<CAction> {
             State::Cycle { index, .. } => actions.get(*index).or(actions.first()).cloned(),
             _ => None,
         },
-        (CBehavior::Change { action }, Slot::Change) => Some(action.clone()),
+        (CBehavior::Change { action, .. }, Slot::Change) => Some(action.clone()),
         (CBehavior::Step { up, .. }, Slot::Up) => up.clone(),
         (CBehavior::Step { down, .. }, Slot::Down) => down.clone(),
         _ => None,
@@ -692,10 +697,26 @@ pub fn on_edge(
             _ => {}
         },
 
-        CBehavior::Change { .. } => {
-            if edge != Edge::Release {
-                fire(rt, def, cx, Slot::Change, ctx, false);
+        CBehavior::Change { min_change, .. } => {
+            if edge == Edge::Release {
+                return;
             }
+            // Jitter guard: a value counts only once it is `min_change` away from the last one
+            // that counted (the first always counts). The reference moves before the rate
+            // limiter decides; a value that does not count reports nothing.
+            if *min_change > 1
+                && def.source.ranged
+                && matches!(edge, Edge::Press | Edge::Update | Edge::Repeat)
+            {
+                if rt
+                    .reference(inst)
+                    .is_some_and(|r| (ctx.value - r).unsigned_abs() < u32::from(*min_change))
+                {
+                    return;
+                }
+                rt.set_ref(inst, ctx.value);
+            }
+            fire(rt, def, cx, Slot::Change, ctx, false);
         }
 
         CBehavior::Step { up, down, step, max_burst, invert, fast } => {
