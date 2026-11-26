@@ -8,6 +8,7 @@ import type { AppInfo } from "@/bindings/AppInfo";
 import type { Config } from "@/bindings/Config";
 import type { DeviceConfig } from "@/bindings/DeviceConfig";
 import type { EngineStatus } from "@/bindings/EngineStatus";
+import type { Key } from "@/bindings/Key";
 import type { Mapping } from "@/bindings/Mapping";
 import type { Permissions } from "@/bindings/Permissions";
 import type { PortStatus } from "@/bindings/PortStatus";
@@ -40,6 +41,8 @@ interface State {
   ports: PortStatus[];
   permissions: Permissions;
   backendError: string;
+  /** Keys the output backend on this system cannot send. */
+  unsupportedKeys: Key[];
 
   past: Config[];
   future: Config[];
@@ -206,7 +209,11 @@ export const useApp = create<State>((set, get) => {
         set({ ports: event.ports });
         break;
       case "permissions":
-        set({ permissions: event.permissions, backendError: event.backend_error });
+        set({
+          permissions: event.permissions,
+          backendError: event.backend_error,
+          unsupportedKeys: event.unsupported_keys ?? [],
+        });
         break;
       case "config":
         set({ config: event.config, past: [], future: [] });
@@ -235,6 +242,7 @@ export const useApp = create<State>((set, get) => {
     ports: [],
     permissions: { can_inject: true, can_detect_foreground: true, hint: "" },
     backendError: "",
+    unsupportedKeys: [],
     past: [],
     future: [],
     saving: false,
@@ -265,6 +273,7 @@ export const useApp = create<State>((set, get) => {
           ports: snapshot.ports,
           permissions: snapshot.permissions,
           backendError: snapshot.backend_error,
+          unsupportedKeys: snapshot.unsupported_keys ?? [],
           viewProfileId: snapshot.config.selected_profile ?? snapshot.config.profiles[0]?.id ?? null,
         });
         for (const warning of snapshot.warnings) get().toast(warning, { kind: "warning" });

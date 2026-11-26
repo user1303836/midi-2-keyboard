@@ -2,6 +2,7 @@
 import type { AppInfo } from "./AppInfo";
 import type { Config } from "./Config";
 import type { EngineStatus } from "./EngineStatus";
+import type { Key } from "./Key";
 import type { Permissions } from "./Permissions";
 import type { PortStatus } from "./PortStatus";
 
@@ -16,4 +17,8 @@ warnings: Array<string>,
 /**
  * Why the output backend could not be created; empty when it is working.
  */
-backend_error: string, };
+backend_error: string, 
+/**
+ * Keys the output backend of this platform/session cannot send.
+ */
+unsupported_keys: Array<Key>, };

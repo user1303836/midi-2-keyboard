@@ -4,6 +4,7 @@
 
 import type { Action } from "@/bindings/Action";
 import type { Config } from "@/bindings/Config";
+import type { ForegroundApp } from "@/bindings/ForegroundApp";
 import type { Profile } from "@/bindings/Profile";
 import type { RuntimeEvent } from "@/bindings/RuntimeEvent";
 import type { Snapshot } from "@/bindings/Snapshot";
@@ -26,6 +27,8 @@ export interface Backend {
   releaseAll(): Promise<void>;
   rescanDevices(): Promise<void>;
   requestPermissions(): Promise<void>;
+  /** Applications that currently have a visible window (for "pick an app" lists). */
+  runningApps(): Promise<ForegroundApp[]>;
   /** Shows the config file in the system file manager. */
   revealConfig(): Promise<void>;
   /** Saves profiles to a file chosen by the user. Resolves `false` if cancelled. */
@@ -49,6 +52,7 @@ async function createTauriBackend(): Promise<Backend> {
     releaseAll: () => invoke("release_all"),
     rescanDevices: () => invoke("rescan_devices"),
     requestPermissions: () => invoke("request_permissions"),
+    runningApps: () => invoke<ForegroundApp[]>("running_apps"),
     revealConfig: () => invoke("reveal_config"),
     exportProfiles: (profiles, suggestedName) =>
       invoke<boolean>("export_profiles", { profiles, suggestedName }),

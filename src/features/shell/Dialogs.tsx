@@ -10,6 +10,8 @@ import { Dialog } from "@/components/ui/overlays";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+import { AppPicker } from "./AppPicker";
+
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-6 last:mb-0">
@@ -384,12 +386,20 @@ export function ProfileDialog({ profile, onClose }: { profile: Profile | null; o
             </div>
           ))}
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              icon={<Plus size={13} />}
-              onClick={() => update((p) => ({ ...p, apps: [...p.apps, { process: "", title: "" }] }))}
+            <AppPicker
+              onPick={(app) =>
+                update((p) => ({
+                  ...p,
+                  apps: [...p.apps.filter((a) => a.process || a.title), { process: app.process || app.app_id, title: "" }],
+                }))
+              }
             >
-              Add application
+              <Button size="sm" variant="primary" icon={<Plus size={13} />}>
+                Add an open application
+              </Button>
+            </AppPicker>
+            <Button size="sm" onClick={() => update((p) => ({ ...p, apps: [...p.apps, { process: "", title: "" }] }))}>
+              Type one in
             </Button>
             {foreground?.process && (
               <Badge title="The application most recently in front">last seen: {foreground.process}</Badge>

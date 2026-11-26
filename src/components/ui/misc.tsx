@@ -167,9 +167,26 @@ const ARROWS: Partial<Record<Key, typeof ArrowUp>> = {
 export function Keycap({ k, small }: { k: Key; small?: boolean }) {
   const info = keyInfo(k);
   const Arrow = ARROWS[k];
+  // A config made on another OS may use keys this one cannot send; say so instead of failing silently.
+  const unsupported = useApp((state) => state.unsupportedKeys.includes(k));
   return (
-    <Tooltip content={info.name !== info.label ? info.name : null} side="top">
-      <kbd className={cn("keycap font-sans", small && "keycap-sm")}>
+    <Tooltip
+      content={
+        unsupported
+          ? `${info.name} cannot be sent on this system, so it is skipped.`
+          : info.name !== info.label
+            ? info.name
+            : null
+      }
+      side="top"
+    >
+      <kbd
+        className={cn(
+          "keycap font-sans",
+          small && "keycap-sm",
+          unsupported && "border-dashed border-danger text-danger line-through",
+        )}
+      >
         {Arrow ? <Arrow size={small ? 12 : 14} strokeWidth={2.6} aria-label={info.name} /> : info.label}
       </kbd>
     </Tooltip>

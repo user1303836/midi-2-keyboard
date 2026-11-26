@@ -84,6 +84,12 @@ fn request_permissions(state: State<'_, AppState>) {
     state.runtime.request_permissions();
 }
 
+/// Applications with a visible window, for the "pick an app" lists in the UI.
+#[tauri::command(async)]
+fn running_apps() -> Vec<m2k_output::platform::ForegroundApp> {
+    m2k_output::platform::running_apps()
+}
+
 #[tauri::command]
 fn reveal_config(state: State<'_, AppState>) -> Result<(), String> {
     reveal(&state.runtime.config_path()).map_err(|error| error.to_string())
@@ -385,6 +391,7 @@ fn main() {
             release_all,
             rescan_devices,
             request_permissions,
+            running_apps,
             reveal_config,
             export_profiles,
             import_profiles,

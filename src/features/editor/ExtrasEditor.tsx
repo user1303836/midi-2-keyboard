@@ -12,6 +12,7 @@ import { useApp, useKnownLayers } from "@/lib/store";
 import { cn, formatMs } from "@/lib/utils";
 
 import { ChannelSelect, NoteInput, RangeEditor } from "./fields";
+import { AppPicker } from "../shell/AppPicker";
 
 const PRESETS = [50, 100, 250, 500, 1000, 2000];
 
@@ -169,12 +170,19 @@ function ConditionRow({
               />
               <span className="text-sm text-fg-faint">the app…</span>
             </div>
-            <TextInput
-              aria-label="Process name"
-              placeholder={recent?.process ? `Process, e.g. ${recent.process}` : "Process, e.g. Photoshop.exe"}
-              value={condition.app.process}
-              onChange={(process) => onChange({ ...condition, app: { ...condition.app, process } }, "process")}
-            />
+            <div className="flex gap-1.5">
+              <TextInput
+                aria-label="Process name"
+                placeholder={recent?.process ? `Process, e.g. ${recent.process}` : "Process, e.g. Photoshop.exe"}
+                value={condition.app.process}
+                onChange={(process) => onChange({ ...condition, app: { ...condition.app, process } }, "process")}
+              />
+              <AppPicker
+                onPick={(app) => onChange({ ...condition, app: { ...condition.app, process: app.process || app.app_id } })}
+              >
+                <Button>Pick…</Button>
+              </AppPicker>
+            </div>
             <TextInput
               aria-label="Window title"
               placeholder="Window title contains… (optional, * and ? allowed)"

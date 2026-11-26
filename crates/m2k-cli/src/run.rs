@@ -221,7 +221,7 @@ impl Printer {
                 }
             }
             RuntimeEvent::Ports { ports } => self.ports_changed(ports),
-            RuntimeEvent::Permissions { permissions, backend_error } => {
+            RuntimeEvent::Permissions { permissions, backend_error, .. } => {
                 let output = if permissions.can_inject { "works" } else { "blocked" };
                 let foreground =
                     if permissions.can_detect_foreground { "detected" } else { "not detectable" };

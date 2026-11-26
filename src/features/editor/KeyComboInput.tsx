@@ -5,6 +5,7 @@ import type { Key } from "@/bindings/Key";
 import { Popover, PopoverContent, PopoverTrigger, Tooltip } from "@/components/ui/overlays";
 import { KeyCombo } from "@/components/ui/misc";
 import { allKeys, KEY_GROUPS, keyFromEvent, normalizeCombo, type KeyInfo } from "@/lib/keys";
+import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /**
@@ -204,6 +205,7 @@ function KeyPicker({
   single: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const unsupported = useApp((state) => state.unsupportedKeys);
   const keys = useMemo(() => allKeys(), []);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -241,16 +243,19 @@ function KeyPicker({
             <div className="flex flex-wrap gap-1">
               {byGroup.get(group)!.map((info) => {
                 const active = selected.includes(info.key);
+                const unavailable = unsupported.includes(info.key);
                 return (
                   <button
                     key={info.key}
                     type="button"
-                    title={info.name}
+                    title={unavailable ? `${info.name} — cannot be sent on this system` : info.name}
                     aria-pressed={active}
+                    disabled={unavailable && !active}
                     onClick={() => onToggle(info.key)}
                     className={cn(
                       "keycap keycap-sm font-sans transition-colors hover:border-accent",
                       active && "border-accent bg-accent-soft text-accent",
+                      unavailable && "border-dashed opacity-40 hover:border-line-strong",
                     )}
                   >
                     {info.label}

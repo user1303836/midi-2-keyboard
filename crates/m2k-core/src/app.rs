@@ -2,6 +2,7 @@
 //! front end. Shared contract; generates TypeScript bindings.
 
 use m2k_midi::input::PortStatus;
+use m2k_output::Key;
 use m2k_output::platform::Permissions;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -35,6 +36,9 @@ pub struct Snapshot {
     pub warnings: Vec<String>,
     /// Why the output backend could not be created; empty when it is working.
     pub backend_error: String,
+    /// Keys the output backend of this platform/session cannot send.
+    #[serde(default)]
+    pub unsupported_keys: Vec<Key>,
 }
 
 /// Live updates pushed to the front end.
@@ -46,7 +50,12 @@ pub enum RuntimeEvent {
     Engine { events: Vec<EngineEvent> },
     /// The set of MIDI ports or their states changed.
     Ports { ports: Vec<PortStatus> },
-    Permissions { permissions: Permissions, backend_error: String },
+    Permissions {
+        permissions: Permissions,
+        backend_error: String,
+        #[serde(default)]
+        unsupported_keys: Vec<Key>,
+    },
     /// The config was changed by something other than this front end (an action switched the
     /// selected profile, the file was re-imported, ...).
     Config { config: Config },

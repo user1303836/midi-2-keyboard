@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use m2k_midi::input::{InputEvent, InputManager, InputOptions, PortPolicy, PortState, PortStatus};
 use m2k_output::platform::{self, Permissions};
-use m2k_output::{Injector, NullInjector};
+use m2k_output::{Injector, Key, NullInjector};
 
 use crate::app::{AppInfo, RuntimeEvent, Snapshot};
 use crate::engine::{Engine, EngineOptions};
@@ -52,6 +52,8 @@ struct Inner {
     ports: Mutex<Vec<PortStatus>>,
     permissions: Mutex<Permissions>,
     backend_error: Mutex<String>,
+    /// Keys the current output backend cannot send (shown as unavailable in the UI).
+    unsupported_keys: Mutex<Vec<Key>>,
     warnings: Mutex<Vec<String>>,
     pending: Mutex<Pending>,
     wake: Condvar,
@@ -82,6 +84,11 @@ fn make_injector(config: &Config, dry_run: bool) -> (Box<dyn Injector>, String) 
         Ok(injector) => (injector, String::new()),
         Err(error) => (Box::new(NullInjector), error.to_string()),
     }
+}
+
+/// The keys `injector` cannot send.
+fn unsupported_keys(injector: &dyn Injector) -> Vec<Key> {
+    Key::ALL.iter().copied().filter(|key| !injector.supports(*key)).collect()
 }
 
 fn policy_for(config: &Config) -> PortPolicy {
@@ -132,6 +139,7 @@ impl Runtime {
             }
         }
         let (injector, backend_error) = make_injector(&config, options.dry_run);
+        let unsupported = unsupported_keys(injector.as_ref());
 
         let inner = Arc::new_cyclic(|weak: &Weak<Inner>| {
             let for_engine = weak.clone();
@@ -154,6 +162,7 @@ impl Runtime {
                 ports: Mutex::new(Vec::new()),
                 permissions: Mutex::new(platform::permissions()),
                 backend_error: Mutex::new(backend_error),
+                unsupported_keys: Mutex::new(unsupported),
                 warnings: Mutex::new(loaded.warnings),
                 pending: Mutex::new(Pending::default()),
                 wake: Condvar::new(),
@@ -221,6 +230,7 @@ impl Runtime {
             permissions: lock(&inner.permissions).clone(),
             warnings: std::mem::take(&mut *lock(&inner.warnings)),
             backend_error: lock(&inner.backend_error).clone(),
+            unsupported_keys: lock(&inner.unsupported_keys).clone(),
         }
     }
 
@@ -416,6 +426,7 @@ impl Inner {
 
     fn rebuild_injector(&self, config: &Config) {
         let (injector, error) = make_injector(config, self.dry_run);
+        *lock(&self.unsupported_keys) = unsupported_keys(injector.as_ref());
         self.engine.set_injector(injector);
         *lock(&self.backend_error) = error;
         self.publish_permissions();
@@ -425,6 +436,7 @@ impl Inner {
         self.emit(RuntimeEvent::Permissions {
             permissions: lock(&self.permissions).clone(),
             backend_error: lock(&self.backend_error).clone(),
+            unsupported_keys: lock(&self.unsupported_keys).clone(),
         });
     }
 
@@ -444,6 +456,7 @@ impl Inner {
             let config = lock(&self.config).clone();
             let (injector, error) = make_injector(&config, self.dry_run);
             if error.is_empty() {
+                *lock(&self.unsupported_keys) = unsupported_keys(injector.as_ref());
                 self.engine.set_injector(injector);
             }
             let error_changed = *lock(&self.backend_error) != error;
