@@ -7,8 +7,8 @@ import type { RateLimit } from "@/bindings/RateLimit";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented, Switch, TextInput } from "@/components/ui/inputs";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/overlays";
-import { CONDITION_TYPES, defaultCondition, defaultRateLimit, knownLayers } from "@/lib/model";
-import { useApp } from "@/lib/store";
+import { CONDITION_TYPES, defaultCondition, defaultRateLimit } from "@/lib/model";
+import { useApp, useKnownLayers } from "@/lib/store";
 import { cn, formatMs } from "@/lib/utils";
 
 import { ChannelSelect, NoteInput, RangeEditor } from "./fields";
@@ -150,7 +150,7 @@ function ConditionRow({
   onChange: (condition: Condition, coalesceKey?: string) => void;
   onRemove: () => void;
 }) {
-  const layers = useApp((state) => knownLayers(state.config));
+  const layers = useKnownLayers();
   const recent = useApp((state) => state.engine.foreground);
   return (
     <div className="flex items-start gap-2 rounded-lg border bg-surface p-2.5">

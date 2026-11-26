@@ -1,6 +1,7 @@
 // The main application store: the config being edited (with undo/redo and debounced saving),
 // the engine's live status, and UI state. High-frequency data lives in `monitor.ts`.
 
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import type { AppInfo } from "@/bindings/AppInfo";
@@ -15,7 +16,7 @@ import type { RuntimeEvent } from "@/bindings/RuntimeEvent";
 import type { Settings } from "@/bindings/Settings";
 
 import { getBackend, type Backend } from "./api";
-import { duplicateMapping, duplicateProfile, newMapping, newProfile } from "./model";
+import { duplicateMapping, duplicateProfile, knownLayers, newMapping, newProfile } from "./model";
 import { pushEngineEvents } from "./monitor";
 import { setPlatform } from "./platform";
 import { deepEqual, move } from "./utils";
@@ -587,6 +588,12 @@ export function useSelectedMapping(): Mapping | null {
     }
     return null;
   });
+}
+
+/** Every layer name used anywhere in the config (for suggestions). */
+export function useKnownLayers(): string[] {
+  const config = useApp((state) => state.config);
+  return useMemo(() => knownLayers(config), [config]);
 }
 
 export function useOctave(): number {

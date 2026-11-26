@@ -33,12 +33,11 @@ import {
   actionTypeInfo,
   defaultAction,
   defaultStep,
-  knownLayers,
   STEP_TYPES,
   type ActionType,
   type StepType,
 } from "@/lib/model";
-import { useApp } from "@/lib/store";
+import { useApp, useKnownLayers } from "@/lib/store";
 import { cn, move } from "@/lib/utils";
 
 import { KeyComboInput } from "./KeyComboInput";
@@ -110,7 +109,7 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 function LayerInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const layers = useApp((state) => knownLayers(state.config));
+  const layers = useKnownLayers();
   const listId = "m2k-layer-names";
   return (
     <>

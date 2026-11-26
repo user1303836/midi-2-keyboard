@@ -6,6 +6,12 @@ import { deviceLabel } from "@/lib/describe";
 import { api, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+/** Makes sure a message ends like a sentence. */
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 function Notice({
   tone,
   icon,
@@ -80,10 +86,9 @@ export function Notices() {
           }
         >
           <span className="font-semibold">
-            {failed.map((port) => deviceLabel(port.name, config)).join(", ")}{" "}
-            {failed.length === 1 ? "could not be opened." : "could not be opened."}
+            {failed.map((port) => deviceLabel(port.name, config)).join(", ")} could not be opened.
           </span>{" "}
-          {failed[0].error || "Another program may be using it."} It is retried automatically.
+          {sentence(failed[0].error || "Another program may be using it")} It is retried automatically.
         </Notice>
       )}
       {connected.length === 0 && failed.length === 0 && !monitorOpen && (
