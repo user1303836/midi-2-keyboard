@@ -74,8 +74,10 @@ dot on every mapping in the list, and an on-screen virtual controller for trying
 hardware.
 
 **Safety** — everything the app holds down is tracked and released on pause, profile switch,
-device disconnect, config change and exit; a key release the system refuses is retried until it
-goes through. (A macro that is already playing finishes across a profile switch, and releases
+device disconnect, config change and exit, and before the computer sleeps or the screen locks
+(Windows, and Linux through logind); a key release the system refuses is retried until it goes
+through. Should the app itself fail, it lets go of every key on the way out and says so at the
+next start. (A macro that is already playing finishes across a profile switch, and releases
 what it pressed at its end.) By default no keys or mouse input are sent while the app's own
 window has focus (MIDI still is), so a mapping cannot type into (or close) the editor.
 
