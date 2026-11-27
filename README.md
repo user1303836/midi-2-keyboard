@@ -164,7 +164,9 @@ three.
   controller that has an output; with several, to the one its control was last touched on.
 - **Outputs are opened only when something is sent to them** (they are listed under *MIDI
   devices*). Windows' one-program-per-device rule applies to them too: while a DAW holds the
-  controller's output, lights cannot reach it; the output says so and is retried.
+  controller's output, lights cannot reach it; the output says so and is retried. Switching a
+  device off under *MIDI devices* also stops everything the app would send to it: its output
+  stays closed, and lights and *Send MIDI* aimed at it say that it is switched off.
 - Lights are sent when their state changes, and all of them again when the controller
   (re)connects. Pausing turns off the lights of what it releases (toggles and holds); layer and
   profile lights stay as they are. On exit nothing is sent: the lights keep their last state.
