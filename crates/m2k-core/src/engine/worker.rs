@@ -835,7 +835,20 @@ impl Worker {
                 .map(|(_, def)| &*def.id)
         };
         if !engaged().eq(status.engaged_mappings.iter().map(String::as_str)) {
-            status.engaged_mappings = engaged().map(str::to_string).collect();
+            // Merged in place (both lists are in config order): only a newly engaged mapping
+            // allocates its id.
+            let list = &mut status.engaged_mappings;
+            let mut at = 0;
+            for id in engaged() {
+                match list[at..].iter().position(|known| known == id) {
+                    Some(0) => {}
+                    // The ones before it are no longer engaged.
+                    Some(skip) => drop(list.drain(at..at + skip)),
+                    None => list.insert(at, id.to_string()),
+                }
+                at += 1;
+            }
+            list.truncate(at);
             changed = true;
         }
         let foreground = self.cx.foreground.as_ref().map(|f| &f.app);

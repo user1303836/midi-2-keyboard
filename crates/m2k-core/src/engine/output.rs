@@ -15,6 +15,40 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+/// Keys are counted per key in a fixed table (index = `key as usize`, the order of `Key::ALL`
+/// and of `Key`'s `Ord`), so pressing and releasing allocates nothing once a key was used.
+const KEY_COUNT: usize = Key::ALL.len();
+const _: () = assert!(KEY_COUNT <= 256, "KeySet holds 256 keys");
+
+/// A set of keys as a bit set (iterates in `Key` order).
+#[derive(Debug, Default, Clone, Copy)]
+struct KeySet([u64; 4]);
+
+impl KeySet {
+    fn insert(&mut self, key: Key) {
+        let i = key as usize;
+        self.0[i / 64] |= 1 << (i % 64);
+    }
+
+    fn remove(&mut self, key: Key) {
+        let i = key as usize;
+        self.0[i / 64] &= !(1 << (i % 64));
+    }
+
+    fn contains(&self, key: Key) -> bool {
+        let i = key as usize;
+        self.0[i / 64] & (1 << (i % 64)) != 0
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(|word| *word == 0)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Key> + '_ {
+        Key::ALL.iter().copied().filter(|key| self.contains(*key))
+    }
+}
+
 use m2k_output::{Injector, Key, MouseButton, OutputError};
 
 use super::latency::LatencyMeter;
@@ -60,16 +94,17 @@ impl Holders {
 
 pub struct Output {
     injector: Box<dyn Injector>,
-    keys: BTreeMap<Key, Holders>,
+    /// Per key (`key as usize`): who holds it (`total == 0`: nobody).
+    keys: Vec<Holders>,
     buttons: BTreeMap<MouseButton, Holders>,
     /// Nobody holds these any more, but the backend refused their release: still down at the
     /// OS until a retry succeeds.
-    stuck_keys: BTreeSet<Key>,
+    stuck_keys: KeySet,
     stuck_buttons: BTreeSet<MouseButton>,
     /// Keys / buttons whose press reached the OS since their last successful release. Only
     /// these can be stuck: when the press never got through either (macOS without the
     /// Accessibility permission), a refused release leaves nothing down.
-    down_keys: BTreeSet<Key>,
+    down_keys: KeySet,
     down_buttons: BTreeSet<MouseButton>,
     /// Set whenever the set of held keys changes (for the status snapshot).
     pub changed: bool,
@@ -85,11 +120,11 @@ impl Output {
     pub fn new(injector: Box<dyn Injector>) -> Self {
         Output {
             injector,
-            keys: BTreeMap::new(),
+            keys: (0..KEY_COUNT).map(|_| Holders::default()).collect(),
             buttons: BTreeMap::new(),
-            stuck_keys: BTreeSet::new(),
+            stuck_keys: KeySet::default(),
             stuck_buttons: BTreeSet::new(),
-            down_keys: BTreeSet::new(),
+            down_keys: KeySet::default(),
             down_buttons: BTreeSet::new(),
             changed: true,
             latency_origin: None,
@@ -122,7 +157,12 @@ impl Output {
     }
 
     pub fn key_count(&self, key: Key) -> u32 {
-        self.keys.get(&key).map_or(0, |h| h.total)
+        self.keys[key as usize].total
+    }
+
+    /// The keys somebody holds, in `Key` order.
+    fn held(&self) -> impl Iterator<Item = Key> + '_ {
+        Key::ALL.iter().copied().filter(|key| self.keys[*key as usize].total > 0)
     }
 
     pub fn button_count(&self, button: MouseButton) -> u32 {
@@ -133,8 +173,8 @@ impl Output {
     /// the backend fails, so the matching release stays balanced.
     pub fn press_key(&mut self, key: Key, owner: u64) -> Result {
         // A stuck key that is pressed again is simply held again; its next release retries.
-        self.stuck_keys.remove(&key);
-        let holders = self.keys.entry(key).or_default();
+        self.stuck_keys.remove(key);
+        let holders = &mut self.keys[key as usize];
         if holders.total == 0 {
             self.changed = true;
         }
@@ -148,15 +188,14 @@ impl Output {
 
     /// Releases one reference of `owner`; sends the key up when nobody holds the key any more.
     pub fn release_key(&mut self, key: Key, owner: u64) -> Result {
-        let Some(holders) = self.keys.get_mut(&key) else {
-            return Ok(());
-        };
+        let holders = &mut self.keys[key as usize];
         if !holders.remove(owner) {
-            log::debug!("release of {key:?} by an owner that does not hold it");
+            if holders.total > 0 {
+                log::debug!("release of {key:?} by an owner that does not hold it");
+            }
             return Ok(());
         }
         if holders.total == 0 {
-            self.keys.remove(&key);
             return self.key_up(key);
         }
         Ok(())
@@ -166,9 +205,9 @@ impl Output {
     /// reached the OS.
     fn key_up(&mut self, key: Key) -> Result {
         let result = self.call(|i| i.key_up(key));
-        if result.is_ok() || !self.down_keys.contains(&key) {
-            self.stuck_keys.remove(&key);
-            self.down_keys.remove(&key);
+        if result.is_ok() || !self.down_keys.contains(key) {
+            self.stuck_keys.remove(key);
+            self.down_keys.remove(key);
         } else {
             self.stuck_keys.insert(key);
         }
@@ -259,20 +298,16 @@ impl Output {
     pub fn release_owner(&mut self, owner: u64) -> Vec<OutputError> {
         let mut errors = Vec::new();
         let keys: Vec<Key> = self
-            .keys
-            .iter()
-            .filter(|(_, h)| h.by.iter().any(|(o, _)| *o == owner))
-            .map(|(k, _)| *k)
+            .held()
+            .filter(|key| self.keys[*key as usize].by.iter().any(|(o, _)| *o == owner))
             .collect();
         for key in release_order(keys) {
-            if let Some(holders) = self.keys.get_mut(&key) {
-                holders.remove_all(owner);
-                if holders.total == 0 {
-                    self.keys.remove(&key);
-                    if let Err(error) = self.key_up(key) {
-                        errors.push(error);
-                    }
-                }
+            let holders = &mut self.keys[key as usize];
+            holders.remove_all(owner);
+            if holders.total == 0
+                && let Err(error) = self.key_up(key)
+            {
+                errors.push(error);
             }
         }
         let buttons: Vec<MouseButton> = self
@@ -300,7 +335,12 @@ impl Output {
     /// releases that failed for the first time (repeated failures of stuck ones stay quiet).
     pub fn release_everything(&mut self) -> Vec<OutputError> {
         let mut errors = Vec::new();
-        let keys: Vec<Key> = std::mem::take(&mut self.keys).into_keys().collect();
+        let keys: Vec<Key> = self.held().collect();
+        for key in &keys {
+            let holders = &mut self.keys[*key as usize];
+            holders.total = 0;
+            holders.by.clear();
+        }
         for key in release_order(keys) {
             if let Err(error) = self.key_up(key) {
                 errors.push(error);
@@ -318,7 +358,7 @@ impl Output {
     /// Tries again to release what the backend refused earlier. Returns whether something is
     /// still stuck.
     pub fn retry_stuck(&mut self) -> bool {
-        let keys: Vec<Key> = self.stuck_keys.iter().copied().collect();
+        let keys: Vec<Key> = self.stuck_keys.iter().collect();
         for key in release_order(keys) {
             let _ = self.key_up(key);
         }
@@ -336,10 +376,12 @@ impl Output {
     /// Keys down at the OS because of the engine: held ones and stuck ones (sorted), into `out`.
     pub fn held_keys_into(&self, out: &mut Vec<Key>) {
         out.clear();
-        out.extend(self.keys.keys().copied());
-        out.extend(self.stuck_keys.iter().copied());
-        out.sort();
-        out.dedup();
+        out.extend(
+            Key::ALL
+                .iter()
+                .copied()
+                .filter(|key| self.keys[*key as usize].total > 0 || self.stuck_keys.contains(*key)),
+        );
     }
 
     /// Swaps the backend. Call [`Output::release_everything`] first; keys the old backend could

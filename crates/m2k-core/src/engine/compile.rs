@@ -1051,7 +1051,10 @@ fn sequence_label(steps: &[SequenceStep]) -> String {
 /// Live mappings by the message kind that can feed them (indices into
 /// [`CompiledConfig::mappings`]). Rebuilt whenever the set of live mappings changes.
 pub struct SourceIndex {
+    /// Every note mapping.
     pub note: Vec<usize>,
+    /// Per note number: the note mappings whose range holds it (in config order, as `note`).
+    pub note_by: Vec<Vec<usize>>,
     pub chord: Vec<usize>,
     pub poly_pressure: Vec<usize>,
     pub channel_pressure: Vec<usize>,
@@ -1086,6 +1089,7 @@ impl SourceIndex {
     pub fn build(mappings: &[CMapping], live: impl Fn(usize) -> bool) -> Self {
         let mut index = SourceIndex {
             note: Vec::new(),
+            note_by: vec![Vec::new(); 128],
             chord: Vec::new(),
             poly_pressure: Vec::new(),
             channel_pressure: Vec::new(),
@@ -1106,7 +1110,12 @@ impl SourceIndex {
                 continue;
             }
             match &mapping.source.kind {
-                CSourceKind::Note { .. } => index.note.push(i),
+                CSourceKind::Note { notes, .. } => {
+                    index.note.push(i);
+                    for note in notes.min..=notes.max.min(127) {
+                        index.note_by[usize::from(note)].push(i);
+                    }
+                }
                 CSourceKind::Chord { mask, .. } => {
                     if *mask != 0 {
                         index.chord.push(i);

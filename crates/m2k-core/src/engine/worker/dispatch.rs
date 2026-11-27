@@ -306,7 +306,7 @@ impl Worker {
             ..Ctx::default()
         };
         let inst = InstKey::new(dev, channel, u16::from(note));
-        for &i in &index.note {
+        for &i in &index.note_by[usize::from(note & 127)] {
             let source = &self.cfg.mappings[i].source;
             let CSourceKind::Note { notes, velocity: accepted } = &source.kind else {
                 continue;

@@ -42,6 +42,8 @@ struct Queue {
     ready_at: Option<Instant>,
     timer: Option<TimerId>,
     overflow_reported: Option<Instant>,
+    /// The key and button lists of the last finished action, kept for the next one.
+    spare: (Vec<Key>, Vec<MouseButton>),
 }
 
 struct Running {
@@ -160,16 +162,10 @@ impl Executor {
 }
 
 impl Running {
-    fn new(action: CAction, ctx: Ctx) -> Self {
-        Running {
-            action,
-            ctx,
-            started: Instant::now(),
-            pc: 0,
-            typing: None,
-            keys: Vec::new(),
-            buttons: Vec::new(),
-        }
+    /// `spare`: empty lists to hold the keys and buttons in (reused, so a tap allocates nothing).
+    fn new(action: CAction, ctx: Ctx, spare: (Vec<Key>, Vec<MouseButton>)) -> Self {
+        let (keys, buttons) = spare;
+        Running { action, ctx, started: Instant::now(), pc: 0, typing: None, keys, buttons }
     }
 }
 
@@ -216,6 +212,7 @@ impl Cx {
             ready_at: None,
             timer: None,
             overflow_reported: None,
+            spare: Default::default(),
         });
         if queue.pending.len() >= QUEUE_LIMIT {
             return Enqueued::Full;
@@ -256,16 +253,17 @@ impl Cx {
                             }
                             None => {
                                 self.timers.cancel(timer);
-                                self.finish(&info, running);
+                                let _ = self.finish(&info, running);
                             }
                         }
                         return;
                     }
                     Progress::Done => {
-                        self.finish(&info, running);
+                        let spare = self.finish(&info, running);
                         let ready = self.actual_now() + self.gap();
                         if let Some(queue) = self.exec.queues.get_mut(&owner) {
                             queue.ready_at = Some(ready);
+                            queue.spare = spare;
                         }
                     }
                 }
@@ -287,7 +285,8 @@ impl Cx {
             let Some((action, ctx)) = queue.pending.pop_front() else {
                 return;
             };
-            queue.running = Some(Running::new(action, ctx));
+            let spare = std::mem::take(&mut queue.spare);
+            queue.running = Some(Running::new(action, ctx, spare));
         }
     }
 
@@ -375,14 +374,16 @@ impl Cx {
         Progress::Done
     }
 
-    /// Releases whatever a finished or aborted action still holds (reverse order).
-    fn finish(&mut self, info: &OwnerInfo, mut run: Running) {
+    /// Releases whatever a finished or aborted action still holds (reverse order). Returns its
+    /// (now empty) key and button lists for the next action.
+    fn finish(&mut self, info: &OwnerInfo, mut run: Running) -> (Vec<Key>, Vec<MouseButton>) {
         while let Some(key) = run.keys.pop() {
             self.release_key(info, key);
         }
         while let Some(button) = run.buttons.pop() {
             self.release_button(info, button);
         }
+        (run.keys, run.buttons)
     }
 
     /// Stops the owner's running action (releasing what it holds) and drops what is queued.
@@ -395,10 +396,11 @@ impl Cx {
         let running = queue.running.take();
         let info = queue.info.clone();
         if let Some(running) = running {
-            self.finish(&info, running);
+            let spare = self.finish(&info, running);
             let ready = self.actual_now() + self.gap();
             if let Some(queue) = self.exec.queues.get_mut(&owner) {
                 queue.ready_at = Some(ready);
+                queue.spare = spare;
             }
         }
     }
