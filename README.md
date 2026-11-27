@@ -51,6 +51,9 @@ clicks / scrolling / movement, macros with delays, profile switching, layers, pa
 launching programs, opening files and URLs, sending MIDI (to other gear, or as lights on the
 controller: see [Sending MIDI and lights](#sending-midi-and-lights)).
 
+**MIDI thru** — a device can be passed on, message for message, to another port, so that another
+program (a DAW) hears it too while this app holds it.
+
 **Shaping** — rate limits (throttle, throttle with a final trailing fire, debounce), conditions
 (only in a certain application, only while a layer is on, only while another pad is held, only
 while a knob is in a certain position), a dead zone for jittery pedals and faders, a jitter guard
@@ -175,6 +178,18 @@ three.
   (re)connects. Pausing turns off the lights of what it releases (toggles and holds); layer and
   profile lights stay as they are. On exit nothing is sent: the lights keep their last state.
 
+**Passing a controller on (MIDI thru).** On Windows a MIDI device serves one program at a time, so
+while this app has the controller, a DAW cannot listen to it. Under *MIDI devices*, click *pass it
+on…* next to the controller and pick the port to *pass everything it sends on to*: a virtual port
+(create one in loopMIDI on Windows, or an IAC bus on macOS; on Linux programs can share a device
+anyway). Point the other program at that port. Both then get every message, mapped or not, also
+while output is paused (only bytes that are not a MIDI message, and a SysEx longer than 4096
+bytes, stay behind; the app reports the latter once); what comes straight back from the virtual
+port is recognized as an echo and not acted on twice. A target switched off under *MIDI
+devices*, or `M2K_NO_MIDI_OUT`, stops it like any other MIDI the app sends. When the target is
+missing, switched off or cannot be opened, the app says so once, not per message, and carries
+on by itself when it is there again.
+
 Good to know:
 
 - **Windows:** most MIDI drivers allow only one program to open a device at a time. If your DAW has
@@ -229,6 +244,8 @@ Shorthands:
   half starts above the resting center.
 - Keys are named like the browser's `KeyboardEvent.code`: `KeyA`, `Digit1`, `ArrowUp`, `Space`,
   `ControlLeft`, `ShiftLeft`, `F13`, `NumpadAdd`, `AudioVolumeUp`.
+- MIDI thru is a setting of the device: `"devices": [{"name": "…", "forward_to": "…"}]`, with the
+  names of an input and of an output as the app lists them.
 - A shuttle needs only its actions: `{"type": "shuttle", "up": …, "down": …}`. It rests in the
   middle for pitch bend and at the bottom for everything else (`"rest": "center" | "low" |
   "high"`), the 5 % next to that still count as rest (`dead_zone`), and it fires every 400 ms
@@ -250,7 +267,8 @@ Shorthands:
   program at a time: close the other one (a DAW, another MIDI tool) and the port opens by itself.
   A device switched off under *MIDI devices* (the button next to MIDI DEVICES) stays closed; so do
   new ones while *Connect new MIDI devices automatically* is off in Settings. *Rescan now* there
-  looks for devices again.
+  looks for devices again. To use a controller here and in another program at the same time,
+  pass it on to a virtual port ([MIDI thru](#sending-midi-and-lights)).
 - **Up / Down stops at the end of a knob.** A knob with end stops, or an endless encoder left in
   its absolute mode, sends nothing more at 0 and at the top. Set the encoder to a relative mode on
   the controller, then choose *Endless encoder* in the editor (it warns when a control gets there).
