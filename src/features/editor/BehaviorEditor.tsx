@@ -782,8 +782,9 @@ function ShuttleForm({
         </>
       ) : (
         <div className="text-sm leading-snug text-fg-faint" data-shuttle-pace>
-          {rest === "center" ? "Rests in the middle" : rest === "low" ? "Rests at the bottom" : "Rests at the top"}; {perSecond(shuttleRate(b, 0) * unit.per)} to{" "}
-          {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.{" "}
+          {hit ? "From the softest hit to the hardest" : rest === "center" ? "Rests in the middle" : rest === "low" ? "Rests at the bottom" : "Rests at the top"}
+          {hit ? ": " : "; "}
+          {perSecond(shuttleRate(b, 0) * unit.per)} to {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.{" "}
           <button type="button" className="text-fg-muted underline underline-offset-2 hover:text-fg" onClick={() => setOpen(true)}>
             Adjust
           </button>
@@ -826,7 +827,11 @@ function ShuttleForm({
               : "Move the control to see how fast that is."
             : now
               ? `At ${shown(live)}: ${both ? (now.side === "up" ? "up, " : "down, ") : ""}${perSecond(now.rate * paceUnit(now.side === "up" ? b.up : b.down).per)} ${paceUnit(now.side === "up" ? b.up : b.down).unit}.`
-              : `At ${shown(live)}: at rest.`}
+              : hit
+                ? live === 0
+                  ? "Let go: nothing repeats."
+                  : `A hit of ${live}: too soft to count.`
+                : `At ${shown(live)}: at rest.`}
         </div>
       </div>
     </div>
