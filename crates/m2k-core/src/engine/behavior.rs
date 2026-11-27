@@ -764,7 +764,8 @@ pub fn on_edge(
             };
             match edge {
                 Edge::Press | Edge::Repress | Edge::Repeat | Edge::Update => {
-                    shuttle.moved(def, &rt.info, cx, inst, ctx)
+                    let press = matches!(edge, Edge::Press | Edge::Repress);
+                    shuttle.moved(def, &rt.info, cx, inst, ctx, press)
                 }
                 Edge::Release => shuttle.released(def, &rt.info, cx, inst),
                 // No position.

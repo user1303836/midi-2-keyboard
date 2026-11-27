@@ -238,6 +238,9 @@ pub enum CBehavior {
         up: Option<CAction>,
         down: Option<CAction>,
         zone: Zone,
+        /// A note or a chord: each hit is a discrete event that fires at once, not an analog
+        /// control whose edge must be kept from machine-gunning.
+        hits: bool,
     },
     /// The mapping's only action or target is empty: it matches, but never does anything.
     Inert,
@@ -638,7 +641,9 @@ fn compile_mapping(
                     let rest =
                         rest.unwrap_or(if sprung { ShuttleRest::Center } else { ShuttleRest::Low });
                     let zone = Zone::new(travel, rest, *dead_zone, *slow_ms, *fast_ms, *curve);
-                    CBehavior::Shuttle { up, down, zone }
+                    let hits =
+                        matches!(source.kind, CSourceKind::Note { .. } | CSourceKind::Chord { .. });
+                    CBehavior::Shuttle { up, down, zone, hits }
                 }
                 _ => CBehavior::Inert,
             }

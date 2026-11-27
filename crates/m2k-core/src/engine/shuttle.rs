@@ -11,8 +11,9 @@
 //!
 //! Each matching instance (a note, a channel, a device) repeats on its own. Leaving the dead zone
 //! fires at once, but never sooner after the previous firing than the pace of the position allows
-//! (a control hovering at the edge cannot beat `slow_ms`); a new value re-times the next firing
-//! from the last one. Intervals shorter than [`MIN_WAKE`] are not woken for one by one: the
+//! (an analog control hovering at the edge cannot beat `slow_ms`); a new value re-times the next
+//! firing from the last one. A note or a chord is different: each hit is a deliberate, discrete
+//! event and fires at once, with no memory of the previous one. Intervals shorter than [`MIN_WAKE`] are not woken for one by one: the
 //! engine wakes every few milliseconds and makes up what fell due (at most [`MAX_BATCH`] at
 //! once), and a pointer move or a scroll then goes out as one call carrying all of them. An
 //! action that queues (key taps, macros, text) never has more than one firing waiting, so letting
@@ -155,9 +156,18 @@ impl Shuttle {
         self.runs.iter().any(|run| run.side.is_some())
     }
 
-    /// A new position of instance `key` (a press, a move).
-    pub fn moved(&mut self, def: &CMapping, info: &OwnerInfo, cx: &mut Cx, key: InstKey, ctx: Ctx) {
-        let CBehavior::Shuttle { up, down, zone } = &def.behavior else {
+    /// A new position of instance `key` (a press, a move). `press`: a new press of the instance
+    /// (for a note or a chord: a hit, which starts afresh).
+    pub fn moved(
+        &mut self,
+        def: &CMapping,
+        info: &OwnerInfo,
+        cx: &mut Cx,
+        key: InstKey,
+        ctx: Ctx,
+        press: bool,
+    ) {
+        let CBehavior::Shuttle { up, down, zone, hits } = &def.behavior else {
             return;
         };
         let now = cx.now;
@@ -184,6 +194,10 @@ impl Shuttle {
             }
         };
         let run = &mut self.runs[i];
+        if press && *hits {
+            // A hit fires at once, whatever fired before.
+            run.last = None;
+        }
         run.ctx = ctx;
         run.interval = zone.interval(d);
         // Leaving the dead zone, or crossing to the other side.
@@ -219,6 +233,10 @@ impl Shuttle {
     pub fn released(&mut self, def: &CMapping, info: &OwnerInfo, cx: &mut Cx, key: InstKey) {
         if let Some(i) = self.runs.iter().position(|run| run.key == key) {
             self.stop(i, def, info, cx);
+            // A note's or a chord's next hit starts afresh: nothing to remember.
+            if matches!(def.behavior, CBehavior::Shuttle { hits: true, .. }) {
+                self.runs.remove(i);
+            }
         }
     }
 
