@@ -395,6 +395,15 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       onChange={(value) => updateDevice(name, (d) => ({ ...d, forward_to: value === NOWHERE ? null : value }))}
                     />
                   </div>
+                  {/* Switched off means left alone in both directions: that wins over passing on. */}
+                  {forward !== null && devices.find((d) => d.name === forward)?.enabled === false && (
+                    <div className="mt-2 flex gap-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
+                      <AlertTriangle size={14} className="mt-[1px] shrink-0" />
+                      <span>
+                        “{forward}” is switched off in this list, so nothing is sent to it. Switch it on to pass this device on.
+                      </span>
+                    </div>
+                  )}
                   <div className="mt-1.5 text-sm leading-snug text-fg-faint">
                     {platform() === "windows"
                       ? "Windows gives a MIDI device to one program at a time. Pass it on to a virtual port (loopMIDI, for one) and point the other program at that port: both then get every message, mapped or not, also while output is paused."
@@ -402,8 +411,6 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                         ? "A copy of every message, mapped or not, also while output is paused: to a virtual port another program listens to (an IAC bus, set up in Audio MIDI Setup), or on to other gear."
                         : "A copy of every message, mapped or not, also while output is paused. (On Linux other programs can usually open the device directly; this is for sending it somewhere else as well.)"}{" "}
                     What comes straight back from a loopback port is recognized as an echo and not acted on.
-                    {platform() === "windows" &&
-                      " If the other program cannot open the port, switch the port off in this list: this app then leaves it alone."}
                   </div>
                 </div>
               )}

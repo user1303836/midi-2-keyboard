@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   FolderOpen,
+  Forward,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -267,6 +268,8 @@ function DeviceItem({ port }: { port: PortStatus }) {
   const config = useApp((state) => state.config);
   const setPanel = useApp((state) => state.setPanel);
   const label = deviceLabel(port.name, config);
+  // Passed on to another port (MIDI thru): worth seeing without opening the dialog.
+  const passedOn = port.state === "connected" ? (config.devices.find((d) => d.name === port.name)?.forward_to ?? null) : null;
   return (
     <Tooltip
       side="right"
@@ -275,9 +278,11 @@ function DeviceItem({ port }: { port: PortStatus }) {
           ? `${port.name} — ${port.error || "could not be opened"}`
           : port.state === "disabled"
             ? `${port.name} — disabled`
-            : port.name !== label
-              ? port.name
-              : null
+            : passedOn
+              ? `${port.name} — everything it sends is passed on to ${passedOn}`
+              : port.name !== label
+                ? port.name
+                : null
       }
     >
       <button
@@ -291,6 +296,7 @@ function DeviceItem({ port }: { port: PortStatus }) {
           <DeviceLed name={port.name} connected={port.state === "connected"} />
         )}
         <span className={cn("min-w-0 flex-1 truncate", port.state === "disabled" && "line-through opacity-60")}>{label}</span>
+        {passedOn && <Forward size={13} className="shrink-0 text-fg-faint" aria-label={`passed on to ${passedOn}`} />}
       </button>
     </Tooltip>
   );
