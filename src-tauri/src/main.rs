@@ -18,16 +18,25 @@
 //!   as status items do there.
 //! - Linux: AppIndicator icons deliver no clicks, so the menu's "Open" item is the way back.
 
-use std::path::Path;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+mod placement;
 
-use m2k_core::{Action, Config, EngineEvent, Profile, Runtime, RuntimeEvent, Snapshot, store};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use m2k_core::{
+    Action, Config, EngineEvent, Profile, Runtime, RuntimeEvent, Settings, Snapshot, hotkey_label,
+    pause_hotkey_problem, store,
+};
+use m2k_output::Key;
+use placement::Placement;
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
+use tauri::window::Color;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcut, Modifiers, Shortcut, ShortcutState};
 
 const EVENT: &str = "m2k:event";
 const MAIN_WINDOW: &str = "main";
@@ -68,6 +77,19 @@ struct AppState {
     /// The main window is closing *to the tray*: the exit request that follows when the last
     /// window is gone is ours to refuse, once. Nothing else is ever refused.
     closing_to_tray: AtomicBool,
+    pause_hotkey: Mutex<PauseHotkey>,
+    /// Where the main window was (for a reopen from the tray and the next start).
+    placement: Arc<Placement>,
+}
+
+/// The system-wide pause shortcut (`Settings::pause_hotkey`) as registered with the OS.
+#[derive(Default)]
+struct PauseHotkey {
+    /// What the settings ask for.
+    keys: Vec<Key>,
+    registered: Option<Shortcut>,
+    /// Why `keys` is not registered; repeated when the window opens.
+    problem: Option<String>,
 }
 
 impl AppState {
@@ -83,13 +105,22 @@ impl AppState {
 
 #[tauri::command]
 fn snapshot(state: State<'_, AppState>) -> Snapshot {
-    state.runtime.snapshot()
+    let mut snapshot = state.runtime.snapshot();
+    // A pause shortcut that does not work is worth hearing about every time the window opens.
+    let hotkey = state.pause_hotkey.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(problem) = &hotkey.problem {
+        snapshot.warnings.push(problem.clone());
+    }
+    snapshot
 }
 
 #[tauri::command]
 fn save_config(app: AppHandle, state: State<'_, AppState>, config: Config) -> Result<Config, String> {
     let saved = state.runtime.set_config(config).map_err(|error| error.to_string())?;
     sync_autostart(&app, saved.settings.launch_at_login);
+    if let Some(problem) = sync_pause_hotkey(&app, &saved.settings.pause_hotkey) {
+        emit_error(&app, problem);
+    }
     refresh_tray(&app);
     Ok(saved)
 }
@@ -257,14 +288,8 @@ fn reveal(path: &Path) -> std::io::Result<()> {
 /// hundred megabytes of browser processes alive for nothing. The engine does not need it.
 fn show_main_window(app: &AppHandle) {
     let window = app.get_webview_window(MAIN_WINDOW).or_else(|| {
-        let config = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW)?.clone();
-        match tauri::WebviewWindowBuilder::from_config(app, &config).and_then(|builder| builder.build()) {
-            Ok(window) => Some(window),
-            Err(error) => {
-                log::error!("could not create the main window: {error}");
-                None
-            }
-        }
+        let state = app.try_state::<AppState>()?;
+        create_main_window(app, &state.placement, state.runtime.config().settings.theme)
     });
     if let Some(window) = window {
         let _ = window.show();
@@ -273,6 +298,65 @@ fn show_main_window(app: &AppHandle) {
     }
     if let Some(state) = app.try_state::<AppState>() {
         state.runtime.set_monitoring(true);
+    }
+}
+
+/// Creates the main window, hidden: where it was last time, and in the background color of the
+/// theme, which the webview shows until the page has painted (instead of a white flash).
+fn create_main_window(app: &AppHandle, placement: &Placement, theme: m2k_core::Theme) -> Option<WebviewWindow> {
+    let config = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW)?.clone();
+    let window = match tauri::WebviewWindowBuilder::from_config(app, &config).and_then(|builder| builder.build()) {
+        Ok(window) => window,
+        Err(error) => {
+            log::error!("could not create the main window: {error}");
+            return None;
+        }
+    };
+    let dark = match theme {
+        m2k_core::Theme::Dark => true,
+        m2k_core::Theme::Light => false,
+        m2k_core::Theme::System => window.theme().map_or(true, |theme| theme != tauri::Theme::Light),
+    };
+    // `--app` in styles.css.
+    let background = if dark { Color(0x0d, 0x0e, 0x12, 0xff) } else { Color(0xf3, 0xf4, 0xf7, 0xff) };
+    let _ = window.set_background_color(Some(background));
+    let minimum = (config.min_width.unwrap_or(0.0), config.min_height.unwrap_or(0.0));
+    placement::restore(&window, placement, minimum);
+    Some(window)
+}
+
+/// The settings as saved, read without side effects (the runtime does the real loading, with
+/// recovery and warnings); defaults when the file cannot be read.
+fn saved_settings(path: &Path) -> Settings {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| store::parse(&text).ok())
+        .map(|(config, _)| config.settings)
+        .unwrap_or_default()
+}
+
+/// Everything the runtime reports, from its threads.
+fn on_runtime_event(app: &AppHandle, event: RuntimeEvent) {
+    // Pause state and profile selection are mirrored in the tray.
+    let status_changed = matches!(&event, RuntimeEvent::Engine { events }
+        if events.iter().any(|e| matches!(e, EngineEvent::Status(_))));
+    // Without a window nobody listens; the UI reads a fresh snapshot when it opens.
+    if app.get_webview_window(MAIN_WINDOW).is_some() {
+        let _ = app.emit(EVENT, &event);
+    }
+    if status_changed {
+        refresh_tray(app);
+    }
+    if let RuntimeEvent::Config { config } = &event {
+        // A hand edit or an import may have changed the pause shortcut. Registering happens on
+        // the main thread; this thread must not wait for it.
+        let keys = config.settings.pause_hotkey.clone();
+        let for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(problem) = sync_pause_hotkey(&for_main, &keys) {
+                emit_error(&for_main, problem);
+            }
+        });
     }
 }
 
@@ -327,6 +411,123 @@ fn sync_autostart(app: &AppHandle, enabled: bool) {
     };
     if let Err(error) = result {
         log::warn!("could not update launch-at-login: {error}");
+    }
+}
+
+/// Registers the pause shortcut the settings ask for, replacing the previous one. Returns what
+/// the user should be told now (`None` also when nothing changed). Main thread only.
+fn sync_pause_hotkey(app: &AppHandle, keys: &[Key]) -> Option<String> {
+    let state = app.try_state::<AppState>()?;
+    let mut hotkey = state.pause_hotkey.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let changed = hotkey.keys != keys;
+    // A shortcut that failed is retried on every save (another program may have let go of it),
+    // but its problem is only reported again when the keys change.
+    if !changed && hotkey.problem.is_none() {
+        return None;
+    }
+    let Some(shortcuts) = app.try_state::<GlobalShortcut<tauri::Wry>>() else {
+        hotkey.keys = keys.to_vec();
+        hotkey.problem = (!keys.is_empty()).then(|| {
+            "System-wide shortcuts are not available on this system, so the pause shortcut does \
+             nothing."
+                .to_string()
+        });
+        return hotkey.problem.clone().filter(|_| changed);
+    };
+    if let Some(previous) = hotkey.registered.take()
+        && let Err(error) = shortcuts.unregister(previous)
+    {
+        log::warn!("could not unregister the pause shortcut: {error}");
+    }
+    hotkey.keys = keys.to_vec();
+    hotkey.problem = None;
+    if keys.is_empty() {
+        return None;
+    }
+    // The Settings field refuses unsafe combinations; a hand-edited config must not get one past
+    // us either (a bare letter would vanish from every application).
+    if let Some(problem) = pause_hotkey_problem(keys) {
+        hotkey.problem = Some(format!("{problem} It was not registered."));
+        return hotkey.problem.clone().filter(|_| changed);
+    }
+    let label = hotkey_label(keys);
+    let registered = pause_shortcut(keys).and_then(|shortcut| {
+        shortcuts.register(shortcut).map(|()| shortcut).map_err(|error| {
+            if error.to_string().contains("already registered") {
+                format!(
+                    "The pause shortcut {label} is already taken by another program, so it does \
+                     nothing. Choose another one in Settings."
+                )
+            } else {
+                format!("The pause shortcut {label} could not be registered ({error}).")
+            }
+        })
+    });
+    match registered {
+        Ok(shortcut) => {
+            hotkey.registered = Some(shortcut);
+            wayland_shortcut_caveat().filter(|_| changed)
+        }
+        Err(problem) => {
+            hotkey.problem = Some(problem.clone());
+            changed.then_some(problem)
+        }
+    }
+}
+
+/// The OS shortcut for `keys`, which [`pause_hotkey_problem`] accepted: modifiers (left and right
+/// alike) plus one other key.
+fn pause_shortcut(keys: &[Key]) -> Result<Shortcut, String> {
+    let mut modifiers = Modifiers::empty();
+    let mut main = None;
+    for &key in keys {
+        modifiers |= match key {
+            Key::ShiftLeft | Key::ShiftRight => Modifiers::SHIFT,
+            Key::ControlLeft | Key::ControlRight => Modifiers::CONTROL,
+            Key::AltLeft | Key::AltRight => Modifiers::ALT,
+            Key::MetaLeft | Key::MetaRight => Modifiers::SUPER,
+            _ => {
+                let code = key.code().parse::<Code>().map_err(|_| {
+                    format!(
+                        "{} cannot be part of a system-wide shortcut, so the pause shortcut was \
+                         not registered.",
+                        key.label()
+                    )
+                })?;
+                main = Some(code);
+                continue;
+            }
+        };
+    }
+    let main = main.ok_or_else(|| "The pause shortcut has no key besides the modifiers.".to_string())?;
+    Ok(Shortcut::new((!modifiers.is_empty()).then_some(modifiers), main))
+}
+
+/// What a registered system-wide shortcut cannot do in this session.
+fn wayland_shortcut_caveat() -> Option<String> {
+    let wayland = cfg!(target_os = "linux")
+        && (std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+            || std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v.eq_ignore_ascii_case("wayland")));
+    wayland.then(|| {
+        "Wayland does not let applications watch the keyboard system-wide: the pause shortcut \
+         only works while an X11 application has focus."
+            .to_string()
+    })
+}
+
+/// The pause shortcut was pressed: pause or resume all output.
+fn toggle_pause(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        let paused = state.runtime.status().paused;
+        state.runtime.set_paused(!paused);
+    }
+}
+
+/// Tells the user about a problem the way the engine does (a toast in the window, when open).
+fn emit_error(app: &AppHandle, message: String) {
+    if app.get_webview_window(MAIN_WINDOW).is_some() {
+        let event = RuntimeEvent::Engine { events: vec![EngineEvent::Error { message }] };
+        let _ = app.emit(EVENT, &event);
     }
 }
 
@@ -581,20 +782,17 @@ fn main() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            let for_events = handle.clone();
-            let runtime = Runtime::start(&store::default_path(), move |event: RuntimeEvent| {
-                // Pause state and profile selection are mirrored in the tray.
-                let status_changed = matches!(&event, RuntimeEvent::Engine { events }
-                    if events.iter().any(|e| matches!(e, EngineEvent::Status(_))));
-                // Without a window nobody listens; the UI reads a fresh snapshot when it opens.
-                if for_events.get_webview_window(MAIN_WINDOW).is_some() {
-                    let _ = for_events.emit(EVENT, &event);
-                }
-                if status_changed {
-                    refresh_tray(&for_events);
-                }
-            });
-            let config = runtime.config();
+            let path = store::default_path();
+            // The runtime (config, engine, the first MIDI port scan) starts on a thread of its
+            // own while the tray and the window with its webview (the slowest part) are created.
+            // Neither needs the other before the page's first request, which this setup holds
+            // back until it returns.
+            let starting = {
+                let (path, for_events) = (path.clone(), handle.clone());
+                std::thread::Builder::new().name("m2k-start".into()).spawn(move || {
+                    Runtime::start(&path, move |event| on_runtime_event(&for_events, event))
+                })
+            };
             // A missing tray must not keep the app from starting: it then simply never hides.
             let has_tray = match setup_tray(&handle) {
                 Ok(()) => true,
@@ -603,24 +801,59 @@ fn main() {
                     false
                 }
             };
+            let placement = Placement::load(path.with_file_name("window.json"));
+            // The window is not created when the app starts in the tray (see tauri.conf.json):
+            // that costs no webview at all. Without a usable tray it always opens.
+            let settings = saved_settings(&path);
+            let in_tray = (launched_minimized || settings.start_minimized)
+                && has_tray
+                && tray_host::present();
+            let window = if in_tray {
+                None
+            } else {
+                create_main_window(&handle, &placement, settings.theme)
+            };
+            let runtime = match starting {
+                Ok(thread) => thread.join().map_err(|_| "the engine could not be started")?,
+                Err(_) => {
+                    let for_events = handle.clone();
+                    Runtime::start(&path, move |event| on_runtime_event(&for_events, event))
+                }
+            };
+            let config = runtime.config();
             app.manage(AppState {
                 runtime,
                 tray: Mutex::new(TrayView::default()),
                 has_tray,
                 quitting: AtomicBool::new(false),
                 closing_to_tray: AtomicBool::new(false),
+                pause_hotkey: Mutex::new(PauseHotkey::default()),
+                placement,
             });
 
             refresh_tray(&handle);
             sync_autostart(&handle, config.settings.launch_at_login);
 
-            // The window is not created at startup (see tauri.conf.json): starting in the tray
-            // costs no webview at all. Without a usable tray it always opens.
-            let tray_usable = handle.state::<AppState>().tray_usable();
-            if (launched_minimized || config.settings.start_minimized) && tray_usable {
-                main_window_gone(&handle);
-            } else {
+            // The system-wide pause shortcut. Added here rather than on the builder so that a
+            // platform without the facility still starts (just without the shortcut).
+            let shortcuts = tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_pause(app);
+                    }
+                })
+                .build();
+            if let Err(error) = handle.plugin(shortcuts) {
+                log::error!("system-wide shortcuts are not available: {error}");
+            }
+            if let Some(problem) = sync_pause_hotkey(&handle, &config.settings.pause_hotkey) {
+                log::warn!("{problem}");
+            }
+
+            if window.is_some() {
                 show_main_window(&handle);
+            } else {
+                main_window_gone(&handle);
             }
             Ok(())
         })
@@ -641,6 +874,9 @@ fn main() {
                     } else {
                         quit_app(app);
                     }
+                }
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    placement::remember(window, &state.placement);
                 }
                 WindowEvent::Destroyed => main_window_gone(app),
                 _ => {}
@@ -674,6 +910,7 @@ fn main() {
             // leave a key held down. Waits until the engine has released everything.
             if let Some(state) = app.try_state::<AppState>() {
                 state.runtime.shutdown();
+                state.placement.flush();
             }
         }
         _ => {}
