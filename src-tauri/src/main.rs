@@ -19,6 +19,7 @@
 //! - Linux: AppIndicator icons deliver no clicks, so the menu's "Open" item is the way back.
 
 mod placement;
+mod session;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -848,6 +849,8 @@ fn main() {
 
             refresh_tray(&handle);
             sync_autostart(&handle, config.settings.launch_at_login);
+            // Sleep, lock and user switching release what is held (see session.rs).
+            session::watch(handle.clone());
 
             // The system-wide pause shortcut. Added here rather than on the builder so that a
             // platform without the facility still starts (just without the shortcut).
