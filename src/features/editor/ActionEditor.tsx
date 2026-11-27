@@ -225,11 +225,16 @@ function MoveFields({
         ]}
         onChange={(mode) => onChange(x, y, mode === "to")}
       />
-      <Label>x</Label>
-      <NumberInput aria-label="X" className="w-[72px]" min={-20000} max={20000} value={x} onChange={(v) => onChange(v, y, absolute)} />
-      <Label>y</Label>
-      <NumberInput aria-label="Y" className="w-[72px]" min={-20000} max={20000} value={y} onChange={(v) => onChange(x, v, absolute)} />
-      <Label>px</Label>
+      {/* Each letter stays with its field: in a narrow slot the pair moves to the next line whole. */}
+      <span className="inline-flex items-center gap-2" title={absolute ? "Pixels from the left edge of the screen" : "Pixels to the right; negative goes left"}>
+        <Label>x</Label>
+        <NumberInput aria-label="X" className="w-[68px]" min={-20000} max={20000} value={x} onChange={(v) => onChange(v, y, absolute)} />
+      </span>
+      <span className="inline-flex items-center gap-2" title={absolute ? "Pixels from the top edge of the screen" : "Pixels down; negative goes up"}>
+        <Label>y</Label>
+        <NumberInput aria-label="Y" className="w-[68px]" min={-20000} max={20000} value={y} onChange={(v) => onChange(x, v, absolute)} />
+        <Label>px</Label>
+      </span>
     </div>
   );
 }
