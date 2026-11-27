@@ -198,8 +198,11 @@ export function KeyComboInput({
           // One line in every state: a hint that wrapped while the field listens would make the
           // field shrink the moment a click elsewhere ends the capture — and the layout under
           // the pointer jump away before that click lands.
-          <span className={cn("min-w-0 flex-1 truncate text-fg-faint", capturing && "text-key")}>
-            {capturing ? "Press a key or shortcut… (Esc cancels)" : placeholder}
+          // In a narrow field the "(Esc cancels)" goes as a whole (it wraps onto a second line
+          // that is not shown) rather than being cut off in the middle of a word.
+          <span className={cn("flex h-5 min-w-0 flex-1 flex-wrap overflow-hidden leading-5 text-fg-faint", capturing && "text-key")}>
+            <span className="max-w-full truncate">{capturing ? "Press a key or shortcut…" : placeholder}</span>
+            {capturing && <span className="whitespace-pre"> (Esc cancels)</span>}
           </span>
         )}
         {capturing && shown.length > 0 && live.length === 0 && (

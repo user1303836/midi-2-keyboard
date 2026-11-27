@@ -69,7 +69,10 @@ function reconcile(previous: Mapping, next: Mapping): Mapping {
   const after = sourceShape(result.source.event);
 
   if (previous.source !== next.source && before !== after) {
-    if (!behaviorTypeInfo(result.behavior.type).fits.includes(after)) {
+    // A shuttle reads its pace from wherever the control is: trimming its travel (which makes a
+    // knob look like a "button" here) or putting it on a note leaves it a shuttle.
+    const stays = result.behavior.type === "shuttle" && (after === "continuous" || after === "button");
+    if (!stays && !behaviorTypeInfo(result.behavior.type).fits.includes(after)) {
       result = { ...result, behavior: defaultBehavior(suggestedBehavior(after, result.source.event), result.behavior) };
     }
   }
@@ -241,6 +244,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
           <Section step="When" tone="midi" title="this comes in">
             <SourceEditor
               source={mapping.source}
+              travel={mapping.behavior.type === "shuttle"}
               onChange={(source, key) => update((m) => ({ ...m, source }), key && `src:${key}`)}
               onLearned={applyLearned}
             />
@@ -795,7 +799,7 @@ function Wizard({
                     : primaryKind !== null && primaryKind !== "keys"
                       ? "Fill in the details below."
                       : mapping.behavior.type === "shuttle" && event.type === "pitch_bend"
-                        ? "First for pushing the wheel up, then the other direction below. It repeats for as long as you push — the further, the faster."
+                        ? "First for pushing it up, then the other direction below."
                         : shape === "relative"
                           ? "First for turning up, then set the other direction below."
                           : "Just press it on your computer keyboard."}

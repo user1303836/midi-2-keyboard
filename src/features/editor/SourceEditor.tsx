@@ -46,17 +46,23 @@ const ENCODING_OPTIONS: { value: ValueEncoding; label: string; hint: string }[] 
   { value: "relative_sign_magnitude", label: "Sign-magnitude", hint: "1 = up, 65 = down" },
 ];
 
+const TRAVEL_HINT =
+  "How far the control really goes. Trim it when a pedal or fader never quite reaches its ends: the fastest pace is where the travel stops.";
+
 export function SourceEditor({
   source,
   onChange,
   onLearned,
   autoLearn = false,
+  travel = false,
 }: {
   source: Source;
   onChange: (source: Source, coalesceKey?: string) => void;
   /** A learn session finished; the parent applies the result (and may adapt the behavior). */
   onLearned: (result: LearnResult) => void;
   autoLearn?: boolean;
+  /** The mapping is a shuttle: the range is the travel its pace is read from, not a "pressed" zone. */
+  travel?: boolean;
 }) {
   const [learning, setLearning] = useState(autoLearn);
   const multipleDevices = useApp((state) => state.ports.filter((p) => p.state === "connected").length > 1);
@@ -261,20 +267,25 @@ export function SourceEditor({
               onChange={(controller) => setEvent({ ...event, controller }, "controller")}
             />
           </Field>
+          {/* These rows keep their height whatever the behavior is: choosing another behavior
+              below (which may narrow or widen the range) must not move the chooser under the
+              pointer. A shuttle reads a position, so it is a knob whatever its travel. */}
           <Field
             label="It is a"
             align="start"
             hint={
-              sourceShape(event) === "continuous"
-                ? "Reacts to every movement."
-                : sourceShape(event) === "button"
-                  ? "Counts as pressed while its value is inside the range below."
-                  : "Sends relative ticks instead of a position."
+              travel && event.encoding === "absolute"
+                ? "The pace follows its place in the travel below."
+                : sourceShape(event) === "continuous"
+                  ? "Reacts to every movement."
+                  : sourceShape(event) === "button"
+                    ? "Pressed while its value is in the range below."
+                    : "Sends relative ticks instead of a position."
             }
           >
             <Segmented
               className="w-full"
-              value={sourceShape(event) as "continuous" | "button" | "relative"}
+              value={travel && event.encoding === "absolute" ? "continuous" : (sourceShape(event) as "continuous" | "button" | "relative")}
               options={[
                 { value: "continuous", label: "Knob / fader" },
                 { value: "button", label: "Button / pedal" },
@@ -289,8 +300,20 @@ export function SourceEditor({
               }
             />
           </Field>
-          {sourceShape(event) === "button" && (
-            <Field label="Pressed when">
+          {event.encoding === "absolute" && (
+            <Field
+              label={
+                <span
+                  title={
+                    travel
+                      ? TRAVEL_HINT
+                      : "The values this mapping reacts to. Narrow it and the control acts like a button that is pressed while the value is inside."
+                  }
+                >
+                  {travel ? "Travel" : sourceShape(event) === "button" ? "Pressed when" : "Range"}
+                </span>
+              }
+            >
               <RangeEditor
                 limit={127}
                 value={event.range}
@@ -459,7 +482,11 @@ export function SourceEditor({
             <Field
               label="Velocity"
               align="start"
-              hint="Only react to hits in this range. Make one mapping per zone to give soft and hard hits different jobs."
+              hint={
+                travel
+                  ? "The softest and the hardest hit that count: the pace runs from one to the other."
+                  : "Only react to hits in this range. Make one mapping per zone to give soft and hard hits different jobs."
+              }
             >
               <RangeEditor
                 limit={127}
@@ -473,9 +500,13 @@ export function SourceEditor({
           )}
           {"range" in event && event.type !== "control_change" && limit !== null && (
             <Field
-              label="Active range"
+              label={travel ? "Travel" : "Active range"}
               align="start"
-              hint="Full range reacts to every movement. Narrow it and the control acts like a button that is pressed while the value is inside."
+              hint={
+                travel
+                  ? TRAVEL_HINT
+                  : "Full range reacts to every movement. Narrow it and the control acts like a button that is pressed while the value is inside."
+              }
             >
               <RangeEditor
                 limit={limit}

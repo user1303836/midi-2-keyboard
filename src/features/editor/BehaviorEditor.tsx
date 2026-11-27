@@ -13,7 +13,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useContext, useState, type ReactNode } from "react";
+import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
@@ -21,7 +21,7 @@ import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { ShuttleRest } from "@/bindings/ShuttleRest";
 import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
-import { NumberInput, Segmented } from "@/components/ui/inputs";
+import { NumberInput, Segmented, Switch } from "@/components/ui/inputs";
 import { Tooltip } from "@/components/ui/overlays";
 import {
   BEHAVIOR_TYPES,
@@ -63,6 +63,12 @@ export function BehaviorIcon({ type }: { type: BehaviorType }) {
   return <>{ICONS[type]}</>;
 }
 
+/**
+ * Where the chooser stood when one of its tiles was clicked (kept outside the component: in
+ * the quick add the whole editor is rebuilt for the new behavior).
+ */
+let clickedAt: number | null = null;
+
 /** The behavior chooser: the ones that suit the source come first and are highlighted. */
 export function BehaviorPicker({
   value,
@@ -73,11 +79,45 @@ export function BehaviorPicker({
   shape: SourceShape;
   onChange: (type: BehaviorType) => void;
 }) {
-  const sorted = [...BEHAVIOR_TYPES].sort(
-    (a, b) => Number(b.fits.includes(shape)) - Number(a.fits.includes(shape)),
-  );
+  // Always in the same places (a row for buttons, a row for knobs and wheels, a row for the
+  // elaborate button gestures): the ones that suit the source stand out, the rest are dimmed.
+  // They used to be sorted by fit, but choosing "Press" for a knob makes it a button, and the
+  // tiles then changed places under the pointer.
+  const sorted = BEHAVIOR_TYPES;
+  // Choosing a behavior can change what is shown above the chooser (a "pressed" range appears
+  // for a knob, a dead zone field goes away…). The tile that was just clicked has to stay under
+  // the pointer, or the next click lands on its neighbour: scroll by whatever the chooser moved.
+  const grid = useRef<HTMLDivElement>(null);
+  // What scrolling cannot make up for (things above got shorter while the panel is already
+  // scrolled to its top) is held open with a spacer, until the pointer or the focus leaves.
+  const [spacer, setSpacer] = useState(0);
+  useLayoutEffect(() => {
+    const node = grid.current;
+    if (!node || clickedAt === null) return;
+    let moved = node.getBoundingClientRect().top - clickedAt;
+    clickedAt = null;
+    if (moved === 0) return;
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowY;
+      if (overflow === "auto" || overflow === "scroll") {
+        const before = parent.scrollTop;
+        parent.scrollTop += moved;
+        moved -= parent.scrollTop - before;
+        break;
+      }
+    }
+    if (moved < -0.5) setSpacer((height) => height - moved);
+  });
   return (
-    <div className="grid grid-cols-3 gap-1.5">
+    <div
+      ref={grid}
+      className="grid grid-cols-3 gap-1.5"
+      style={spacer ? { marginTop: spacer } : undefined}
+      onMouseLeave={() => setSpacer(0)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setSpacer(0);
+      }}
+    >
       {sorted.map((info) => {
         const selected = info.type === value;
         const fits = info.fits.includes(shape);
@@ -98,7 +138,10 @@ export function BehaviorPicker({
             <button
               type="button"
               aria-pressed={selected}
-              onClick={() => onChange(info.type)}
+              onClick={() => {
+                clickedAt = grid.current?.getBoundingClientRect().top ?? null;
+                onChange(info.type);
+              }}
               className={cn(
                 "flex h-[50px] flex-col items-center justify-center gap-1 rounded-lg border text-sm transition-colors",
                 selected
@@ -587,14 +630,19 @@ function ShuttleForm({
   const unit = paceUnit((sides.up ? b.up : null) ?? (sides.down ? b.down : null));
   const span = Math.max(1, travel.max - travel.min);
   const at = (value: number) => `${(Math.min(Math.max(value - travel.min, 0), span) / span) * 100}%`;
+  // Values read as they do everywhere else: pitch bend counts from its middle (+8191 … −8192).
+  const bend = event?.type === "pitch_bend";
+  const shown = (value: number) => (bend ? `${value > 8192 ? "+" : ""}${value - 8192}` : String(value));
   const restText =
     b.dead_zone === 0
-      ? `only ${zone.rest} itself`
+      ? `only ${shown(zone.rest)} itself`
       : rest === "low"
-        ? `values up to ${zone.max}`
+        ? `values up to ${shown(zone.max)}`
         : rest === "high"
-          ? `values from ${zone.min}`
-          : `values ${zone.min}–${zone.max}`;
+          ? `values from ${shown(zone.min)}`
+          : bend
+            ? `${shown(zone.min)} to ${shown(zone.max)}`
+            : `values ${zone.min}–${zone.max}`;
 
   const restRow = (
     <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
@@ -666,12 +714,18 @@ function ShuttleForm({
           <div className="text-sm text-fg-faint" data-shuttle-pace>
             That is {perSecond(shuttleRate(b, 0) * unit.per)} to {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.
           </div>
-          <InlineSwitch
-            label="Gentle start"
-            hint="The pace builds up slowly at first and reaches full speed only at the very end: fine control near rest, where it matters (what game controllers do for a pointer)"
-            checked={b.curve === "squared"}
-            onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
-          />
+          <label
+            className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-fg-muted"
+            title="The pace grows with the square of the distance: fine control near rest, where it matters, and full speed only at the very end (what game controllers do for a pointer)"
+          >
+            <Switch
+              checked={b.curve === "squared"}
+              onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
+              aria-label="Gentle near rest"
+            />
+            <span>Gentle near rest</span>
+            <span className="text-sm text-fg-faint">slow for small pushes, fast only near the end</span>
+          </label>
           <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
             <span className="whitespace-nowrap">Rest zone:</span>
             <NumberInput
@@ -733,8 +787,8 @@ function ShuttleForm({
               ? "Hit the pad to see how fast that is."
               : "Move the control to see how fast that is."
             : now
-              ? `At ${live}: ${both ? (now.side === "up" ? "up, " : "down, ") : ""}${perSecond(now.rate * paceUnit(now.side === "up" ? b.up : b.down).per)} ${paceUnit(now.side === "up" ? b.up : b.down).unit}.`
-              : `At ${live}: at rest.`}
+              ? `At ${shown(live)}: ${both ? (now.side === "up" ? "up, " : "down, ") : ""}${perSecond(now.rate * paceUnit(now.side === "up" ? b.up : b.down).per)} ${paceUnit(now.side === "up" ? b.up : b.down).unit}.`
+              : `At ${shown(live)}: at rest.`}
         </div>
       </div>
     </div>
