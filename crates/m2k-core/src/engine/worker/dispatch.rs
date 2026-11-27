@@ -37,6 +37,9 @@ impl Worker {
         for event in derived.iter() {
             self.dispatch_derived(&index, dev, &device, event, &mut matched);
         }
+        if !self.cx.monitor {
+            return;
+        }
         let log = MidiLog {
             time_us: self.cx.time_us(),
             device,
@@ -58,7 +61,7 @@ impl Worker {
         let Some(edge) = rt.observe(def, &mut self.cx, inst, obs, ctx) else {
             return;
         };
-        if !matched.iter().any(|id| id.as_str() == &*def.id) {
+        if self.cx.monitor && !matched.iter().any(|id| id.as_str() == &*def.id) {
             matched.push(def.id.to_string());
         }
         // Feedback without a device of its own answers the device that last reached it.

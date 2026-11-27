@@ -499,6 +499,7 @@ impl Runtime {
     /// collected at all (status updates still are).
     pub fn set_monitoring(&self, enabled: bool) {
         self.inner.monitoring.store(enabled, Ordering::Relaxed);
+        self.inner.engine.set_monitoring(enabled);
         if !enabled {
             lock(&self.inner.pending).events.clear();
         }

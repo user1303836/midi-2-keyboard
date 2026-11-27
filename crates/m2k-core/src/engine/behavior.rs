@@ -492,7 +492,7 @@ fn fire_action(
 ) {
     if let Some(detail) = cx.failed_condition(&def.conditions) {
         if !quiet {
-            let description = action.describe(&ctx, cx.settings.middle_c_octave);
+            let description = cx.describe(&action, &ctx);
             cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         }
         return;
@@ -558,14 +558,14 @@ fn note_rate_limited(
         return;
     }
     rt.limit_reported = Some(cx.now);
-    let description = action.describe(ctx, cx.settings.middle_c_octave);
+    let description = cx.describe(action, ctx);
     cx.report_skip(&rt.info, description, SkipReason::RateLimited, detail);
 }
 
 /// A firing that is not rate limited (tap-hold, multi-tap, hold pulses).
 fn fire_direct(rt: &MappingRt, def: &CMapping, cx: &mut Cx, action: &CAction, ctx: Ctx) {
     if let Some(detail) = cx.failed_condition(&def.conditions) {
-        let description = action.describe(&ctx, cx.settings.middle_c_octave);
+        let description = cx.describe(action, &ctx);
         cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         return;
     }
@@ -636,7 +636,7 @@ pub fn on_edge(
                     return;
                 }
                 if let Some(detail) = cx.failed_condition(&def.conditions) {
-                    let label = target.hold_label.clone();
+                    let label = cx.label(&target.hold_label);
                     cx.report_skip(&rt.info, label, SkipReason::ConditionFailed, detail);
                     return;
                 }
@@ -669,7 +669,7 @@ pub fn on_edge(
                 cx.disengage(&rt.info, target, false);
                 rt.state = State::Toggle { latched: false, by: None };
             } else if let Some(detail) = cx.failed_condition(&def.conditions) {
-                let label = target.hold_label.clone();
+                let label = cx.label(&target.hold_label);
                 cx.report_skip(&rt.info, label, SkipReason::ConditionFailed, detail);
             } else if cx.engage(&rt.info, target, false) {
                 rt.state = State::Toggle { latched: true, by: Some(ctx.device) };
@@ -1035,8 +1035,8 @@ fn on_tap_hold(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, id: TimerId) {
     }
     if let Some(detail) = cx.failed_condition(&def.conditions) {
         let description = match (hold, hold_target) {
-            (Some(action), _) => action.describe(&ctx, cx.settings.middle_c_octave),
-            (None, Some(target)) => target.hold_label.clone(),
+            (Some(action), _) => cx.describe(action, &ctx),
+            (None, Some(target)) => cx.label(&target.hold_label),
             (None, None) => return,
         };
         cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
@@ -1098,7 +1098,7 @@ fn on_limiter(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, slot: Slot, id: T
         return;
     };
     if let Some(detail) = cx.failed_condition(&def.conditions) {
-        let description = action.describe(&ctx, cx.settings.middle_c_octave);
+        let description = cx.describe(&action, &ctx);
         cx.report_skip(&rt.info, description, SkipReason::ConditionFailed, detail);
         return;
     }

@@ -2,6 +2,7 @@
 //!
 //! Each subcommand lives in its own module so several people can work here without conflicts.
 
+mod bench;
 mod bindings;
 mod devices;
 mod outputs;
@@ -18,7 +19,12 @@ commands:
   run [--config <path>] [--dry-run]
                            run a config headless against the real MIDI inputs (Ctrl+C stops)
   simulate <args>          run a config against scripted MIDI input and print what would be sent
+  bench [options]          measure the engine's hot path (throughput, cost per message, allocations)
   export-bindings [dir]    write the TypeScript bindings (default: src/bindings)";
+
+/// Counts allocations while `m2k bench` measures; otherwise just the system allocator.
+#[global_allocator]
+static ALLOCATOR: bench::CountingAllocator = bench::CountingAllocator;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,6 +36,7 @@ fn main() {
         Some("send") => outputs::send(rest),
         Some("run") => run::run(rest),
         Some("simulate") => simulate::run(rest),
+        Some("bench") => bench::run(rest),
         Some("export-bindings") => bindings::run(rest),
         _ => {
             eprintln!("{USAGE}");

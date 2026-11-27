@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use m2k_midi::MidiMessage;
-use m2k_output::Injector;
 use m2k_output::platform::ForegroundApp;
+use m2k_output::{Injector, Key};
 
 use super::EngineOptions;
 use super::behavior::{self, MappingRt};
@@ -59,6 +59,7 @@ pub enum Command {
     SetConfig(Box<Config>),
     SetInjector(Box<dyn Injector>),
     SetMidiSink(Box<dyn MidiSink>),
+    SetMonitoring(bool),
     MidiOutputsChanged(Vec<String>),
     MidiInputsChanged(Vec<String>),
     DeviceDisconnected(String),
@@ -110,14 +111,16 @@ struct Profiles {
     auto_switched: bool,
 }
 
+/// The current status lives in [`Shared::status`], kept up to date in place.
 #[derive(Default)]
 struct StatusState {
-    current: EngineStatus,
     /// What the sink last received (`None` before the first status).
     emitted: Option<EngineStatus>,
     last_emit: Option<Instant>,
     pending: bool,
     timer: Option<TimerId>,
+    /// Reused for the held keys.
+    held: Vec<Key>,
 }
 
 pub struct Worker {
@@ -186,7 +189,7 @@ pub fn run(
 }
 
 impl Worker {
-    fn new(
+    pub(super) fn new(
         config: Config,
         options: EngineOptions,
         sink: Box<dyn Fn(EngineEvent) + Send>,
@@ -244,6 +247,18 @@ impl Worker {
         worker
     }
 
+    /// One envelope exactly as the loop handles it (for [`super::BenchEngine`]).
+    pub(super) fn step(&mut self, envelope: Envelope) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| self.iteration(Ok(envelope)))) {
+            self.recover(panic);
+        }
+    }
+
+    /// The latest status snapshot.
+    pub(super) fn shared(&self) -> &Arc<Shared> {
+        &self.shared
+    }
+
     /// One loop iteration. `false` = stop.
     fn iteration(&mut self, received: Result<Envelope, RecvTimeoutError>) -> bool {
         match received {
@@ -290,6 +305,7 @@ impl Worker {
                 self.refresh_feedback();
             }
             Command::MidiOutputsChanged(ports) => self.midi_outputs_changed(ports),
+            Command::SetMonitoring(on) => self.cx.monitor = on,
             Command::MidiInputsChanged(connected) => {
                 self.inputs = feedback::Inputs {
                     connected: connected.into_iter().map(Arc::from).collect(),
@@ -732,10 +748,7 @@ impl Worker {
         }
         if self.cx.dirty {
             self.cx.dirty = false;
-            let status = self.build_status();
-            if status != self.status.current {
-                *self.shared.status.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
-                self.status.current = status;
+            if self.update_status() {
                 self.status.pending = true;
             }
         }
@@ -746,10 +759,11 @@ impl Worker {
                 self.status.pending = false;
                 self.cx.timers.cancel_slot(&mut self.status.timer);
                 // Changes that cancelled out within the interval (a tap) need no event.
-                if self.status.emitted.as_ref() != Some(&self.status.current) {
+                let current = self.shared.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                if self.status.emitted.as_ref() != Some(&current) {
                     self.status.last_emit = Some(now);
-                    self.status.emitted = Some(self.status.current.clone());
-                    self.emit(EngineEvent::Status(self.status.current.clone()));
+                    self.status.emitted = Some(current.clone());
+                    self.emit(EngineEvent::Status(current));
                 }
             } else if self.status.timer.is_none() {
                 self.status.timer = Some(self.cx.timers.schedule(due, TimerKind::Status));
@@ -776,28 +790,75 @@ impl Worker {
         }
     }
 
-    fn build_status(&self) -> EngineStatus {
-        let id = |index: Option<usize>| index.map(|i| self.cfg.profiles[i].id.to_string());
-        EngineStatus {
-            paused: self.cx.gate.paused,
-            focus_suspended: self.cx.gate.focus_suspended(),
-            learning: self.cx.gate.learning,
-            selected_profile: id(self.profiles.selected),
-            effective_profile: id(self.profiles.effective),
-            auto_switched: self.profiles.auto_switched,
-            layers: self.cx.layers.names(),
-            held_keys: self.cx.out.held_keys(),
-            engaged_mappings: self
-                .maps
+    /// Brings the shared status snapshot up to date in place; `true` when something changed.
+    /// Only what changed is allocated (every key press changes the held keys, so building a
+    /// whole new status each time was most of what a tap cost).
+    fn update_status(&mut self) -> bool {
+        let mut held = std::mem::take(&mut self.status.held);
+        self.cx.out.held_keys_into(&mut held);
+        let mut guard = self.shared.status.lock().unwrap_or_else(|e| e.into_inner());
+        let status = &mut *guard;
+        let mut changed = false;
+        let mut set = |field: &mut bool, value: bool| {
+            if *field != value {
+                *field = value;
+                changed = true;
+            }
+        };
+        set(&mut status.paused, self.cx.gate.paused);
+        set(&mut status.focus_suspended, self.cx.gate.focus_suspended());
+        set(&mut status.learning, self.cx.gate.learning);
+        set(&mut status.auto_switched, self.profiles.auto_switched);
+        let id = |index: Option<usize>| index.map(|i| &*self.cfg.profiles[i].id);
+        for (field, index) in [
+            (&mut status.selected_profile, self.profiles.selected),
+            (&mut status.effective_profile, self.profiles.effective),
+        ] {
+            if field.as_deref() != id(index) {
+                *field = id(index).map(str::to_string);
+                changed = true;
+            }
+        }
+        if !self.cx.layers.matches(&status.layers) {
+            status.layers = self.cx.layers.names();
+            changed = true;
+        }
+        if status.held_keys != held {
+            std::mem::swap(&mut status.held_keys, &mut held);
+            changed = true;
+        }
+        let engaged = || {
+            self.maps
                 .iter()
                 .zip(&self.cfg.mappings)
                 .filter(|(rt, _)| rt.engaged())
-                .map(|(_, def)| def.id.to_string())
-                .collect(),
-            foreground: self.cx.foreground.as_ref().map(|f| f.app.clone()),
-            backend: self.cx.out.name().to_string(),
-            latency: self.latency,
+                .map(|(_, def)| &*def.id)
+        };
+        if !engaged().eq(status.engaged_mappings.iter().map(String::as_str)) {
+            status.engaged_mappings = engaged().map(str::to_string).collect();
+            changed = true;
         }
+        let foreground = self.cx.foreground.as_ref().map(|f| &f.app);
+        if status.foreground.as_ref() != foreground {
+            status.foreground = foreground.cloned();
+            changed = true;
+        }
+        if status.backend != self.cx.out.name() {
+            status.backend = self.cx.out.name().to_string();
+            changed = true;
+        }
+        if status.latency != self.latency {
+            status.latency = self.latency;
+            changed = true;
+        }
+        drop(guard);
+        self.status.held = held;
+        changed
+    }
+
+    /// Whether `Midi` / `Fired` events are made (for [`super::BenchEngine`]).
+    pub(super) fn set_monitoring(&mut self, on: bool) {
+        self.cx.monitor = on;
     }
 
     // -----------------------------------------------------------------------------------------
@@ -870,7 +931,7 @@ impl Worker {
     }
 
     /// Final cleanup on the engine thread: release everything and deliver the last status.
-    fn stop(&mut self) {
+    pub(super) fn stop(&mut self) {
         // Lights keep showing the state the app was in.
         self.fb_enabled = false;
         let _ = catch_unwind(AssertUnwindSafe(|| {

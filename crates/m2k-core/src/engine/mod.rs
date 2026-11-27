@@ -44,7 +44,7 @@ mod worker;
 
 use std::sync::{Arc, Mutex};
 use std::thread::{JoinHandle, ThreadId};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
 use m2k_midi::MidiMessage;
@@ -122,6 +122,12 @@ impl Engine {
     /// Everything held is released through the old backend first.
     pub fn set_injector(&self, injector: Box<dyn Injector>) {
         self.post(Command::SetInjector(injector));
+    }
+
+    /// Whether anybody is looking at the monitor. Off, the engine does not even make its
+    /// per-message events (`Midi`, `Fired`); status and error events are unaffected.
+    pub fn set_monitoring(&self, on: bool) {
+        self.post(Command::SetMonitoring(on));
     }
 
     /// Replaces the MIDI output (for example once the output ports are available).
@@ -225,6 +231,50 @@ impl Engine {
     /// Same as [`Engine::stop`], consuming the handle.
     pub fn shutdown(self) {
         self.stop();
+    }
+}
+
+/// Drives the real engine on the calling thread, one message at a time, for `m2k bench`. Each
+/// message is processed exactly as the engine thread processes it (the timers due before it, the
+/// message, the timers due now, feedback, event delivery), only without the channel and the
+/// thread hop, so its cost can be measured. A diagnostic, not part of the app's API.
+#[doc(hidden)]
+pub struct BenchEngine {
+    worker: worker::Worker,
+    _commands: Receiver<Envelope>,
+}
+
+#[doc(hidden)]
+impl BenchEngine {
+    pub fn new(
+        config: Config,
+        options: EngineOptions,
+        sink: impl Fn(EngineEvent) + Send + 'static,
+    ) -> BenchEngine {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let worker =
+            worker::Worker::new(config, options, Box::new(sink), Arc::new(Shared::default()), tx);
+        BenchEngine { worker, _commands: rx }
+    }
+
+    /// One message from `device` that arrived at `at` (never before the previous one). The
+    /// device name is what `Engine::midi` copies on the caller's thread.
+    pub fn midi(&mut self, device: String, message: MidiMessage, at: Instant) {
+        self.worker.step(Envelope { at, command: Command::Midi { device, message } });
+    }
+
+    pub fn status(&self) -> EngineStatus {
+        self.worker.shared().status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Whether the engine makes monitor events (as [`Engine::set_monitoring`]).
+    pub fn set_monitoring(&mut self, on: bool) {
+        self.worker.set_monitoring(on);
+    }
+
+    /// Releases everything, as stopping the engine does.
+    pub fn finish(mut self) {
+        self.worker.stop();
     }
 }
 

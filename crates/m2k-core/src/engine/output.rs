@@ -333,13 +333,13 @@ impl Output {
         !self.stuck_keys.is_empty() || !self.stuck_buttons.is_empty()
     }
 
-    /// Keys down at the OS because of the engine: held ones and stuck ones.
-    pub fn held_keys(&self) -> Vec<Key> {
-        let mut keys: Vec<Key> = self.keys.keys().copied().collect();
-        keys.extend(self.stuck_keys.iter().copied());
-        keys.sort();
-        keys.dedup();
-        keys
+    /// Keys down at the OS because of the engine: held ones and stuck ones (sorted), into `out`.
+    pub fn held_keys_into(&self, out: &mut Vec<Key>) {
+        out.clear();
+        out.extend(self.keys.keys().copied());
+        out.extend(self.stuck_keys.iter().copied());
+        out.sort();
+        out.dedup();
     }
 
     /// Swaps the backend. Call [`Output::release_everything`] first; keys the old backend could

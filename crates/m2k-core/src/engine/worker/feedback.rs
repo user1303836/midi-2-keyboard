@@ -182,9 +182,13 @@ impl Worker {
     fn send_feedback(&mut self, info: &OwnerInfo, target: &FbTarget, message: &CSend, on: bool) {
         // `Incoming` stands for 127 in `on` and 0 in `off`.
         let incoming = if on { 127 } else { 0 };
-        let text = message.text(incoming, self.cx.settings.middle_c_octave);
-        let verb = if on { "light on" } else { "light off" };
-        let description = format!("{verb}: {text} \u{2192} \"{}\"", target.name());
+        let description = if self.cx.monitor {
+            let text = message.text(incoming, self.cx.settings.middle_c_octave);
+            let verb = if on { "light on" } else { "light off" };
+            format!("{verb}: {text} \u{2192} \"{}\"", target.name())
+        } else {
+            String::new()
+        };
         match target {
             FbTarget::Port(port) => match message.send(self.cx.midi.as_ref(), port, incoming) {
                 Ok(()) => self.cx.report(info, description, Outcome::Sent),

@@ -191,6 +191,13 @@ impl Layers {
         false
     }
 
+    /// Whether `names` (as [`Layers::names`] gives them: sorted, no duplicates) are exactly the
+    /// active layers.
+    pub fn matches(&self, names: &[String]) -> bool {
+        let held_only = self.held.keys().filter(|name| !self.latched.contains(*name)).count();
+        self.latched.len() + held_only == names.len() && names.iter().all(|n| self.is_active(n))
+    }
+
     /// Forgets every hold (their holders were reset); latched layers stay.
     pub fn release_held(&mut self) {
         self.held.clear();
@@ -259,6 +266,9 @@ pub struct Cx {
     /// Outbox index of the `Fired` event whose output is being sent right now: a backend
     /// failure turns that event's outcome into `Failed` instead of adding another event.
     firing: Option<usize>,
+    /// Somebody is watching the monitor. Off, no `Midi` / `Fired` events (nor their
+    /// descriptions) are made at all.
+    pub monitor: bool,
 }
 
 impl Cx {
@@ -289,7 +299,22 @@ impl Cx {
             selectable: Vec::new(),
             failures: FailureLog::default(),
             firing: None,
+            monitor: true,
         }
+    }
+
+    /// What `action` does, for the monitor (nothing when nobody watches it).
+    pub fn describe(&self, action: &CAction, ctx: &Ctx) -> String {
+        if self.monitor {
+            action.describe(ctx, self.settings.middle_c_octave)
+        } else {
+            String::new()
+        }
+    }
+
+    /// A prepared monitor label (nothing when nobody watches the monitor).
+    pub fn label(&self, label: &str) -> String {
+        if self.monitor { label.to_string() } else { String::new() }
     }
 
     pub fn time_us(&self) -> u64 {
@@ -309,6 +334,9 @@ impl Cx {
     // ----- reporting -----
 
     pub fn report(&mut self, info: &OwnerInfo, description: String, outcome: Outcome) {
+        if !self.monitor {
+            return;
+        }
         self.outbox.push(EngineEvent::Fired(FiredLog {
             time_us: self.time_us(),
             profile_id: info.profile_id.to_string(),
@@ -361,7 +389,7 @@ impl Cx {
     ) -> R {
         let index = self.outbox.len();
         self.report(info, description, Outcome::Sent);
-        let outer = self.firing.replace(index);
+        let outer = std::mem::replace(&mut self.firing, self.monitor.then_some(index));
         let result = send(self);
         self.firing = outer;
         result
@@ -454,7 +482,7 @@ impl Cx {
     pub fn execute(&mut self, info: &OwnerInfo, action: &CAction, ctx: Ctx, gated: bool) -> bool {
         use super::compile::ActionKind;
 
-        let description = action.describe(&ctx, self.settings.middle_c_octave);
+        let description = self.describe(action, &ctx);
         if gated && let Some(reason) = self.gate.check(action.class) {
             self.report_skip(info, description, reason, String::new());
             return false;
@@ -519,7 +547,10 @@ impl Cx {
                 match self.midi_port(midi.device.as_ref(), &ctx) {
                     Ok(port) => {
                         let octave = self.settings.middle_c_octave;
-                        let description = midi.describe(Some(&port), incoming, octave);
+                        let description = match self.monitor {
+                            true => midi.describe(Some(&port), incoming, octave),
+                            false => String::new(),
+                        };
                         match midi.send.send(self.midi.as_ref(), &port, incoming) {
                             Ok(()) => self.report(info, description, Outcome::Sent),
                             Err(error) => self.report_failed_once(info, description, error),
@@ -585,10 +616,12 @@ impl Cx {
     /// it. Conditions are the caller's business. Returns whether it was engaged.
     pub fn engage(&mut self, info: &OwnerInfo, target: &CHoldTarget, auto_repeat: bool) -> bool {
         if let Some(reason) = self.gate.check(target.class()) {
-            self.report_skip(info, target.hold_label.clone(), reason, String::new());
+            let label = self.label(&target.hold_label);
+            self.report_skip(info, label, reason, String::new());
             return false;
         }
-        self.report_sent(info, target.hold_label.clone(), |cx| match &target.what {
+        let label = self.label(&target.hold_label);
+        self.report_sent(info, label, |cx| match &target.what {
             HoldWhat::Keys(keys) => {
                 let emulate = auto_repeat && !cx.out.repeats_held_keys();
                 cx.hold_keys(info, keys, emulate);
@@ -605,7 +638,8 @@ impl Cx {
     /// Disengages a hold target. Always goes through. `immediate` releases all keys at once
     /// (forced releases); otherwise keys come up in reverse order with the key stagger.
     pub fn disengage(&mut self, info: &OwnerInfo, target: &CHoldTarget, immediate: bool) {
-        self.report_sent(info, target.release_label.clone(), |cx| match &target.what {
+        let label = self.label(&target.release_label);
+        self.report_sent(info, label, |cx| match &target.what {
             HoldWhat::Keys(_) => cx.unhold_keys(info.owner, immediate),
             HoldWhat::Button(button) => cx.release_button(info, *button),
             HoldWhat::Layer(layer) => {
