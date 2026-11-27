@@ -84,6 +84,7 @@
 //!   and do so without a size limit: a device that starts a SysEx and never ends it can make that
 //!   port swallow everything that follows. Our parser's cap applies to what midir hands over.
 
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
@@ -312,6 +313,27 @@ impl Drop for InputManager {
 
 type Sink = dyn Fn(InputEvent) + Send + Sync;
 
+thread_local! {
+    /// How many sections on this thread are catching their own panics right now.
+    static CATCHING: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Whether a panic on this thread, right now, would be caught here: the thread is inside the
+/// MIDI input callback or a delivery to the sink, which catch their panics and go on. For a
+/// panic hook that has to tell such a panic from one that ends the process
+/// (`m2k_output::install_panic_release` leaves these alone).
+pub fn catching_panics() -> bool {
+    CATCHING.try_with(|depth| depth.get() > 0).unwrap_or(false)
+}
+
+/// `catch_unwind`, with the thread counted as catching (see [`catching_panics`]) while `f` runs.
+fn guarded<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
+    CATCHING.with(|depth| depth.set(depth.get() + 1));
+    let result = catch_unwind(AssertUnwindSafe(f));
+    CATCHING.with(|depth| depth.set(depth.get() - 1));
+    result
+}
+
 /// What the OS callbacks need: the sink and the clock.
 struct Delivery {
     sink: Box<Sink>,
@@ -326,7 +348,7 @@ impl Delivery {
     /// Calls the sink. A panicking sink must not unwind into an OS callback (that aborts the
     /// process) or kill the input thread.
     fn send(&self, event: InputEvent) {
-        if catch_unwind(AssertUnwindSafe(|| (self.sink)(event))).is_err() {
+        if guarded(|| (self.sink)(event)).is_err() {
             log::error!("the MIDI input event sink panicked");
         }
     }
@@ -701,7 +723,8 @@ impl Drop for Connection {
 /// it: if decoding panics, the bytes of that callback are dropped, the parser starts over (a SysEx
 /// in progress is lost), it is logged once per port, and the port stays open. The gate cannot
 /// wedge the port afterwards: `lock` takes a poisoned guard anyway, and the poison is cleared.
-/// (The sink is guarded separately, by [`Delivery::send`].)
+/// (The sink is guarded separately, by [`Delivery::send`].) Both count as catching for
+/// [`catching_panics`], so the panic hook does not let go of the keys held meanwhile.
 fn port_callback(
     delivery: Arc<Delivery>,
     port: Arc<str>,
@@ -710,7 +733,7 @@ fn port_callback(
     let mut parser = Parser::new();
     let mut failed_before = false;
     move |_os_time, bytes, _| {
-        let handled = catch_unwind(AssertUnwindSafe(|| {
+        let handled = guarded(|| {
             let open = lock(&gate);
             if !*open {
                 return;
@@ -720,7 +743,7 @@ fn port_callback(
                 delivery.send(InputEvent::Message { port: port.clone(), time_us, message });
             });
             drop(open);
-        }));
+        });
         if handled.is_err() {
             parser = Parser::new();
             gate.clear_poison();

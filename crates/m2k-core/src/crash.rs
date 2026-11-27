@@ -3,10 +3,12 @@
 //! A panic outside the app's own threads (on the main thread, in an OS callback, in a library)
 //! usually ends the process. [`install`] adds a panic hook that appends an entry to `crash.log`
 //! in the config directory, after the hooks installed before it have run (install it after
-//! `m2k_output::install_panic_release`, so every held key is released first). Panics on the
-//! app's own `m2k-` threads are logged too, marked `internal` instead of `crash`: the engine
-//! recovers from those by itself, so they only help whoever debugs it later. The file keeps the
-//! last few entries. The hook uses plain `std::fs` and no lock, and never runs inside itself.
+//! `m2k_output::install_panic_release`, so every held key is released first). Panics the process
+//! goes on from are logged too, marked `internal` instead of `crash`: those on the app's own
+//! `m2k-` threads (the engine recovers from them by itself) and those caught where they happen
+//! (`m2k_midi::input::catching_panics`); they only help whoever debugs it later. A panic that
+//! makes the process abort is a `crash` wherever it happens. The file keeps the last few
+//! entries. The hook uses plain `std::fs` and no lock, and never runs inside itself.
 //!
 //! At the next start [`startup_notice`] says whether the previous run crashed (a `crash` entry
 //! newer than the last clean exit, which [`clean_exit`] records) and that has not been reported
@@ -74,7 +76,8 @@ pub fn install(dir: PathBuf, app: &'static str) {
 fn write_entry(dir: &Path, app: &str, info: &std::panic::PanicHookInfo<'_>) {
     let thread = std::thread::current();
     let name = thread.name().unwrap_or("unnamed");
-    let kind = if name.starts_with("m2k-") { "internal" } else { "crash" };
+    let goes_on = name.starts_with("m2k-") || m2k_midi::input::catching_panics();
+    let kind = if goes_on && !m2k_output::panic_aborts(info) { "internal" } else { "crash" };
     let payload = info.payload();
     let message = payload
         .downcast_ref::<&str>()

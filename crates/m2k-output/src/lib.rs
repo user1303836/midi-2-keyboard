@@ -22,7 +22,7 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
-pub use emergency::{install_panic_release, release_held};
+pub use emergency::{install_panic_release, panic_aborts, release_held};
 pub use key::{Key, MouseButton};
 
 /// Marker carried by every injected event where the platform has room for one (`dwExtraInfo`

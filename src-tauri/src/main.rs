@@ -762,7 +762,7 @@ fn wait_for_exit(_pid: u32) {}
 fn main() {
     // Whatever panics from here on, nothing this process pressed stays down; and a crash leaves
     // an entry in crash.log, which the next start mentions once.
-    m2k_output::install_panic_release();
+    m2k_output::install_panic_release(m2k_midi::input::catching_panics);
     m2k_core::crash::install(
         store::default_dir(),
         concat!("MIDI 2 Keyboard ", env!("CARGO_PKG_VERSION")),

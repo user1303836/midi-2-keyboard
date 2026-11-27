@@ -72,12 +72,15 @@ pub fn release_held() {
 /// Installs a panic hook that calls [`release_held`] before the panic is reported (and before
 /// the process aborts, when the panic cannot unwind), then hands over to the previous hook.
 ///
-/// Panics on the threads of midi-2-keyboard itself (named `m2k-...`) are left alone: the engine
-/// thread releases everything itself when it recovers from one, and the others hold no keys.
-/// That leaves the main thread (a command, a window or tray event), OS callback threads (MIDI
-/// input) and the threads of libraries, where a panic usually ends the process. Installing it
-/// twice does nothing.
-pub fn install_panic_release() {
+/// It releases for a panic that can end the process: on the main thread (a command, a window or
+/// tray event), in an OS callback, in a library's thread. It leaves alone the panics the process
+/// goes on from, where the engine still holds what it holds: those on the threads of
+/// midi-2-keyboard itself (named `m2k-...`; the engine releases everything itself when it
+/// recovers from one, and the others hold no keys), and those inside a section that catches its
+/// own panics, which `caught` reports for the current thread (`m2k_midi::input::catching_panics`:
+/// the MIDI input callback). A panic that makes the process abort ([`panic_aborts`]) releases
+/// wherever it happens. Installing it twice does nothing.
+pub fn install_panic_release(caught: fn() -> bool) {
     static INSTALLED: AtomicBool = AtomicBool::new(false);
     if INSTALLED.swap(true, Ordering::SeqCst) {
         return;
@@ -85,11 +88,22 @@ pub fn install_panic_release() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let ours = std::thread::current().name().is_some_and(|name| name.starts_with("m2k-"));
-        if !ours {
+        if panic_aborts(info) || !(ours || caught()) {
             release_held();
         }
         previous(info);
     }));
+}
+
+/// Whether the process aborts after this panic, whatever would have caught it: a panic that
+/// reached a function that cannot unwind (an OS callback), or a destructor that panicked while
+/// unwinding. Rust reports those with these words, after the hook has seen the panic that led
+/// there (checked with Rust 1.99). Should the words change, such a panic counts as any other.
+pub fn panic_aborts(info: &std::panic::PanicHookInfo<'_>) -> bool {
+    matches!(
+        info.payload().downcast_ref::<&str>().copied(),
+        Some("panic in a function that cannot unwind" | "panic in a destructor during cleanup")
+    )
 }
 
 /// An injector whose presses are recorded for [`release_held`].
