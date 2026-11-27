@@ -601,6 +601,8 @@ impl Worker {
         let mut timer = state.sensing_timer.take();
         self.cx.timers.cancel_slot(&mut timer);
         self.cx.dirty = true;
+        // Lights that answered it look for their output again.
+        self.fb_due = true;
         released
     }
 }

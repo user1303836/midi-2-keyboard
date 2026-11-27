@@ -34,35 +34,57 @@ pub(super) struct FinalOff {
 /// device; (3) the output paired with the device that last reached it; (4) before anything
 /// reached it, the output paired with the connected input when exactly one connected input has
 /// one. `None`: nowhere yet.
+///
+/// Only inputs that are open right now count (once the runtime has said which are), and an output
+/// that is missing or switched off is never a target to send to.
 fn resolve(
     cx: &Cx,
     def: &CMapping,
     fb: &CFeedback,
     last: Option<DeviceId>,
-    inputs: &[Arc<str>],
+    inputs: &Inputs,
 ) -> Option<FbTarget> {
+    let usable = |port: Arc<str>| match cx.midi.unavailable(&port) {
+        None => FbTarget::Port(port),
+        Some(_) => FbTarget::Missing(port),
+    };
     if let Some(port) = &fb.device {
-        let present = cx.midi.has_port(port);
-        return Some(if present {
-            FbTarget::Port(port.clone())
-        } else {
-            FbTarget::Missing(port.clone())
-        });
+        return Some(usable(port.clone()));
     }
-    let input: Arc<str> = match (&def.source.device, last.and_then(|d| cx.devices.name(d))) {
+    let last = last.and_then(|d| cx.devices.name(d)).filter(|name| inputs.open(name));
+    let input: Arc<str> = match (&def.source.device, last) {
         (Some(device), _) => Arc::from(&**device),
         (None, Some(name)) => name.clone(),
         (None, None) => {
-            let mut paired = inputs.iter().filter_map(|input| cx.midi.paired_output(input));
+            let mut paired = inputs
+                .connected
+                .iter()
+                .filter_map(|input| cx.midi.paired_output(input))
+                .filter(|output| cx.midi.unavailable(output).is_none());
             let only = paired.next()?;
             return paired.next().is_none().then(|| FbTarget::Port(Arc::from(only)));
         }
     };
     Some(match cx.midi.paired_output(&input) {
-        Some(output) if *output == *input => FbTarget::Port(input),
-        Some(output) => FbTarget::Port(Arc::from(output)),
+        Some(output) if *output == *input => usable(input),
+        Some(output) => usable(Arc::from(output)),
         None => FbTarget::Missing(input),
     })
+}
+
+/// The MIDI inputs the runtime reports as open.
+#[derive(Default)]
+pub(super) struct Inputs {
+    pub connected: Vec<Arc<str>>,
+    /// The runtime has reported them (until then, as in `m2k simulate` without `inputs` lines,
+    /// a device that sends counts as open).
+    pub known: bool,
+}
+
+impl Inputs {
+    fn open(&self, name: &Arc<str>) -> bool {
+        !self.known || self.connected.contains(name)
+    }
 }
 
 impl Worker {
@@ -76,7 +98,10 @@ impl Worker {
         }
         self.fb_due = false;
         for owed in std::mem::take(&mut self.fb_final) {
-            self.send_feedback(&owed.info, &FbTarget::Port(owed.port), &owed.off, false);
+            // Gone or switched off since: leave it alone.
+            if self.cx.midi.unavailable(&owed.port).is_none() {
+                self.send_feedback(&owed.info, &FbTarget::Port(owed.port), &owed.off, false);
+            }
         }
         if self.feedback.is_empty() {
             return;
@@ -143,6 +168,7 @@ impl Worker {
         if let Some((old, true)) = &last
             && *old != port
             && let Some(off) = &off
+            && self.cx.midi.unavailable(old).is_none()
         {
             self.send_feedback(&info, &FbTarget::Port(old.clone()), off, false);
         }
@@ -166,7 +192,11 @@ impl Worker {
             },
             FbTarget::Missing(port) => {
                 if self.fb_missing.insert(port.clone()) {
-                    let error = format!("there is no MIDI output named \"{port}\"");
+                    let error = self
+                        .cx
+                        .midi
+                        .unavailable(port)
+                        .unwrap_or_else(|| format!("there is no MIDI output named \"{port}\""));
                     self.cx.report(info, description, Outcome::Failed { error });
                 }
             }

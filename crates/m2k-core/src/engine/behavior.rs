@@ -1187,6 +1187,10 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
 pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: DeviceId) -> bool {
     let latched_here =
         matches!(rt.state, State::Toggle { latched: true, by: Some(by) } if by == device);
+    // Feedback no longer answers a device that is gone.
+    if rt.fb.last_device == Some(device) {
+        rt.fb.last_device = None;
+    }
     let before = rt.instances.len();
     rt.instances.retain(|i| i.key.device() != device);
     rt.step_refs.retain(|(k, _)| k.device() != device);

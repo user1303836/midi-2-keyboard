@@ -154,8 +154,8 @@ pub struct Worker {
     fb_final: Vec<feedback::FinalOff>,
     /// Bumped whenever outputs or feedback targets may have changed.
     outputs_generation: u64,
-    /// Connected MIDI inputs, as the runtime reports them (feedback's last resort).
-    inputs: Vec<Arc<str>>,
+    /// Open MIDI inputs, as the runtime reports them (where feedback may answer).
+    inputs: feedback::Inputs,
     cx: Cx,
 }
 
@@ -232,7 +232,7 @@ impl Worker {
             fb_missing: HashSet::new(),
             fb_final: Vec::new(),
             outputs_generation: 0,
-            inputs: Vec::new(),
+            inputs: feedback::Inputs::default(),
             cx,
         };
         // The first install runs outside the loop's protection: a panic here must not take the
@@ -291,7 +291,10 @@ impl Worker {
             }
             Command::MidiOutputsChanged(ports) => self.midi_outputs_changed(ports),
             Command::MidiInputsChanged(connected) => {
-                self.inputs = connected.into_iter().map(Arc::from).collect();
+                self.inputs = feedback::Inputs {
+                    connected: connected.into_iter().map(Arc::from).collect(),
+                    known: true,
+                };
                 self.outputs_generation += 1;
                 self.refresh_feedback();
             }

@@ -537,17 +537,25 @@ impl Cx {
     /// The output port for a send: the configured one, or the one named like the device the
     /// triggering message came from (back to the controller itself).
     pub fn midi_port(&self, device: Option<&Arc<str>>, ctx: &Ctx) -> Result<Arc<str>, String> {
-        match device {
-            Some(name) if self.midi.has_port(name) => Ok(name.clone()),
-            Some(name) => Err(format!("there is no MIDI output named \"{name}\"")),
+        let port = match device {
+            Some(name) => name.clone(),
             None => match self.devices.name(ctx.device) {
                 Some(input) => match self.midi.paired_output(input) {
-                    Some(output) if *output == **input => Ok(input.clone()),
-                    Some(output) => Ok(Arc::from(output)),
-                    None => Err(format!("there is no MIDI output named \"{input}\"")),
+                    Some(output) if *output == **input => input.clone(),
+                    Some(output) => Arc::from(output),
+                    None => {
+                        return Err(self.midi.unavailable(input).unwrap_or_else(|| {
+                            format!("there is no MIDI output named \"{input}\"")
+                        }));
+                    }
                 },
-                None => Err("choose an output (no message came from a device)".into()),
+                None => return Err("choose an output (no message came from a device)".into()),
             },
+        };
+        // Missing, or switched off: nothing is sent.
+        match self.midi.unavailable(&port) {
+            None => Ok(port),
+            Some(problem) => Err(problem),
         }
     }
 

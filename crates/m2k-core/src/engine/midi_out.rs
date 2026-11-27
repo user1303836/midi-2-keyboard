@@ -19,6 +19,13 @@ pub trait MidiSink: Send {
     /// Whether an output port with this name exists (it may only be opened on first use).
     fn has_port(&self, name: &str) -> bool;
 
+    /// Why nothing may be sent to `port` right now (`None`: it may), in the user's terms. The
+    /// engine asks before every send and sends nothing to such a port. By default: it does not
+    /// exist.
+    fn unavailable(&self, port: &str) -> Option<String> {
+        (!self.has_port(port)).then(|| format!("there is no MIDI output named \"{port}\""))
+    }
+
     /// The output that answers the input port called `input` (a "Send MIDI" without a port
     /// goes back to the device the message came from). By default the output of the same name;
     /// the app's sink also pairs the extra ports Windows names `MIDIINn (…)` / `MIDIOUTn (…)`.

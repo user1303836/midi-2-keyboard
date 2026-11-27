@@ -16,7 +16,7 @@ use m2k_core::{
     Config, EngineEvent, EngineStatus, Outcome, Runtime, RuntimeEvent, RuntimeOptions, SkipReason,
     Snapshot, store,
 };
-use m2k_midi::input::PortStatus;
+use m2k_midi::input::{PortState, PortStatus};
 
 use crate::devices::{describe_derived, describe_message, describe_state};
 
@@ -41,6 +41,23 @@ status and port change. Ctrl+C stops it and releases everything that is held.
 fn usage_error(message: &str) -> i32 {
     eprintln!("m2k run: {message}\n\n{}", usage());
     2
+}
+
+/// `Faderfox EC4 (not open), GS Synth (open)`: whether anything was opened shows at a glance.
+fn output_list(outputs: &[PortStatus]) -> String {
+    if outputs.is_empty() {
+        return "none".to_string();
+    }
+    let state = |port: &PortStatus| match port.state {
+        PortState::Connected => "open",
+        PortState::Error => "error",
+        _ => "not open",
+    };
+    outputs
+        .iter()
+        .map(|port| format!("{} ({})", port.name, state(port)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn run(args: &[String]) -> i32 {
@@ -204,12 +221,13 @@ impl Printer {
         } else {
             self.out(format_args!("  output   NOT WORKING: {}", snapshot.backend_error));
         }
+        let outputs = output_list(&snapshot.outputs);
         if dry_run {
-            self.out("  midi out DRY RUN: nothing is sent to MIDI outputs");
+            self.out(format_args!("  midi out DRY RUN, nothing is sent: {outputs}"));
+        } else if std::env::var_os("M2K_NO_MIDI_OUT").is_some_and(|value| !value.is_empty()) {
+            self.out(format_args!("  midi out SWITCHED OFF (M2K_NO_MIDI_OUT): {outputs}"));
         } else {
-            let names: Vec<&str> = snapshot.outputs.iter().map(|port| port.name.as_str()).collect();
-            let names = if names.is_empty() { "none".to_string() } else { names.join(", ") };
-            self.out(format_args!("  midi out {names}"));
+            self.out(format_args!("  midi out {outputs}"));
         }
         if !snapshot.permissions.hint.is_empty() {
             self.out(format_args!("  note     {}", snapshot.permissions.hint));
@@ -229,8 +247,7 @@ impl Printer {
             }
             RuntimeEvent::Ports { ports } => self.ports_changed(ports),
             RuntimeEvent::Outputs { outputs } => {
-                let names: Vec<String> = outputs.iter().map(|port| port.name.clone()).collect();
-                self.line(None, "OUT", format!("MIDI outputs: {}", names.join(", ")));
+                self.line(None, "OUT", format!("MIDI outputs: {}", output_list(&outputs)));
             }
             RuntimeEvent::Permissions { permissions, backend_error, .. } => {
                 let output = if permissions.can_inject { "works" } else { "blocked" };

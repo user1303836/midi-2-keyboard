@@ -17,12 +17,12 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use m2k_midi::input::{InputEvent, InputManager, InputOptions, PortPolicy, PortState, PortStatus};
-use m2k_midi::output::{OutputEvent, OutputManager, OutputOptions, paired_output_name};
+use m2k_midi::output::{OutputEvent, OutputManager, OutputOptions, SendError, paired_output_name};
 use m2k_output::platform::{self, Permissions};
 use m2k_output::{Injector, Key, NullInjector};
 
 use crate::app::{AppInfo, RuntimeEvent, Snapshot};
-use crate::engine::{Engine, EngineOptions, MidiSink, NullMidiSink};
+use crate::engine::{Engine, EngineOptions, MidiSink};
 use crate::events::{EngineEvent, EngineStatus};
 use crate::model::{Action, Config};
 use crate::store;
@@ -89,6 +89,9 @@ struct Inner {
     outputs: Mutex<Vec<PortStatus>>,
     /// The output port names, shared with the engine's [`OutputSink`].
     output_names: Arc<Mutex<Vec<String>>>,
+    /// Outputs switched off under MIDI devices (and the outputs paired with those inputs):
+    /// the manager's policy, shared with the engine's [`OutputSink`].
+    output_disabled: Arc<Mutex<Vec<String>>>,
     permissions: Mutex<Permissions>,
     backend_error: Mutex<String>,
     /// Keys the current output backend cannot send (shown as unavailable in the UI).
@@ -142,26 +145,85 @@ fn unsupported_keys(injector: &dyn Injector) -> Vec<Key> {
 /// The app's own virtual MIDI input (macOS / Linux), which other programs see as an output.
 const VIRTUAL_PORT: &str = "MIDI 2 Keyboard";
 
-/// The engine's MIDI output: m2k-midi's [`OutputManager`], with the port names at hand so the
-/// engine thread never copies the port list.
+/// Set (to anything non-empty): no MIDI is sent at all, the outputs are only listed. For agents
+/// and cautious users who run the real app.
+const NO_MIDI_OUT: &str = "M2K_NO_MIDI_OUT";
+
+fn switched_off(port: &str) -> String {
+    format!("\u{201C}{port}\u{201D} is switched off under MIDI devices")
+}
+
+/// The engine's MIDI output: m2k-midi's [`OutputManager`], with the port names and the switched
+/// off ones at hand so the engine thread never copies the port list.
 struct OutputSink {
     manager: Arc<OutputManager>,
     names: Arc<Mutex<Vec<String>>>,
+    disabled: Arc<Mutex<Vec<String>>>,
 }
 
 impl MidiSink for OutputSink {
     fn send(&self, port: &str, bytes: &[u8]) -> Result<(), String> {
-        self.manager.send(Some(port), bytes).map_err(|error| error.to_string())
+        self.manager.send(Some(port), bytes).map_err(|error| match error {
+            SendError::Disabled(port) => switched_off(&port),
+            other => other.to_string(),
+        })
     }
 
     fn has_port(&self, name: &str) -> bool {
         lock(&self.names).iter().any(|port| port == name)
     }
 
+    fn unavailable(&self, port: &str) -> Option<String> {
+        if lock(&self.disabled).iter().any(|name| name == port) {
+            return Some(switched_off(port));
+        }
+        (!self.has_port(port)).then(|| format!("there is no MIDI output named \"{port}\""))
+    }
+
     fn paired_output(&self, input: &str) -> Option<String> {
         let names = lock(&self.names);
         paired_output_name(input, names.iter().map(String::as_str)).map(str::to_string)
     }
+}
+
+/// No MIDI output at all (a dry run, or `M2K_NO_MIDI_OUT`): every send is refused with `reason`.
+struct NoMidiOut {
+    reason: &'static str,
+}
+
+impl MidiSink for NoMidiOut {
+    fn send(&self, _port: &str, _bytes: &[u8]) -> Result<(), String> {
+        Err(self.reason.to_string())
+    }
+
+    fn has_port(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn unavailable(&self, _port: &str) -> Option<String> {
+        Some(self.reason.to_string())
+    }
+
+    fn paired_output(&self, _input: &str) -> Option<String> {
+        None
+    }
+}
+
+/// Outputs to leave alone: the devices switched off under MIDI devices, and the outputs paired
+/// with those inputs. Only these: an output is opened only when an action or a light targets it,
+/// and output-only ports (a software synth, a sound module) have no input to switch on.
+fn disabled_outputs(config: &Config, outputs: &[PortStatus]) -> Vec<String> {
+    let mut names = Vec::new();
+    for device in config.devices.iter().filter(|device| !device.enabled) {
+        names.push(device.name.clone());
+        let present = outputs.iter().map(|port| port.name.as_str());
+        if let Some(paired) = paired_output_name(&device.name, present) {
+            names.push(paired.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Connected input ports, without the app's own virtual one (where unaimed feedback can go).
@@ -217,32 +279,48 @@ impl Runtime {
         let (injector, backend_error) = make_injector(&config, options.dry_run);
         let unsupported = unsupported_keys(injector.as_ref());
 
-        // MIDI output, started first so the engine's first lights go to real ports. None in a
-        // dry run: a test must not change what the controllers show.
+        // MIDI output, started first so the engine's first lights go to real ports, with the
+        // devices switched off under MIDI devices left alone. In a dry run, or with
+        // M2K_NO_MIDI_OUT set, the outputs are only listed: nothing is ever sent (a test must not
+        // change what the controllers show).
+        let no_output = if options.dry_run {
+            Some("nothing is sent to MIDI outputs in a dry run")
+        } else if std::env::var_os(NO_MIDI_OUT).is_some_and(|value| !value.is_empty()) {
+            Some("MIDI output is switched off (M2K_NO_MIDI_OUT)")
+        } else {
+            None
+        };
         let to_inner: Arc<OnceLock<Weak<Inner>>> = Arc::new(OnceLock::new());
-        let output = (!options.dry_run).then(|| {
+        let output = {
             let to_inner = to_inner.clone();
             Arc::new(OutputManager::start(
                 OutputOptions {
                     own_virtual_input: cfg!(unix).then(|| VIRTUAL_PORT.to_string()),
                     ..OutputOptions::default()
                 },
-                PortPolicy::AllExcept(Vec::new()),
+                PortPolicy::AllExcept(disabled_outputs(&config, &[])),
                 move |event| {
                     if let Some(inner) = to_inner.get().and_then(Weak::upgrade) {
                         inner.on_output_event(event);
                     }
                 },
             ))
-        });
-        let outputs = output.as_ref().map(|manager| manager.ports()).unwrap_or_default();
+        };
+        let outputs = output.ports();
+        // With the ports known, the outputs paired with switched-off inputs too (before the
+        // engine can send anything).
+        let disabled = disabled_outputs(&config, &outputs);
+        output.set_policy(PortPolicy::AllExcept(disabled.clone()));
+        let output_disabled = Arc::new(Mutex::new(disabled));
         let output_names =
             Arc::new(Mutex::new(outputs.iter().map(|port| port.name.clone()).collect::<Vec<_>>()));
-        let midi_out: Box<dyn MidiSink> = match &output {
-            Some(manager) => {
-                Box::new(OutputSink { manager: manager.clone(), names: output_names.clone() })
-            }
-            None => Box::new(NullMidiSink),
+        let midi_out: Box<dyn MidiSink> = match no_output {
+            None => Box::new(OutputSink {
+                manager: output.clone(),
+                names: output_names.clone(),
+                disabled: output_disabled.clone(),
+            }),
+            Some(reason) => Box::new(NoMidiOut { reason }),
         };
 
         let inner = Arc::new_cyclic(|weak: &Weak<Inner>| {
@@ -264,9 +342,10 @@ impl Runtime {
                 engine,
                 input: Mutex::new(None),
                 ports: Mutex::new(Vec::new()),
-                output: Mutex::new(output.clone()),
+                output: Mutex::new(Some(output.clone())),
                 outputs: Mutex::new(outputs.clone()),
                 output_names,
+                output_disabled,
                 permissions: Mutex::new(platform::permissions()),
                 backend_error: Mutex::new(backend_error),
                 unsupported_keys: Mutex::new(unsupported),
@@ -293,11 +372,9 @@ impl Runtime {
 
         // Output events from now on; a change between the first scan and here still counts.
         let _ = to_inner.set(Arc::downgrade(&inner));
-        if let Some(manager) = &output {
-            let now = manager.ports();
-            if now != outputs {
-                inner.on_output_event(OutputEvent::PortsChanged { ports: now });
-            }
+        let now = output.ports();
+        if now != outputs {
+            inner.on_output_event(OutputEvent::PortsChanged { ports: now });
         }
 
         // MIDI input.
@@ -497,6 +574,9 @@ impl Inner {
         if previous.settings.injector != config.settings.injector {
             self.rebuild_injector(config);
         }
+        // Before the engine sees the config: a device switched off in it must already be
+        // refused when the engine sends the lights of the new config.
+        self.update_output_policy(config);
         self.engine.set_config(config.clone());
         if let Some(input) = lock(&self.input).as_ref() {
             let policy = policy_for(config);
@@ -505,6 +585,22 @@ impl Inner {
             }
         }
         true
+    }
+
+    /// Leaves the outputs of switched-off devices alone (the engine asks first; the manager's
+    /// policy refuses them as well).
+    fn update_output_policy(&self, config: &Config) {
+        let outputs = lock(&self.outputs).clone();
+        let disabled = disabled_outputs(config, &outputs);
+        let mut current = lock(&self.output_disabled);
+        if *current == disabled {
+            return;
+        }
+        *current = disabled.clone();
+        drop(current);
+        if let Some(manager) = lock(&self.output).as_ref() {
+            manager.set_policy(PortPolicy::AllExcept(disabled));
+        }
     }
 
     /// Saves the config and remembers what the file looks like now, so the watcher does not
@@ -705,6 +801,9 @@ impl Inner {
                     .filter(|port| replaced || !previous.contains(port))
                     .map(|port| port.name.clone())
                     .collect();
+                // Outputs paired with switched-off inputs may have come or gone.
+                let config = lock(&self.config).clone();
+                self.update_output_policy(&config);
                 if !refresh.is_empty() {
                     self.engine.midi_outputs_changed(refresh);
                 }
