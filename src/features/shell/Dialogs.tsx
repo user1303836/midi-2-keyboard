@@ -377,7 +377,13 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   )}
                 </span>
                 <span className={cn("shrink-0 text-sm", port.state === "error" ? "text-warn" : "text-fg-faint")}>
-                  {port.state === "connected" ? "in use" : port.state === "error" ? port.error || "could not be opened" : "available"}
+                  {port.state === "connected"
+                    ? "in use"
+                    : port.state === "error"
+                      ? port.error || "could not be opened"
+                      : devices.find((d) => d.name === port.name)?.enabled === false
+                        ? "switched off"
+                        : "available"}
                 </span>
               </div>
             ))}
