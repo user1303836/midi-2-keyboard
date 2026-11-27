@@ -136,7 +136,10 @@ export function SourceEditor({
             </div>
             {live !== null && (
               <div className="shrink-0 text-right">
-                <div className="font-mono text-base leading-tight text-midi tabular-nums">{live}</div>
+                {/* Pitch bend counts from its middle, here as in the status bar and the range below. */}
+                <div className="font-mono text-base leading-tight text-midi tabular-nums">
+                  {event.type === "pitch_bend" ? `${live > 8192 ? "+" : ""}${live - 8192}` : live}
+                </div>
                 <div className="text-2xs tracking-wide text-fg-faint uppercase">live</div>
               </div>
             )}

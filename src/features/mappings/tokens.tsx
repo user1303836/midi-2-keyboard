@@ -265,11 +265,20 @@ export function BehaviorSummary({ behavior, event = null }: { behavior: Behavior
       const down = sides.down && b.down && !isEmptyAction(b.down) ? b.down : null;
       const both = sides.up && sides.down;
       if (!up && !down) return <Verb>does nothing yet</Verb>;
+      // A pad or key goes by how hard it is hit, everything else by how far it is pushed.
+      const hit = event?.type === "note" || event?.type === "chord";
       // The shuttle's own sign always; the words only where the list is wide enough for the
       // actions and the words (with the editor open, the actions matter more).
       return (
         <>
-          <span className="inline-flex shrink-0 text-fg-muted" title="Repeats for as long as the control is pushed away from rest — faster the further">
+          <span
+            className="inline-flex shrink-0 text-fg-muted"
+            title={
+              hit
+                ? "Repeats for as long as the pad is held — faster the harder it is hit"
+                : "Repeats for as long as the control is pushed away from rest — faster the further"
+            }
+          >
             <FastForward size={13} />
           </span>
           {up && (
@@ -284,7 +293,9 @@ export function BehaviorSummary({ behavior, event = null }: { behavior: Behavior
               <ActionView action={down} />
             </span>
           )}
-          <span className="hidden shrink-0 text-sm text-fg-muted @min-[900px]:inline">· faster the further</span>
+          <span className="hidden shrink-0 text-sm text-fg-muted @min-[900px]:inline">
+            {hit ? "· faster the harder the hit" : "· faster the further"}
+          </span>
         </>
       );
     }

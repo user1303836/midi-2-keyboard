@@ -338,15 +338,23 @@ export function mappingBrief(mapping: Mapping, config: Config | null = null): st
       const sides = shuttleSides(b, mapping.source.event);
       const up = sides.up && b.up && !isEmptyAction(b.up) ? actionText(b.up, config) : null;
       const down = sides.down && b.down && !isEmptyAction(b.down) ? actionText(b.down, config) : null;
-      if (up && down) return `↑ ${up}  ↓ ${down}, faster the further`;
-      return up || down ? `${up ?? down}, faster the further` : "nothing yet";
+      const how = isHit(mapping.source.event) ? "faster the harder the hit" : "faster the further";
+      if (up && down) return `↑ ${up}  ↓ ${down}, ${how}`;
+      return up || down ? `${up ?? down}, ${how}` : "nothing yet";
     }
   }
 }
 
-/** "every 400 ms → every 30 ms": the two ends of a shuttle's pace. */
-export function shuttlePaceText(behavior: ShuttleBehavior): string {
-  return `every ${formatMs(behavior.slow_ms)} near rest to every ${formatMs(behavior.fast_ms)} at the end`;
+/** A pad or key: its shuttle goes by how hard it is hit, not by how far something is pushed. */
+function isHit(event: SourceEvent): boolean {
+  return event.type === "note" || event.type === "chord";
+}
+
+/** "every 400 ms near rest to every 30 ms at the end": the two ends of a shuttle's pace. */
+export function shuttlePaceText(behavior: ShuttleBehavior, event: SourceEvent | null = null): string {
+  return event && isHit(event)
+    ? `every ${formatMs(behavior.slow_ms)} for a soft hit to every ${formatMs(behavior.fast_ms)} for a hard one`
+    : `every ${formatMs(behavior.slow_ms)} near rest to every ${formatMs(behavior.fast_ms)} at the end`;
 }
 
 /** A complete sentence describing a mapping, for tooltips and screen readers. */
@@ -408,11 +416,12 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
     case "shuttle": {
       const sides = shuttleSides(b, mapping.source.event);
       const both = sides.up && sides.down;
+      const hit = isHit(mapping.source.event);
       const parts = [
-        sides.up && b.up && !isEmptyAction(b.up) && `${both ? "while pushed up" : "while it is up"}: ${actionText(b.up, config)}`,
-        sides.down && b.down && !isEmptyAction(b.down) && `${both ? "while pushed down" : "while it is down"}: ${actionText(b.down, config)}`,
+        sides.up && b.up && !isEmptyAction(b.up) && `${hit ? "while held" : both ? "while pushed up" : "while it is up"}: ${actionText(b.up, config)}`,
+        sides.down && b.down && !isEmptyAction(b.down) && `${hit ? "while held" : both ? "while pushed down" : "while it is down"}: ${actionText(b.down, config)}`,
       ].filter(Boolean);
-      what = parts.length ? `${parts.join("; ")}; repeating ${shuttlePaceText(b)}` : "does nothing yet";
+      what = parts.length ? `${parts.join("; ")}; repeating ${shuttlePaceText(b, mapping.source.event)}` : "does nothing yet";
       break;
     }
   }
