@@ -1,6 +1,7 @@
 //! Core of midi-2-keyboard: the config model, its persistence, and the engine.
 
 pub mod app;
+pub mod crash;
 pub mod engine;
 pub mod events;
 pub mod model;

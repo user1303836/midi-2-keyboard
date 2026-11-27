@@ -80,6 +80,8 @@ struct AppState {
     pause_hotkey: Mutex<PauseHotkey>,
     /// Where the main window was (for a reopen from the tray and the next start).
     placement: Arc<Placement>,
+    /// The previous run crashed: said once, in the first snapshot a window asks for.
+    crash_notice: Mutex<Option<m2k_core::crash::Notice>>,
 }
 
 /// The system-wide pause shortcut (`Settings::pause_hotkey`) as registered with the OS.
@@ -106,6 +108,11 @@ impl AppState {
 #[tauri::command]
 fn snapshot(state: State<'_, AppState>) -> Snapshot {
     let mut snapshot = state.runtime.snapshot();
+    let notice = state.crash_notice.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+    if let Some(notice) = notice {
+        m2k_core::crash::mark_reported(&store::default_dir(), &notice);
+        snapshot.warnings.push(notice.message);
+    }
     // A pause shortcut that does not work is worth hearing about every time the window opens.
     let hotkey = state.pause_hotkey.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(problem) = &hotkey.problem {
@@ -749,8 +756,13 @@ fn wait_for_exit(pid: u32) {
 fn wait_for_exit(_pid: u32) {}
 
 fn main() {
-    // Whatever panics from here on, nothing this process pressed stays down.
+    // Whatever panics from here on, nothing this process pressed stays down; and a crash leaves
+    // an entry in crash.log, which the next start mentions once.
     m2k_output::install_panic_release();
+    m2k_core::crash::install(
+        store::default_dir(),
+        concat!("MIDI 2 Keyboard ", env!("CARGO_PKG_VERSION")),
+    );
     let args: Vec<String> = std::env::args().collect();
     let launched_minimized = args.iter().any(|arg| arg == "--minimized");
     // Started by "Restart as administrator": let the previous instance finish quitting first,
@@ -831,6 +843,7 @@ fn main() {
                 closing_to_tray: AtomicBool::new(false),
                 pause_hotkey: Mutex::new(PauseHotkey::default()),
                 placement,
+                crash_notice: Mutex::new(m2k_core::crash::startup_notice(&store::default_dir())),
             });
 
             refresh_tray(&handle);
@@ -913,6 +926,7 @@ fn main() {
             if let Some(state) = app.try_state::<AppState>() {
                 state.runtime.shutdown();
                 state.placement.flush();
+                m2k_core::crash::clean_exit(&store::default_dir());
             }
         }
         _ => {}
