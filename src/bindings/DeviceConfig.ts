@@ -26,7 +26,10 @@ enabled: boolean,
  * reacts, and also while output is paused, while learning and while the app's own window
  * has focus: this is routing, not something a mapping does. It goes through the same
  * output path as lights, so it never blocks, a target switched off under MIDI devices gets
- * nothing, and neither does anything when MIDI output is switched off altogether.
+ * nothing, and neither does anything when MIDI output is switched off altogether. Two
+ * things are not passed on: bytes that are not a MIDI message (an undefined status byte, a
+ * message cut short), and a SysEx longer than an output takes (4096 bytes), which is
+ * reported once.
  *
  * A loopback port hands what it is sent straight back on the input of the same name. Such
  * an echo (a message equal to one passed on to that port a moment ago) is dropped when it
