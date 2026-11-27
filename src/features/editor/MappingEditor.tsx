@@ -1,5 +1,5 @@
 import { ArrowRight, Check, Copy, FolderInput, Layers, Lightbulb, MoreHorizontal, Play, Radio, Timer, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
@@ -34,6 +34,7 @@ import {
   newSource,
   primaryAction,
   rangeLimit,
+  shuttleSides,
   sourceShape,
   suggestedBehavior,
   supportsRateLimit,
@@ -602,8 +603,28 @@ function Suggestions({
     ["Paste", keys(mod, "KeyV")],
     ["Undo", keys(mod, "KeyZ")],
   ];
+  // A shuttle that rests at one end (a fader, a pedal, how hard a pad is hit) has one direction:
+  // a single thing to repeat, faster the further. [label, action, slowest ms, fastest ms].
+  const click: Action = { type: "mouse_click", button: "left", clicks: 1 };
+  const pacedOne: [string, Action, number, number][] = [
+    ["Scroll down", scroll(-1), 250, 20],
+    ["Scroll up", scroll(1), 250, 20],
+    ["→", keys("ArrowRight"), 400, 30],
+    ["←", keys("ArrowLeft"), 400, 30],
+    ["Space", keys("Space"), 400, 50],
+    ["Click", click, 500, 50],
+  ];
+  const source = useContext(SourceContext);
+  const sides = shuttle ? shuttleSides(shuttle, source?.event ?? null) : null;
   const turning = shape === "relative" || shape === "continuous";
-  const offers: [string, Behavior][] = shuttle
+  const offers: [string, Behavior][] = shuttle && sides && sides.up !== sides.down
+    ? pacedOne
+        .filter(([, action]) => usable(action))
+        .map(([label, action, slow_ms, fast_ms]) => [
+          label,
+          { ...shuttle, ...(sides.up ? { up: action } : { down: action }), slow_ms, fast_ms, curve: "linear" },
+        ])
+    : shuttle
     ? paced
         .filter(([, up, down]) => usable(up) && usable(down))
         .map(([label, up, down, slow_ms, fast_ms, gentle]) => [

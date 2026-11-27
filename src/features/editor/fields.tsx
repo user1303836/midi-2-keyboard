@@ -8,7 +8,7 @@ import type { ValueRange } from "@/bindings/ValueRange";
 import { NumberInput, RangeSlider, Select, type SelectOption } from "@/components/ui/inputs";
 import { deviceLabel } from "@/lib/describe";
 import { noteName } from "@/lib/midi";
-import { onMidi } from "@/lib/monitor";
+import { getLastMidi, onMidi } from "@/lib/monitor";
 import { useApp, useOctave } from "@/lib/store";
 import { clamp, cn } from "@/lib/utils";
 
@@ -236,8 +236,11 @@ export function useLiveValue(source: Source): number | null {
   const [value, setValue] = useState<number | null>(null);
   const key = JSON.stringify(source);
   useEffect(() => {
-    setValue(null);
     const current = JSON.parse(key) as Source;
+    // The control that was touched last is very often this one (it was just learned, or just
+    // tried): start from where it stands instead of from nothing.
+    const last = getLastMidi();
+    setValue(last ? sourceValue(current, last) : null);
     return onMidi((log) => {
       const next = sourceValue(current, log);
       if (next !== null) setValue(next);
