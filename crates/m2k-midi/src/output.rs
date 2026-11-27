@@ -29,6 +29,9 @@
 //!   is full, the OLDEST queued send is dropped and counted ([`dropped`](OutputManager::dropped)).
 //!   Sends go out in the order they were made. Sends to a port that is in the `Error` state are
 //!   dropped (not counted) until a poll manages to open it again.
+//! - [`OutputManager::reopen_all`] drops every open connection and opens the wanted ports again
+//!   (after sleep or a locked session our handle can be dead while the name stays), reporting
+//!   `PortsChanged` even if the list reads as before, so lights are sent again.
 //! - Dropping the manager first delivers what is still queued (for at most [`FLUSH_ON_DROP`]),
 //!   then closes every port and stops the thread.
 //!
@@ -309,6 +312,7 @@ impl OutputManager {
             state: Mutex::new(State {
                 policy,
                 scan_requested: false,
+                reopen_requested: false,
                 stop: false,
                 stop_deadline: None,
                 alive: true,
@@ -358,6 +362,20 @@ impl OutputManager {
     /// Re-scans the system's ports immediately instead of waiting for the next poll.
     pub fn rescan(&self) {
         lock_state(&self.shared).scan_requested = true;
+        self.shared.wake.notify_all();
+    }
+
+    /// Drops every open connection and opens the ports that are wanted again (for after the
+    /// computer slept or the session was locked, when a device can come back under the same name
+    /// while our handle to it is dead). Asynchronous: the output thread does it before the next
+    /// queued send, and `PortsChanged` is reported even if the list reads as before, so lights
+    /// get sent again. A port that cannot be opened goes to `Error` and is retried on every poll.
+    /// Calling it again in the meantime is harmless.
+    pub fn reopen_all(&self) {
+        let mut state = lock_state(&self.shared);
+        state.reopen_requested = true;
+        state.scan_requested = true;
+        drop(state);
         self.shared.wake.notify_all();
     }
 
@@ -473,6 +491,8 @@ impl Shared {
 struct State {
     policy: PortPolicy,
     scan_requested: bool,
+    /// `reopen_all()` asked for every connection to be dropped and opened again.
+    reopen_requested: bool,
     stop: bool,
     /// Until when a stopping thread keeps delivering what is queued.
     stop_deadline: Option<Instant>,
@@ -507,7 +527,7 @@ fn output_thread(shared: Arc<Shared>, options: OutputOptions, ready: mpsc::SyncS
     let mut ready = Some(ready);
     let mut next_scan = Instant::now();
     loop {
-        let (batch, policy, scan, deadline) = {
+        let (batch, policy, scan, reopen, deadline) = {
             let mut state = lock_state(&shared);
             loop {
                 let now = Instant::now();
@@ -522,12 +542,17 @@ fn output_thread(shared: Arc<Shared>, options: OutputOptions, ready: mpsc::SyncS
             }
             let scan = !state.stop && (state.scan_requested || Instant::now() >= next_scan);
             state.scan_requested = false;
+            let reopen = !state.stop && std::mem::take(&mut state.reopen_requested);
             let batch: Vec<Pending> = state.queue.drain(..).collect();
             state.queued_bytes = 0;
             state.busy = !batch.is_empty();
-            (batch, state.policy.clone(), scan, state.stop_deadline)
+            (batch, state.policy.clone(), scan, reopen, state.stop_deadline)
         };
 
+        if reopen {
+            // The scan right below opens the wanted ports again, before the batch is sent.
+            poller.close_for_reopen();
+        }
         if scan {
             if catch_unwind(AssertUnwindSafe(|| poller.scan(&policy))).is_err() {
                 log::error!("MIDI output port scan failed unexpectedly; retrying on the next poll");
@@ -662,6 +687,15 @@ impl Poller {
             reported: None,
             force_report: false,
         }
+    }
+
+    /// Drops every connection for [`OutputManager::reopen_all`]; the scan that follows opens the
+    /// wanted ports again, and the report afterwards goes out even if the list reads the same.
+    fn close_for_reopen(&mut self) {
+        for entry in self.entries.iter_mut().filter(|entry| entry.connection.is_some()) {
+            entry.close();
+        }
+        self.force_report = true;
     }
 
     fn scan(&mut self, policy: &PortPolicy) {

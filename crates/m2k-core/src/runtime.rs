@@ -530,6 +530,21 @@ impl Runtime {
         }
     }
 
+    /// Closes and reopens every MIDI port in use, inputs and outputs, keeping what is switched
+    /// off as it is: for when the computer wakes up or the session is unlocked, when a device can
+    /// come back under the same name with the old handle dead. The inputs are reported closed
+    /// first, so whatever their devices held is released (as for a disconnect); the outputs are
+    /// reported afterwards even if nothing seems to have changed, so lights are sent again.
+    /// Asynchronous and harmless to call twice.
+    pub fn reopen_midi(&self) {
+        if let Some(input) = lock(&self.inner.input).as_ref() {
+            input.reopen_all();
+        }
+        if let Some(output) = lock(&self.inner.output).as_ref() {
+            output.reopen_all();
+        }
+    }
+
     pub fn request_permissions(&self) {
         platform::request_permissions();
         self.inner.check_permissions();

@@ -10,6 +10,9 @@
 //! - Port names are **normalized to be stable across reconnects/reboots** (for example the ALSA
 //!   `client:port` numbers are stripped) because configs refer to devices by name. When several
 //!   identical devices are connected, later ones get a ` #2`, ` #3`, ... suffix.
+//! - [`InputManager::reopen_all`] closes every open port and opens it again (after sleep or a
+//!   locked session a device can come back under the same name with our handle dead). It reports
+//!   the ports closed first, so whatever they held is released, then reopened.
 //! - Dropping the manager closes all ports and stops the thread.
 //!
 //! # How it works
@@ -198,7 +201,12 @@ impl InputManager {
     ) -> Self {
         let shared = Arc::new(Shared {
             delivery: Arc::new(Delivery { sink: Box::new(sink), epoch: Instant::now() }),
-            control: Mutex::new(Control { policy, scan_requested: false, stop: false }),
+            control: Mutex::new(Control {
+                policy,
+                scan_requested: false,
+                reopen_requested: false,
+                stop: false,
+            }),
             wake: Condvar::new(),
             ports: Mutex::new(Vec::new()),
         });
@@ -240,6 +248,24 @@ impl InputManager {
     /// Asynchronous, like [`set_policy`](Self::set_policy).
     pub fn rescan(&self) {
         lock(&self.shared.control).scan_requested = true;
+        self.shared.wake.notify_all();
+    }
+
+    /// Closes every open port and opens it again (the policy, and so what is switched off, stays
+    /// as it is). For after the computer slept or the session was locked: a device can come back
+    /// under the same name and OS identifier while the handle we hold is dead (WinMM), so a scan
+    /// sees nothing to do and the port stays silent.
+    ///
+    /// Asynchronous, like [`rescan`](Self::rescan): the background thread closes the ports and
+    /// reports them closed with `PortsChanged` (so whatever those devices held is released, as
+    /// for a disconnect), then opens them again and reports that. A port that cannot be opened
+    /// again goes to the `Error` state and is retried on every poll, like any other. Calling it
+    /// again before that is done, or while a scan runs, just makes it happen once more.
+    pub fn reopen_all(&self) {
+        let mut control = lock(&self.shared.control);
+        control.reopen_requested = true;
+        control.scan_requested = true;
+        drop(control);
         self.shared.wake.notify_all();
     }
 
@@ -318,6 +344,8 @@ struct Control {
     policy: PortPolicy,
     /// `rescan()` or `set_policy()` asked for a scan now.
     scan_requested: bool,
+    /// `reopen_all()` asked for every open port to be closed and opened again.
+    reopen_requested: bool,
     stop: bool,
 }
 
@@ -337,7 +365,7 @@ fn poll_thread(shared: Arc<Shared>, options: InputOptions, ready: mpsc::SyncSend
     let mut poller = Poller::new(shared.clone(), options);
     let mut ready = Some(ready);
     loop {
-        let policy = {
+        let (policy, reopen) = {
             let mut control = lock(&shared.control);
             if ready.is_none() {
                 let deadline = Instant::now() + interval;
@@ -356,9 +384,9 @@ fn poll_thread(shared: Arc<Shared>, options: InputOptions, ready: mpsc::SyncSend
                 break;
             }
             control.scan_requested = false;
-            control.policy.clone()
+            (control.policy.clone(), std::mem::take(&mut control.reopen_requested))
         };
-        if catch_unwind(AssertUnwindSafe(|| poller.scan(&policy))).is_err() {
+        if catch_unwind(AssertUnwindSafe(|| poller.scan(&policy, reopen))).is_err() {
             log::error!("MIDI port scan failed unexpectedly; retrying on the next poll");
         }
         if let Some(ready) = ready.take() {
@@ -460,12 +488,26 @@ impl Poller {
         }
     }
 
-    fn scan(&mut self, policy: &PortPolicy) {
+    /// Brings the ports in line with the system and the policy; with `reopen`, every open port is
+    /// closed (and reported closed) first, so the scan opens it again.
+    fn scan(&mut self, policy: &PortPolicy, reopen: bool) {
+        if reopen {
+            self.close_for_reopen();
+            self.report();
+        }
         if let Some(found) = self.enumerate() {
             self.update_entries(&found, policy);
         }
         self.update_virtual_port(policy);
         self.report();
+    }
+
+    /// Closes every open device port for [`InputManager::reopen_all`]. Our own virtual port is
+    /// left alone: it is not a device, and closing it would cut off the programs sending to it.
+    fn close_for_reopen(&mut self) {
+        for entry in self.entries.iter_mut().filter(|entry| entry.connection.is_some()) {
+            entry.disable();
+        }
     }
 
     /// The ports present right now, or `None` when the MIDI system cannot be queried (in which
