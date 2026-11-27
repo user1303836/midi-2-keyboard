@@ -198,8 +198,6 @@ impl Shuttle {
             // A hit fires at once, whatever fired before.
             run.last = None;
         }
-        run.ctx = ctx;
-        run.interval = zone.interval(d);
         // Leaving the dead zone, or crossing to the other side.
         let starting = run.side != Some(side);
         if starting {
@@ -209,21 +207,25 @@ impl Shuttle {
         }
         let run = &mut self.runs[i];
         cx.timers.cancel_slot(&mut run.timer);
-        // At once, or re-timed from the last firing at the pace of the new value: never sooner.
+        // A steady run finer than the wake period still owes what fell due at its pace since its
+        // last wake (a fast pointer loses nothing to the messages of a moving wheel). Nothing is
+        // ever made up for time that passed at a slower pace.
+        if !starting {
+            let owed = owed(run.interval, run.last, cx.actual_now());
+            if owed > 0 {
+                // With the message they fell due under.
+                self.fire(i, def, info, cx, owed, true);
+            }
+        }
+        let run = &mut self.runs[i];
+        cx.timers.cancel_slot(&mut run.timer);
+        run.ctx = ctx;
+        run.interval = zone.interval(d);
+        // At once (one firing, the pace counts from it), or re-timed from the last firing at the
+        // pace of the new value: never sooner.
         let due = run.last.map_or(now, |last| (last + run.interval).max(now));
         if due <= now {
-            // Starting is one step; a repetition that goes on makes up what fell due at the new
-            // pace (a fast pointer loses nothing to the messages of a moving wheel).
-            let count = match (starting, run.last) {
-                (false, Some(last)) => {
-                    let elapsed = cx.actual_now().saturating_duration_since(last).as_nanos();
-                    (elapsed / run.interval.as_nanos().max(1)).clamp(1, u128::from(MAX_BATCH))
-                        as u32
-                }
-                _ => 1,
-            };
-            // Timed from now: the next firing is one interval after this one.
-            self.fire(i, def, info, cx, count, false);
+            self.fire(i, def, info, cx, 1, false);
         } else {
             run.timer = Some(cx.timers.schedule(due, TimerKind::Shuttle(info.owner, key)));
         }
@@ -259,11 +261,7 @@ impl Shuttle {
             return;
         }
         let run = &self.runs[i];
-        let real = cx.actual_now();
-        let due = run.last.map_or(1, |last| {
-            let elapsed = real.saturating_duration_since(last).as_nanos();
-            (elapsed / run.interval.as_nanos().max(1)).clamp(1, u128::from(MAX_BATCH)) as u32
-        });
+        let due = owed(run.interval, run.last, cx.actual_now()).max(1);
         self.fire(i, def, info, cx, due, true);
     }
 
@@ -379,10 +377,19 @@ impl Shuttle {
         }) else {
             return;
         };
-        // Keep the cadence (the remainder of a batch carries over); after a stall that hit the
-        // cap, or at once, start from now.
+        // From its timer the cadence goes on exactly: a batch's remainder carries over, an
+        // on-time firing does not drift by the wake-up delay. At once, re-timed, after a stall,
+        // or late by more than an interval: from now.
         let last = match run.last {
-            Some(last) if catch_up && count < MAX_BATCH => last + run.interval * count,
+            Some(last) if catch_up && run.interval < MIN_WAKE && count < MAX_BATCH => {
+                last + run.interval * count
+            }
+            Some(last)
+                if catch_up
+                    && real.saturating_duration_since(last + run.interval) < run.interval =>
+            {
+                last + run.interval
+            }
             _ => real,
         };
         run.last = Some(last);
@@ -415,6 +422,18 @@ impl Shuttle {
             self.fresh = false;
             self.flush(def, info, cx);
         }
+    }
+}
+
+/// Firings owed at `interval` since `last`: only a pace finer than the wake period is made up
+/// (in batches, at most [`MAX_BATCH`]); a slower one fires once, when it is due.
+fn owed(interval: Duration, last: Option<Instant>, now: Instant) -> u32 {
+    match last {
+        Some(last) if interval < MIN_WAKE => {
+            let elapsed = now.saturating_duration_since(last).as_nanos();
+            (elapsed / interval.as_nanos().max(1)).min(u128::from(MAX_BATCH)) as u32
+        }
+        _ => 0,
     }
 }
 
