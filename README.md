@@ -115,7 +115,8 @@ was sent, why (no mapping, its mapping is switched off, only mapped in another p
 back by a rate limit, …). For a control that has no mapping yet, *map it* next to that
 message starts one with the control already filled in.
 
-To stop all output, click **Active** at the top right (it turns into **Paused**), or press the
+To stop everything your mappings send, click **Active** at the top right (it turns into
+**Paused**; MIDI thru keeps passing devices on), or press the
 shortcut set under Settings → *Pause from anywhere*, which pauses and resumes from whichever
 application is in front. It is Ctrl, Alt or Win plus one other key (F13–F24, Pause and Scroll
 Lock also work alone); a combination that would get in the way of typing is refused, and the app
@@ -282,9 +283,10 @@ Shorthands:
   keys* in the tray menu; pausing releases everything too. If the app fails, it releases what it
   holds on the way out and says so at the next start (details in `crash.log` next to the config
   file). If it was killed outright, press and release that key on the keyboard.
-- **The controller is silent after the computer slept.** On Windows the app releases what it
-  holds before sleep and lock, and reopens its MIDI devices after waking, unlocking or switching
-  back to your user. Elsewhere, or if it stays silent: *Rescan now* under *MIDI devices*.
+- **The controller is silent after the computer slept.** On Windows, and on Linux through
+  logind, the app releases what it holds before sleep and lock, and reopens its MIDI devices after
+  waking and unlocking (on Windows also after switching back to your user). On macOS, or if it
+  stays silent: *Rescan now* under *MIDI devices*.
 - **Lights or *Send MIDI* do nothing.** They go to the output named like the controller's input
   (see [Sending MIDI and lights](#sending-midi-and-lights)): check that the controller is listed
   under OUTPUTS in *MIDI devices*, that it is not switched off there, and that no other program
