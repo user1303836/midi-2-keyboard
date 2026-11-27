@@ -29,6 +29,7 @@ import {
   defaultBehavior,
   emptyKeys,
   isEmptyAction,
+  rangeLimit,
   shuttleAt,
   shuttleRate,
   shuttleRest,
@@ -423,6 +424,7 @@ export function BehaviorEditor({
               </div>
             </div>
           )}
+          {shape === "continuous" && <EndStopNote />}
           <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
             <span className="whitespace-nowrap">Fire at most</span>
             <NumberInput aria-label="Maximum actions per message" className="w-[60px]" min={0} max={1000} value={b.max_burst} onChange={(max_burst) => onChange({ ...b, max_burst }, "burst")} />
@@ -567,6 +569,34 @@ export function BehaviorEditor({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Up / Down on a control with end stops (or an endless encoder left in its absolute mode, which
+ * many controllers ship with): at 0 and at the top it sends nothing more, and the steps simply
+ * stop — which looks like the mapping broke. Said here, and said louder the moment it happens.
+ */
+function EndStopNote() {
+  const source = useContext(SourceContext);
+  const live = useLiveValue(source ?? NO_SOURCE);
+  const limit = source ? rangeLimit(source.event) : null;
+  if (!source || limit === null) return null;
+  const atEnd = live !== null && (live <= 0 || live >= limit);
+  const cure =
+    source.event.type === "control_change"
+      ? "An encoder in a relative mode never runs out: set that on the controller, then choose “Endless encoder” above."
+      : "An encoder sending relative control changes never runs out.";
+  return (
+    <div
+      data-end-stop={atEnd ? "now" : "note"}
+      className={cn("rounded-md px-2.5 py-1.5 text-sm leading-snug", atEnd ? "bg-warn-soft text-warn" : "bg-app text-fg-faint")}
+    >
+      {atEnd
+        ? `It is at the end of its travel now (${live}): turning further sends nothing, so the steps stop. `
+        : `At the ends of its travel (0 and ${limit}) it sends nothing more, so the steps stop there. `}
+      {cure}
     </div>
   );
 }
