@@ -10,7 +10,7 @@ It is built around two promises:
 - **The weird case is possible.** *"CC 20 on channel 2 comes from a knob; when I turn it, send
   Ctrl+Shift+O — but at most once every 500 ms."* That is one mapping with a rate limit.
 
-![The mapping list, with the editor open on a knob that sends Ctrl+Shift+O at most once per 500 ms](docs/screenshot.png)
+![The mapping list (notes, knobs, an encoder, a pad with a light, a pitch wheel as a shuttle), with the editor open on a knob that sends Ctrl+Shift+O at most once per 500 ms](docs/screenshot.png)
 
 ## What it can do
 
@@ -237,6 +237,46 @@ Shorthands:
 - Leaving out `version`, `id`, `name`, `velocity`, a tap-hold's `hold_ms` or a multi-tap's
   `window_ms` is fine; the full format is what the app writes back when you change anything in
   it.
+
+## When something does not work
+
+- **Nothing is typed.** The status bar at the bottom says why for the last message: *this window
+  is in front* (no keys are sent while the app has focus: switch to the target app), *output is
+  paused* (click **Paused**), *its mapping is switched off*, *only mapped in "…"* (another profile
+  is live), *outside the range its mapping reacts to*, *held back by the rate limit*, *condition
+  not met*, or *no mapping*. The **Monitor** (`Ctrl+M`) shows the same for every message. macOS,
+  and Linux on Wayland, need a permission first (see *Good to know* under [Using it](#using-it)).
+- **A controller is not listed, or "could not be opened".** On Windows most MIDI drivers serve one
+  program at a time: close the other one (a DAW, another MIDI tool) and the port opens by itself.
+  A device switched off under *MIDI devices* (the button next to MIDI DEVICES) stays closed; so do
+  new ones while *Connect new MIDI devices automatically* is off in Settings. *Rescan now* there
+  looks for devices again.
+- **Up / Down stops at the end of a knob.** A knob with end stops, or an endless encoder left in
+  its absolute mode, sends nothing more at 0 and at the top. Set the encoder to a relative mode on
+  the controller, then choose *Endless encoder* in the editor (it warns when a control gets there).
+- **Turning a knob fires far too often.** A turn sends dozens of messages. Take the editor's offer
+  *Limit to once per 500 ms* (or set any *Rate limit*), or use *Up / Down* with a larger step.
+- **Keys do not reach a game, or a program run as administrator.** Windows keeps input from
+  ordinary programs out of programs that run as administrator; the app says so and offers
+  *Restart as administrator* (also in Settings). Some games ignore very short taps: set *Key tap
+  length* in Settings to 40–60 ms.
+- **A key seems stuck.** Click *release* next to "holding …" in the status bar, or *Release all
+  keys* in the tray menu; pausing releases everything too. If the app fails, it releases what it
+  holds on the way out and says so at the next start (details in `crash.log` next to the config
+  file). If it was killed outright, press and release that key on the keyboard.
+- **The controller is silent after the computer slept.** On Windows the app releases what it
+  holds before sleep and lock, and reopens its MIDI devices after waking, unlocking or switching
+  back to your user. Elsewhere, or if it stays silent: *Rescan now* under *MIDI devices*.
+- **Lights or *Send MIDI* do nothing.** They go to the output named like the controller's input
+  (see [Sending MIDI and lights](#sending-midi-and-lights)): check that the controller is listed
+  under OUTPUTS in *MIDI devices*, that it is not switched off there, and that no other program
+  holds that output. With the environment variable `M2K_NO_MIDI_OUT` set, nothing is ever sent
+  (the monitor says "MIDI output is switched off").
+- **The configuration did not load.** A `config.json` that cannot be read is kept as
+  `config.corrupt-<number>.json`, and the backup next to it (`config.backup.json`) or a default is
+  used; the app says which. A mistake in a file edited by hand while the app runs is reported with
+  its line and column, and the previous configuration stays. Where the file lives: see
+  [Using it](#using-it).
 
 ## Building from source
 
