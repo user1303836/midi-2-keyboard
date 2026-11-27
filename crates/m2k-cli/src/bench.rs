@@ -30,7 +30,10 @@ options:
                     (notes = a note on and its note off a few messages later, cc = knob sweeps,
                     enc = relative encoder ticks, clock = MIDI clock)
   --rate <N>        messages per second of MIDI time (default 2000: a busy controller)
-  --monitor <m>     on, off or both (default both)";
+  --monitor <m>     on, off or both (default both)
+  --shuttles        every 20th mapping is a shuttle on a knob (the sweeps drive it), moving
+                    the pointer at up to 1 ms per pixel; otherwise it is a pitch bend change
+                    that gets no traffic";
 
 // ---------------------------------------------------------------------------------------------
 // Allocation counting (only while a measurement asks for it)
@@ -155,7 +158,7 @@ struct Sources {
 /// A realistic mix: notes with Hold / Trigger / Toggle / tap-hold, knobs with Change and a
 /// throttle (some with a jitter guard), encoders with Step, CC buttons, a "shift" layer and
 /// mappings conditioned on it, toggles with feedback lights, and a clock divider.
-fn build_config(mappings: usize) -> (Config, Sources) {
+fn build_config(mappings: usize, shuttles: bool) -> (Config, Sources) {
     const KEYS: [&str; 16] = [
         "KeyA",
         "KeyB",
@@ -227,6 +230,9 @@ fn build_config(mappings: usize) -> (Config, Sources) {
             18 => json!({ "id": id, "source": note(&mut sources),
                 "behavior": { "type": "tap_hold", "tap": keys(i),
                               "hold_target": { "type": "keys", "keys": ["ShiftLeft"] } } }),
+            _ if shuttles => json!({ "id": id, "source": cc(&mut sources.knobs, false),
+                "behavior": { "type": "shuttle", "up": { "type": "mouse_move", "x": 1, "y": 0 },
+                              "dead_zone": 5, "slow_ms": 200, "fast_ms": 1 } }),
             _ => json!({ "id": id, "source": { "event": { "type": "pitch_bend" } },
                 "behavior": { "type": "change", "action": keys(i) }, "rate_limit": { "interval_ms": 50 } }),
         };
@@ -436,6 +442,7 @@ pub fn run(args: &[String]) -> i32 {
     let mut rate = 2000u32;
     let mut mix = Mix { notes: 40, cc: 35, enc: 10, clock: 15 };
     let mut modes = vec![true, false];
+    let mut shuttles = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let mut value = || args.next().cloned().unwrap_or_default();
@@ -443,6 +450,7 @@ pub fn run(args: &[String]) -> i32 {
             "--mappings" => mappings = value().parse().unwrap_or(mappings).max(1),
             "--messages" => messages = value().parse().unwrap_or(messages).max(1),
             "--rate" => rate = value().parse().unwrap_or(rate).max(1),
+            "--shuttles" => shuttles = true,
             "--mix" => {
                 for part in value().split(',') {
                     let Some((name, share)) = part.split_once('=') else { continue };
@@ -481,7 +489,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
 
-    let (config, sources) = build_config(mappings);
+    let (config, sources) = build_config(mappings, shuttles);
     let traffic = generate(messages, mix, &sources);
     let built = if cfg!(debug_assertions) { "debug" } else { "release" };
     println!(
