@@ -87,8 +87,6 @@ Not there yet:
 - Output that scales with the value (knob position → pointer speed, jog / shuttle rates).
 - Per-application profiles on Wayland (there is no portable way to ask which window is in front).
 - Signed installers: Windows SmartScreen and macOS Gatekeeper warn about the downloads.
-- A system-wide pause shortcut: Settings already has the field (*Pause from anywhere*), but the
-  app does not react to it yet.
 
 ## Using it
 
@@ -109,11 +107,17 @@ was sent, why (no mapping, its mapping is switched off, only mapped in another p
 back by a rate limit, …). For a control that has no mapping yet, *map it* next to that
 message starts one with the control already filled in.
 
-To stop all output, click **Active** at the top right (it turns into **Paused**). If a key ever
-seems stuck, the *release* link next to "holding …" in the status bar lets go of everything.
+To stop all output, click **Active** at the top right (it turns into **Paused**), or press the
+shortcut set under Settings → *Pause from anywhere*, which pauses and resumes from whichever
+application is in front. It is Ctrl, Alt or Win plus one other key (F13–F24, Pause and Scroll
+Lock also work alone); a combination that would get in the way of typing is refused, and the app
+says so when another program already uses it. (On Wayland it works only while an X11 application
+has focus.) If a key ever seems stuck, the *release* link next to "holding …" in the status bar
+lets go of everything.
 
 Closing the window keeps the app running in the tray (the first time, it says so). Click the
-tray icon (on Linux: *Open* in its menu) or simply start the app again to get the window back.
+tray icon (on Linux: *Open* in its menu) or simply start the app again to get the window back,
+where you left it: its size and position are kept, across restarts too.
 The tray menu also pauses output, releases all keys, switches profiles and quits. To make
 closing the window quit the app instead, turn off *Keep running when the window is closed* in
 Settings; *Launch at login* is there too.
