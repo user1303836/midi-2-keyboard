@@ -158,9 +158,12 @@ fn release_all(state: State<'_, AppState>) {
     state.runtime.release_all();
 }
 
+/// The Devices dialog's "Rescan now": also closes and reopens the ports in use, so a controller
+/// that came back under the same name (with the old handle dead) is heard again. What those
+/// devices held is let go, as for a disconnect.
 #[tauri::command]
 fn rescan_devices(state: State<'_, AppState>) {
-    state.runtime.rescan_devices();
+    state.runtime.reopen_midi();
 }
 
 #[tauri::command]

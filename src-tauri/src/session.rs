@@ -5,7 +5,9 @@
 //! sent while locked or away is refused (and its releases retried until it is back), and a key
 //! held across a sleep could stay down for good: a USB controller that comes back under the same
 //! name is not seen to have gone, so the release of its pad never arrives. Back from sleep,
-//! unlocked or reconnected, the MIDI ports are scanned again.
+//! unlocked or reconnected, the MIDI ports in use are closed and opened again
+//! (`Runtime::reopen_midi`): the handle of such a controller is dead, and a scan alone sees
+//! nothing to do.
 //!
 //! Not watched elsewhere yet. macOS drops input posted from a session in the background (fast
 //! user switching) without an error; on Linux the lock screen receives XTest and uinput input,
@@ -136,7 +138,7 @@ mod imp {
         let Some(state) = APP.get().and_then(|app| app.try_state::<AppState>()) else { return };
         match change {
             Change::Away => state.runtime.release_all(),
-            Change::Back => state.runtime.rescan_devices(),
+            Change::Back => state.runtime.reopen_midi(),
         }
     }
 }
