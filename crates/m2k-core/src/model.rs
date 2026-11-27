@@ -828,10 +828,14 @@ pub enum Behavior {
     /// that moment (the interval that was running is not waited out). It stops when the control
     /// is back at rest, when the source goes inactive (the note is released, the value leaves
     /// `range`), when its device disconnects, on pause and on "release all"; it starts again
-    /// with the next message from the control. Conditions are checked at every firing. While it
-    /// repeats, the mapping counts as engaged (shown as on; see [`FeedbackWhen::Engaged`]).
-    /// `rate_limit` does not apply. Needs a source with a position: a note, a chord or an
-    /// absolute ranged control. Relative encoders and pulses never fire it.
+    /// with the next message from the control. Conditions are checked at every firing. If the
+    /// first firing of a push (leaving rest, crossing to the other side, a hit) cannot go out —
+    /// paused, the app's own window in front, learning, a condition not met — that is reported
+    /// once for the push; the rest of the push stays quiet. A note or chord fires at once on
+    /// every new hit (a hit is not a control hovering on an edge). While it repeats, the mapping
+    /// counts as engaged (shown as on; see [`FeedbackWhen::Engaged`]). `rate_limit` does not
+    /// apply. Needs a source with a position: a note, a chord or an absolute ranged control.
+    /// Relative encoders and pulses never fire it.
     Shuttle {
         /// Fires while the value is above the rest position.
         #[serde(default)]
