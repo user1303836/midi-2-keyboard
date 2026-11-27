@@ -156,6 +156,15 @@ There is no test suite (see the ground rules). Verify by exercising the real thi
   live status. To check real output, open a Notepad window of your own, make sure **it** is the
   foreground window before every send, and read its text back (`WM_GETTEXT`). The app holds
   output back while its own window has focus.
+- The scripts that drove the app during the build sessions are kept on the dev machine in the
+  git-ignored `.agents/verify-scripts/` (outside version control on purpose: the repository has
+  no tests). `pw/*.mjs` drive the browser mock (`npm run dev` running, then `node pw/<name>.mjs`)
+  or, for `e2e`, `e2e2`, `shell`, `reload`, `examples`, `profiles`, `realtour` and everything
+  ending in `-real`, the real app (`M2K_EXE=<path to the exe>` and `M2K_NO_MIDI_OUT=1`; only
+  `midiout-real` and `passon-real` need MIDI output, and they name nothing but the GS synth).
+  `sim/` holds `m2k simulate` scenarios, `useridle.ps1` prints how long the desktop has been
+  idle. Reuse and extend them rather than starting over: they are the only regression net there
+  is. Scripts written against the mock check the interface, not the engine.
 - This injects real input into the owner's desktop: only ever into a window you opened, keep
   runs short, and make sure nothing is left held (`snapshot().engine.held_keys` must be empty).
 - **Never send MIDI to the owner's hardware.** A controller that receives MIDI changes what it
