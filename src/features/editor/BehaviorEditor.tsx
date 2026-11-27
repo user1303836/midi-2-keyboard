@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   ArrowUp,
   ArrowUpDown,
+  FastForward,
   Hourglass,
   MousePointerClick,
   Plus,
@@ -12,11 +13,13 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
 import type { HoldTarget } from "@/bindings/HoldTarget";
+import type { ShuttleRest } from "@/bindings/ShuttleRest";
+import type { Source } from "@/bindings/Source";
 import { Button, IconButton } from "@/components/ui/button";
 import { NumberInput, Segmented } from "@/components/ui/inputs";
 import { Tooltip } from "@/components/ui/overlays";
@@ -26,7 +29,14 @@ import {
   defaultBehavior,
   emptyKeys,
   isEmptyAction,
+  shuttleAt,
+  shuttleRate,
+  shuttleRest,
+  shuttleRestZone,
+  shuttleSides,
+  shuttleTravel,
   type BehaviorType,
+  type ShuttleBehavior,
   type SourceShape,
 } from "@/lib/model";
 import { isModifier } from "@/lib/keys";
@@ -34,7 +44,8 @@ import { platform } from "@/lib/platform";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-import { ActionEditor, InlineSwitch, TargetEditor } from "./ActionEditor";
+import { ActionEditor, InlineSwitch, SourceContext, TargetEditor } from "./ActionEditor";
+import { useLiveValue } from "./fields";
 
 const ICONS: Record<BehaviorType, ReactNode> = {
   trigger: <Zap size={15} />,
@@ -42,6 +53,7 @@ const ICONS: Record<BehaviorType, ReactNode> = {
   toggle: <ToggleLeft size={15} />,
   change: <Activity size={15} />,
   step: <ArrowUpDown size={15} />,
+  shuttle: <FastForward size={15} />,
   tap_hold: <Hourglass size={15} />,
   multi_tap: <MousePointerClick size={15} />,
   cycle: <Repeat size={15} />,
@@ -65,7 +77,7 @@ export function BehaviorPicker({
     (a, b) => Number(b.fits.includes(shape)) - Number(a.fits.includes(shape)),
   );
   return (
-    <div className="grid grid-cols-4 gap-1.5">
+    <div className="grid grid-cols-3 gap-1.5">
       {sorted.map((info) => {
         const selected = info.type === value;
         const fits = info.fits.includes(shape);
@@ -376,6 +388,8 @@ export function BehaviorEditor({
         </div>
       )}
 
+      {b.type === "shuttle" && <ShuttleForm b={b} shape={shape} onChange={onChange} arm={arm} />}
+
       {b.type === "tap_hold" && (
         <div className="flex flex-col gap-2.5">
           {b.tap ? (
@@ -507,6 +521,193 @@ export function BehaviorEditor({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "2.5", "33": firings per second, short. */
+function perSecond(rate: number): string {
+  return rate < 10 ? String(Math.round(rate * 10) / 10) : String(Math.round(rate));
+}
+
+/** What a pace means for the action it repeats, where a number says more than "times a second". */
+function paceUnit(action: Action | null): { per: number; unit: string } {
+  if (action?.type === "mouse_move" && !action.absolute) {
+    const distance = Math.hypot(action.x, action.y);
+    if (distance > 0) return { per: distance, unit: "pixels a second" };
+  }
+  if (action?.type === "mouse_scroll") {
+    const notches = Math.hypot(action.dx, action.dy);
+    if (notches > 0) return { per: notches, unit: "wheel notches a second" };
+  }
+  return { per: 1, unit: "times a second" };
+}
+
+const NO_SOURCE: Source = {
+  device: null,
+  channel: null,
+  event: { type: "control_change", controller: 0, range: { min: 0, max: 127 }, encoding: "absolute" },
+  hysteresis: 0,
+  debounce_ms: 0,
+};
+
+/**
+ * Shuttle: the control's position sets the pace. The form reads like a sentence per line, and
+ * the strip at the bottom shows the control live: where it is, and how fast that is.
+ */
+function ShuttleForm({
+  b,
+  shape,
+  onChange,
+  arm,
+}: {
+  b: ShuttleBehavior;
+  shape: SourceShape;
+  onChange: (behavior: Behavior, coalesceKey?: string) => void;
+  arm: (slot: number, action: Action | null) => { autoCapture: boolean; onCaptured: () => void };
+}) {
+  const source = useContext(SourceContext);
+  const event = source?.event ?? null;
+  const live = useLiveValue(source ?? NO_SOURCE);
+  const rest = shuttleRest(b, event);
+  const sides = shuttleSides(b, event);
+  const both = sides.up && sides.down;
+  const travel = shuttleTravel(event);
+  const zone = shuttleRestZone(b, event);
+  const now = live === null ? null : shuttleAt(b, event, live);
+  const hit = event?.type === "note" || event?.type === "chord";
+
+  const unit = paceUnit((sides.up ? b.up : null) ?? (sides.down ? b.down : null));
+  const span = Math.max(1, travel.max - travel.min);
+  const at = (value: number) => `${(Math.min(Math.max(value - travel.min, 0), span) / span) * 100}%`;
+  const restText =
+    b.dead_zone === 0
+      ? `only ${zone.rest} itself`
+      : rest === "low"
+        ? `values up to ${zone.max}`
+        : rest === "high"
+          ? `values from ${zone.min}`
+          : `values ${zone.min}–${zone.max}`;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {(shape === "relative" || shape === "pulse") && (
+        <div className="rounded-md bg-warn-soft px-2.5 py-1.5 text-sm text-warn">
+          {shape === "relative"
+            ? "An endless encoder sends steps, not a position, so there is nothing to set the pace. Try Up / Down."
+            : "This message has no position, so there is nothing to set the pace. Try Press."}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+        <span className="shrink-0">{hit ? "The softest hit is" : "It rests"}</span>
+        <Segmented<ShuttleRest>
+          size="sm"
+          value={rest}
+          options={[
+            { value: "center", label: "in the middle", title: "A pitch wheel, a joystick axis, a shuttle ring: one action above the middle, another below" },
+            { value: "low", label: "at the bottom", title: "A fader, a pedal, pressure, how hard a pad is hit: the higher, the faster" },
+            { value: "high", label: "at the top", title: "A control that reads backwards: the lower, the faster" },
+          ]}
+          onChange={(next) => onChange({ ...b, rest: next })}
+        />
+      </div>
+      {sides.up && (
+        <StepSlot
+          label={both ? <><ArrowUp size={14} /> Up</> : "Repeat"}
+          action={b.up}
+          {...arm(0, b.up)}
+          onChange={(up, key) => onChange({ ...b, up }, key && `up:${key}`)}
+        />
+      )}
+      {sides.down && (
+        <StepSlot
+          label={both ? <><ArrowDown size={14} /> Down</> : "Repeat"}
+          action={b.down}
+          {...arm(both ? 1 : 0, b.down)}
+          onChange={(down, key) => onChange({ ...b, down }, key && `down:${key}`)}
+        />
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+        <span className="whitespace-nowrap">From every</span>
+        <Ms
+          label="Pace near rest"
+          max={600000}
+          value={b.slow_ms}
+          onChange={(slow_ms) => onChange({ ...b, slow_ms, fast_ms: Math.min(b.fast_ms, slow_ms) }, "slow")}
+        />
+        <span className="whitespace-nowrap">{hit ? "for the softest hit to every" : "near rest to every"}</span>
+        <Ms
+          label="Pace at the end of the travel"
+          value={b.fast_ms}
+          onChange={(fast_ms) => onChange({ ...b, fast_ms, slow_ms: Math.max(b.slow_ms, fast_ms) }, "fast")}
+        />
+        <span className="whitespace-nowrap">{hit ? "for the hardest" : "at the end of its travel"}</span>
+      </div>
+      <div className="text-sm text-fg-faint" data-shuttle-pace>
+        That is {perSecond(shuttleRate(b, 0) * unit.per)} to {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.
+      </div>
+      <InlineSwitch
+        label="Gentle start"
+        hint="The pace builds up slowly at first and reaches full speed only at the very end: fine control near rest, where it matters (what game controllers do for a pointer)"
+        checked={b.curve === "squared"}
+        onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
+      />
+      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+        <span className="whitespace-nowrap">{hit ? "Ignore the softest" : "Counts as rest:"}</span>
+        <NumberInput
+          aria-label="Dead zone"
+          suffix="%"
+          className="w-[72px]"
+          min={0}
+          max={90}
+          value={b.dead_zone}
+          onChange={(dead_zone) => onChange({ ...b, dead_zone }, "dead")}
+        />
+        <span>
+          {hit ? "of the velocity range" : "of the travel next to the rest position"}{" "}
+          <span className="text-fg-faint">({restText})</span>
+        </span>
+      </div>
+      <div>
+        <div
+          className="relative h-[22px] overflow-hidden rounded-md border bg-app"
+          role="img"
+          aria-label="Where the control is, and the part of its travel that counts as rest"
+        >
+          {sides.down && (
+            <span
+              className="absolute inset-y-0 bg-linear-to-l from-transparent to-midi-soft"
+              style={{ left: 0, width: at(zone.min) }}
+            />
+          )}
+          {sides.up && (
+            <span
+              className="absolute inset-y-0 bg-linear-to-r from-transparent to-midi-soft"
+              style={{ left: at(zone.max), right: 0 }}
+            />
+          )}
+          <span
+            className="absolute inset-y-0 border-x border-line-strong bg-hover"
+            style={{ left: at(zone.min), width: `max(3px, calc(${at(zone.max)} - ${at(zone.min)}))` }}
+            title={`Rest: ${restText}`}
+          />
+          {live !== null && (
+            <span
+              className="pointer-events-none absolute inset-y-0 w-[2px] bg-midi shadow-[0_0_6px_var(--midi)]"
+              style={{ left: `calc(${at(live)} - 1px)` }}
+            />
+          )}
+        </div>
+        <div className="mt-1 text-sm text-fg-faint" data-shuttle-live>
+          {live === null
+            ? hit
+              ? "Hit the pad to see how fast that is."
+              : "Move the control to see how fast that is."
+            : now
+              ? `At ${live}: ${both ? (now.side === "up" ? "up, " : "down, ") : ""}${perSecond(now.rate * paceUnit(now.side === "up" ? b.up : b.down).per)} ${paceUnit(now.side === "up" ? b.up : b.down).unit}.`
+              : `At ${live}: at rest.`}
+        </div>
+      </div>
     </div>
   );
 }

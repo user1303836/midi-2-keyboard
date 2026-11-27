@@ -222,7 +222,7 @@ const MappingRow = memo(function MappingRow({
         {mapping.name && <div className="truncate text-sm leading-tight text-fg-muted">{mapping.name}</div>}
         <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
           {mapping.behavior.type === "change" && <span className="shrink-0 text-sm text-fg-muted">on change</span>}
-          <BehaviorSummary behavior={mapping.behavior} />
+          <BehaviorSummary behavior={mapping.behavior} event={mapping.source.event} />
         </div>
       </div>
 

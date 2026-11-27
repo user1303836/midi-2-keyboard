@@ -37,7 +37,7 @@ import type { HoldTarget } from "@/bindings/HoldTarget";
 import type { SourceEvent } from "@/bindings/SourceEvent";
 import { KeyCombo } from "@/components/ui/misc";
 import { actionText, targetText } from "@/lib/describe";
-import { isEmptyAction, sourceShape } from "@/lib/model";
+import { isEmptyAction, shuttleSides, sourceShape } from "@/lib/model";
 import { useApp } from "@/lib/store";
 import { cn, formatMs } from "@/lib/utils";
 
@@ -153,8 +153,11 @@ function Verb({ children }: { children: ReactNode }) {
   return <span className="shrink-0 text-sm text-fg-muted">{children}</span>;
 }
 
-/** The right-hand side of a mapping row: what the behavior does, as words + tokens. */
-export function BehaviorSummary({ behavior }: { behavior: Behavior }) {
+/**
+ * The right-hand side of a mapping row: what the behavior does, as words + tokens. `event` is
+ * the mapping's source, for the behaviors that read differently depending on the control.
+ */
+export function BehaviorSummary({ behavior, event = null }: { behavior: Behavior; event?: SourceEvent | null }) {
   const b = behavior;
   switch (b.type) {
     case "trigger":
@@ -253,5 +256,28 @@ export function BehaviorSummary({ behavior }: { behavior: Behavior }) {
           {((b.fast?.up && !isEmptyAction(b.fast.up)) || (b.fast?.down && !isEmptyAction(b.fast.down))) && <Verb>+ fast</Verb>}
         </>
       );
+    case "shuttle": {
+      const sides = shuttleSides(b, event);
+      const up = sides.up && b.up && !isEmptyAction(b.up) ? b.up : null;
+      const down = sides.down && b.down && !isEmptyAction(b.down) ? b.down : null;
+      const both = sides.up && sides.down;
+      return (
+        <>
+          {up && (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              {both && <ArrowUp size={13} className="shrink-0 text-fg-muted" />}
+              <ActionView action={up} />
+            </span>
+          )}
+          {down && (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              {both && <ArrowDown size={13} className="shrink-0 text-fg-muted" />}
+              <ActionView action={down} />
+            </span>
+          )}
+          <Verb>{up || down ? "· faster the further" : "does nothing yet"}</Verb>
+        </>
+      );
+    }
   }
 }

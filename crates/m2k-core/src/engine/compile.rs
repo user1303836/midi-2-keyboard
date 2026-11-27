@@ -606,6 +606,8 @@ fn compile_mapping(
             max_burst: *max_burst,
             invert: *invert,
         },
+        // Not built yet: the mapping loads and does nothing.
+        Behavior::Shuttle { .. } => CBehavior::Inert,
     };
 
     for action in behavior_actions(&mapping.behavior) {
@@ -703,6 +705,7 @@ fn behavior_actions(behavior: &Behavior) -> Vec<&Action> {
             .chain(down)
             .chain(fast.iter().flat_map(|fast| fast.up.iter().chain(&fast.down)))
             .collect(),
+        Behavior::Shuttle { up, down, .. } => up.iter().chain(down).collect(),
     }
 }
 

@@ -3,6 +3,8 @@ import type { Action } from "./Action";
 import type { FastStep } from "./FastStep";
 import type { HoldTarget } from "./HoldTarget";
 import type { Repeat } from "./Repeat";
+import type { ShuttleCurve } from "./ShuttleCurve";
+import type { ShuttleRest } from "./ShuttleRest";
 
 /**
  * How the stream of matching messages is interpreted, and what it does.
@@ -19,4 +21,33 @@ invert: boolean,
  * A second speed for fast movement (coarse steps for a quick spin, fine steps for a
  * slow one).
  */
-fast: FastStep | null, };
+fast: FastStep | null, } | { "type": "shuttle", 
+/**
+ * Fires while the value is above the rest position.
+ */
+up: Action | null, 
+/**
+ * Fires while the value is below the rest position.
+ */
+down: Action | null, 
+/**
+ * Where the control rests. `None` = the middle for pitch bend (a sprung wheel), the low
+ * end for everything else (a fader, a pedal, pressure, velocity).
+ */
+rest: ShuttleRest | null, 
+/**
+ * How much of the travel on each side of the rest position still counts as rest, in
+ * percent (0..=90): a sprung wheel rarely comes back to exactly the same value.
+ */
+dead_zone: number, 
+/**
+ * Time between firings just outside the dead zone, in milliseconds.
+ */
+slow_ms: number, 
+/**
+ * Time between firings at the end of the travel, in milliseconds: at least 1, at most
+ * `slow_ms`. Shorter than the engine can wake up (a few milliseconds), firings are made
+ * up for in small batches, so "move the pointer 1 pixel" every 1 ms is a smooth
+ * 1000 pixels per second.
+ */
+fast_ms: number, curve: ShuttleCurve, };

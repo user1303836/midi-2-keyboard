@@ -20,7 +20,8 @@ name: string, enabled: boolean, source: Source, behavior: Behavior,
 conditions: Array<Condition>, 
 /**
  * Limits how often this mapping's actions fire. Applies to `Trigger` (press/release),
- * `Cycle`, `Change` and `Step`; ignored by `Hold`, `Toggle`, `TapHold` and `MultiTap`.
+ * `Cycle`, `Change` and `Step`; ignored by `Hold`, `Toggle`, `TapHold`, `MultiTap` and
+ * `Shuttle` (which sets its own pace).
  */
 rate_limit: RateLimit | null, 
 /**

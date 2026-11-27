@@ -160,10 +160,10 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 /// A ranged, absolute source written without `range` (by hand) gets the range its behavior
-/// needs: everything for `change` and `step`, which follow the value, and the "pressed" half
-/// for press/release behaviors, which would otherwise be pressed forever: 64..=127 for 7-bit
-/// values, 8192..=16383 for 14-bit ones, and 12288..=16383 for pitch bend (8192 is where the
-/// wheel rests). Relative encoders ignore the range and are left alone.
+/// needs: everything for `change`, `step` and `shuttle`, which follow the value, and the
+/// "pressed" half for press/release behaviors, which would otherwise be pressed forever:
+/// 64..=127 for 7-bit values, 8192..=16383 for 14-bit ones, and 12288..=16383 for pitch bend
+/// (8192 is where the wheel rests). Relative encoders ignore the range and are left alone.
 fn fill_missing_ranges(value: &mut Value) {
     let Some(profiles) = value.get_mut("profiles").and_then(Value::as_array_mut) else {
         return;
@@ -175,7 +175,7 @@ fn fill_missing_ranges(value: &mut Value) {
         for mapping in mappings {
             let follows_value = matches!(
                 mapping.pointer("/behavior/type").and_then(Value::as_str),
-                Some("change" | "step")
+                Some("change" | "step" | "shuttle")
             );
             let Some(event) = mapping.pointer_mut("/source/event").and_then(Value::as_object_mut)
             else {
@@ -374,6 +374,12 @@ fn sanitize_mapping(mapping: &mut Mapping) {
         Behavior::Trigger { repeat: Some(repeat), .. } => {
             repeat.interval_ms = repeat.interval_ms.max(5);
         }
+        Behavior::Shuttle { dead_zone, slow_ms, fast_ms, .. } => {
+            *dead_zone = (*dead_zone).min(90);
+            *fast_ms = (*fast_ms).clamp(1, 60_000);
+            // The far end is never slower than the near one.
+            *slow_ms = (*slow_ms).clamp(*fast_ms, 600_000);
+        }
         _ => {}
     }
     if let Some(limit) = &mut mapping.rate_limit {
@@ -429,6 +435,7 @@ fn behavior_actions_mut(behavior: &mut Behavior) -> Vec<&mut Action> {
             }
             all
         }
+        Behavior::Shuttle { up, down, .. } => up.iter_mut().chain(down.iter_mut()).collect(),
         Behavior::Hold { .. } | Behavior::Toggle { .. } => Vec::new(),
     }
 }

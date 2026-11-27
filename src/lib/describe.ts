@@ -15,7 +15,7 @@ import type { ValueRange } from "@/bindings/ValueRange";
 
 import { comboText, keyLabel, mouseButtonLabel } from "./keys";
 import { ccName, noteName, rpnName } from "./midi";
-import { isEmptyAction, isFullRange, rangeLimit } from "./model";
+import { isEmptyAction, isFullRange, rangeLimit, shuttleSides, type ShuttleBehavior } from "./model";
 import { formatMs, plural } from "./utils";
 
 export function rangeText(range: ValueRange, limit: number): string {
@@ -330,7 +330,19 @@ export function mappingBrief(mapping: Mapping, config: Config | null = null): st
       return [b.up && `↑ ${actionText(b.up, config)}`, b.down && `↓ ${actionText(b.down, config)}`]
         .filter(Boolean)
         .join("  ") || "nothing yet";
+    case "shuttle": {
+      const sides = shuttleSides(b, mapping.source.event);
+      const up = sides.up && b.up && !isEmptyAction(b.up) ? actionText(b.up, config) : null;
+      const down = sides.down && b.down && !isEmptyAction(b.down) ? actionText(b.down, config) : null;
+      if (up && down) return `↑ ${up}  ↓ ${down}, faster the further`;
+      return up || down ? `${up ?? down}, faster the further` : "nothing yet";
+    }
   }
+}
+
+/** "every 400 ms → every 30 ms": the two ends of a shuttle's pace. */
+export function shuttlePaceText(behavior: ShuttleBehavior): string {
+  return `every ${formatMs(behavior.slow_ms)} near rest to every ${formatMs(behavior.fast_ms)} at the end`;
 }
 
 /** A complete sentence describing a mapping, for tooltips and screen readers. */
@@ -389,6 +401,16 @@ export function mappingSentence(mapping: Mapping, config: Config | null, octave 
         .filter(Boolean)
         .join("; ");
       break;
+    case "shuttle": {
+      const sides = shuttleSides(b, mapping.source.event);
+      const both = sides.up && sides.down;
+      const parts = [
+        sides.up && b.up && !isEmptyAction(b.up) && `${both ? "while pushed up" : "while it is up"}: ${actionText(b.up, config)}`,
+        sides.down && b.down && !isEmptyAction(b.down) && `${both ? "while pushed down" : "while it is down"}: ${actionText(b.down, config)}`,
+      ].filter(Boolean);
+      what = parts.length ? `${parts.join("; ")}; repeating ${shuttlePaceText(b)}` : "does nothing yet";
+      break;
+    }
   }
   const extras = [
     mapping.rate_limit && rateLimitText(mapping.rate_limit),

@@ -335,7 +335,8 @@ pub struct Mapping {
     #[serde(default)]
     pub conditions: Vec<Condition>,
     /// Limits how often this mapping's actions fire. Applies to `Trigger` (press/release),
-    /// `Cycle`, `Change` and `Step`; ignored by `Hold`, `Toggle`, `TapHold` and `MultiTap`.
+    /// `Cycle`, `Change` and `Step`; ignored by `Hold`, `Toggle`, `TapHold`, `MultiTap` and
+    /// `Shuttle` (which sets its own pace).
     #[serde(default)]
     pub rate_limit: Option<RateLimit>,
     /// MIDI sent back to the controller to show a state (light a pad while a toggle is on, ...).
@@ -375,7 +376,7 @@ pub struct Feedback {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeedbackWhen {
     /// While this mapping is engaged — what the UI shows as ON: a `Hold` / `TapHold` target
-    /// that is down, a latched `Toggle`.
+    /// that is down, a latched `Toggle`, a `Shuttle` that is repeating.
     #[default]
     Engaged,
     /// While the named layer is on, whoever switched it (a "shift" light).
@@ -789,6 +790,81 @@ pub enum Behavior {
         #[serde(default)]
         fast: Option<FastStep>,
     },
+    /// Repeat an action for as long as the control is pushed away from where it rests: the
+    /// further away, the faster. A shuttle ring, a pitch wheel that scrolls, a joystick axis
+    /// that moves the pointer, a pad that fires faster the harder it is pressed.
+    ///
+    /// The source's `range` is the travel (for a note or chord: the `velocity` range, with the
+    /// velocity of the hit as the position). `rest` is the place in it where nothing happens,
+    /// `dead_zone` how much of the travel next to it still counts as rest. Beyond that, `up`
+    /// fires again and again while the value is above the rest position and `down` while it is
+    /// below: once every `slow_ms` just outside the dead zone, once every `fast_ms` at the end
+    /// of the travel, in between at a rate that grows with the distance (see `curve`).
+    ///
+    /// Leaving the dead zone fires at once (a nudge is one step), but never sooner after the
+    /// previous firing than the pace of that position allows, so a control that hovers on the
+    /// edge of the dead zone cannot fire faster than `slow_ms`. A new value sets the pace from
+    /// that moment (the interval that was running is not waited out). It stops when the control
+    /// is back at rest, when the source goes inactive (the note is released, the value leaves
+    /// `range`), when its device disconnects, on pause and on "release all"; it starts again
+    /// with the next message from the control. Conditions are checked at every firing. While it
+    /// repeats, the mapping counts as engaged (shown as on; see [`FeedbackWhen::Engaged`]).
+    /// `rate_limit` does not apply. Needs a source with a position: a note, a chord or an
+    /// absolute ranged control. Relative encoders and pulses never fire it.
+    Shuttle {
+        /// Fires while the value is above the rest position.
+        #[serde(default)]
+        up: Option<Action>,
+        /// Fires while the value is below the rest position.
+        #[serde(default)]
+        down: Option<Action>,
+        /// Where the control rests. `None` = the middle for pitch bend (a sprung wheel), the low
+        /// end for everything else (a fader, a pedal, pressure, velocity).
+        #[serde(default)]
+        rest: Option<ShuttleRest>,
+        /// How much of the travel on each side of the rest position still counts as rest, in
+        /// percent (0..=90): a sprung wheel rarely comes back to exactly the same value.
+        #[serde(default = "default_dead_zone")]
+        dead_zone: u8,
+        /// Time between firings just outside the dead zone, in milliseconds.
+        #[serde(default = "default_shuttle_slow")]
+        slow_ms: u32,
+        /// Time between firings at the end of the travel, in milliseconds: at least 1, at most
+        /// `slow_ms`. Shorter than the engine can wake up (a few milliseconds), firings are made
+        /// up for in small batches, so "move the pointer 1 pixel" every 1 ms is a smooth
+        /// 1000 pixels per second.
+        #[serde(default = "default_shuttle_fast")]
+        fast_ms: u32,
+        #[serde(default)]
+        curve: ShuttleCurve,
+    },
+}
+
+/// Where a [`Behavior::Shuttle`] control rests, within the source's range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ShuttleRest {
+    /// At the low end: only `up` can fire (a fader, a pedal, pressure, velocity).
+    Low,
+    /// In the middle (64 of 0..=127, 8192 of 0..=16383; in general `(min + max + 1) / 2`):
+    /// `up` above it, `down` below it (a pitch wheel, a joystick axis, a shuttle ring).
+    Center,
+    /// At the high end: only `down` can fire (a control that reads backwards).
+    High,
+}
+
+/// How the pace of a [`Behavior::Shuttle`] grows with the distance from rest. With `d` the
+/// distance beyond the dead zone as a fraction of the travel that is left (0..=1), and the rates
+/// `1 / slow_ms` and `1 / fast_ms`: `rate = slow + (fast - slow) * f(d)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ShuttleCurve {
+    /// `f(d) = d`: twice as far is twice as fast.
+    #[default]
+    Linear,
+    /// `f(d) = d * d`: gentle near rest, where precision matters, and fast only at the end
+    /// (what game controllers do for a pointer or a camera).
+    Squared,
 }
 
 /// The "turned fast" half of [`Behavior::Step`]: when a single message moves the control by at
@@ -832,6 +908,15 @@ fn default_repeat_interval() -> u32 {
 }
 fn default_max_burst() -> u16 {
     8
+}
+fn default_dead_zone() -> u8 {
+    5
+}
+fn default_shuttle_slow() -> u32 {
+    400
+}
+fn default_shuttle_fast() -> u32 {
+    30
 }
 
 /// Auto-fire timing for [`Behavior::Trigger`].

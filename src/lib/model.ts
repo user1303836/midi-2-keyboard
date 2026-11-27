@@ -13,6 +13,7 @@ import type { MidiSend } from "@/bindings/MidiSend";
 import type { Profile } from "@/bindings/Profile";
 import type { RateLimit } from "@/bindings/RateLimit";
 import type { SequenceStep } from "@/bindings/SequenceStep";
+import type { ShuttleRest } from "@/bindings/ShuttleRest";
 import type { Source } from "@/bindings/Source";
 import type { SourceEvent } from "@/bindings/SourceEvent";
 import type { ValueRange } from "@/bindings/ValueRange";
@@ -223,6 +224,12 @@ export const BEHAVIOR_TYPES: BehaviorTypeInfo[] = [
     fits: ["continuous", "relative"],
   },
   {
+    type: "shuttle",
+    label: "Shuttle",
+    hint: "Repeat for as long as it is pushed away from rest — the further, the faster",
+    fits: ["continuous"],
+  },
+  {
     type: "tap_hold",
     label: "Tap or hold",
     hint: "One action for a quick tap, another for a long press",
@@ -267,8 +274,75 @@ export function primaryAction(behavior: Behavior): Action | null {
     case "change":
       return behavior.action;
     case "step":
+    case "shuttle":
       return behavior.up ?? behavior.down;
   }
+}
+
+// ----- Shuttle: the pace follows the position -----
+
+export type ShuttleBehavior = Extract<Behavior, { type: "shuttle" }>;
+
+/**
+ * Where a shuttle's control rests. Left open (`null`, also in hand-written configs) it follows
+ * the source: a pitch wheel springs back to the middle, everything else rests at the bottom.
+ */
+export function shuttleRest(behavior: ShuttleBehavior, event: SourceEvent | null): ShuttleRest {
+  return behavior.rest ?? (event?.type === "pitch_bend" ? "center" : "low");
+}
+
+/** Which of a shuttle's two directions can ever fire, given where it rests. */
+export function shuttleSides(behavior: ShuttleBehavior, event: SourceEvent | null): { up: boolean; down: boolean } {
+  const rest = shuttleRest(behavior, event);
+  return { up: rest !== "high", down: rest !== "low" };
+}
+
+/** The travel a shuttle works with: the source's range (for notes and chords: the velocity). */
+export function shuttleTravel(event: SourceEvent | null): ValueRange {
+  if (!event) return { ...FULL7 };
+  if (event.type === "note") return event.velocity;
+  if (event.type === "chord") return { min: 1, max: 127 };
+  return sourceRange(event) ?? { ...FULL7 };
+}
+
+/**
+ * The values that count as rest, as the engine works them out: the rest position plus, on each
+ * side, `dead_zone` percent of the travel that side has (rounded up).
+ */
+export function shuttleRestZone(behavior: ShuttleBehavior, event: SourceEvent | null): { rest: number; min: number; max: number } {
+  const travel = shuttleTravel(event);
+  const where = shuttleRest(behavior, event);
+  const rest = where === "low" ? travel.min : where === "high" ? travel.max : Math.floor((travel.min + travel.max + 1) / 2);
+  const dead = (span: number) => Math.ceil((span * behavior.dead_zone) / 100);
+  return { rest, min: rest - dead(rest - travel.min), max: rest + dead(travel.max - rest) };
+}
+
+/** Firings per second at `fraction` (0..1) of the way from the dead zone to the end of the travel. */
+export function shuttleRate(behavior: ShuttleBehavior, fraction: number): number {
+  const slow = 1000 / Math.max(1, behavior.slow_ms);
+  const fast = 1000 / Math.max(1, behavior.fast_ms);
+  const d = Math.min(1, Math.max(0, fraction));
+  return slow + (fast - slow) * (behavior.curve === "squared" ? d * d : d);
+}
+
+/**
+ * The firing a shuttle is at for `value`: the direction and the pace, or `null` at rest.
+ * (The engine does the same arithmetic; this one draws the editor's preview and runs the mock.)
+ */
+export function shuttleAt(
+  behavior: ShuttleBehavior,
+  event: SourceEvent | null,
+  value: number,
+): { side: "up" | "down"; fraction: number; rate: number } | null {
+  const travel = shuttleTravel(event);
+  if (value < travel.min || value > travel.max) return null;
+  const zone = shuttleRestZone(behavior, event);
+  if (value >= zone.min && value <= zone.max) return null;
+  const side = value > zone.rest ? "up" : "down";
+  const room = side === "up" ? travel.max - zone.max : zone.min - travel.min;
+  const beyond = side === "up" ? value - zone.max : zone.min - value;
+  const fraction = room > 0 ? beyond / room : 1;
+  return { side, fraction, rate: shuttleRate(behavior, fraction) };
 }
 
 export function targetToAction(target: HoldTarget): Action {
@@ -310,6 +384,8 @@ export function defaultBehavior(type: BehaviorType, previous?: Behavior): Behavi
       return { type, action, min_change: 0 };
     case "step":
       return { type, up: action, down: emptyKeys(), step: 1, max_burst: 8, invert: false, fast: null };
+    case "shuttle":
+      return { type, up: action, down: emptyKeys(), rest: null, dead_zone: 5, slow_ms: 400, fast_ms: 30, curve: "linear" };
   }
 }
 
@@ -682,6 +758,9 @@ export function layerSwitches(config: Config, layer: string): Mapping[] {
         case "step":
           hit = sets(b.up) || sets(b.down) || sets(b.fast?.up) || sets(b.fast?.down);
           break;
+        case "shuttle":
+          hit = sets(b.up) || sets(b.down);
+          break;
       }
       if (hit) result.push(mapping);
     }
@@ -735,6 +814,10 @@ export function knownLayers(config: Config): string[] {
           visitAction(b.down);
           visitAction(b.fast?.up ?? null);
           visitAction(b.fast?.down ?? null);
+          break;
+        case "shuttle":
+          visitAction(b.up);
+          visitAction(b.down);
           break;
       }
     }
