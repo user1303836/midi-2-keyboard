@@ -28,6 +28,7 @@ impl TimerResolution {
     pub fn begin() -> Self {
         #[cfg(windows)]
         {
+            opt_out_of_power_throttling();
             // SAFETY: plain Win32 call without pointer arguments. 0 = TIMERR_NOERROR.
             let active = unsafe { windows_sys::Win32::Media::timeBeginPeriod(1) } == 0;
             TimerResolution { active }
@@ -49,4 +50,50 @@ impl Drop for TimerResolution {
             }
         }
     }
+}
+
+/// Keeps the process out of Windows' power throttling, once per process. Windows 11 stops
+/// honouring a process's timer resolution while none of its windows is visible, and the tray is
+/// this app's normal state: a 20 ms repeat would land on 15.6 ms ticks. Efficiency-mode
+/// throttling can also slow a process it takes for background work. For an input tool that
+/// idles at 0 % both opt-outs cost nothing.
+///
+/// One request carries both: each one replaces the whole setting, so a second would undo the
+/// first. Windows 10 does not know the timer flag and refuses that request, which then goes out
+/// for the speed alone. A failure leaves things as they were and is ignored.
+#[cfg(windows)]
+fn opt_out_of_power_throttling() {
+    use std::sync::Once;
+
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetProcessInformation,
+    };
+
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let opt_out = |mechanisms: u32| {
+            // Taken over (ControlMask) and switched off (StateMask 0).
+            let state = PROCESS_POWER_THROTTLING_STATE {
+                Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask: mechanisms,
+                StateMask: 0,
+            };
+            // SAFETY: the pseudo handle of this process and a pointer to a local struct of the
+            // size passed.
+            unsafe {
+                SetProcessInformation(
+                    GetCurrentProcess(),
+                    ProcessPowerThrottling,
+                    (&state as *const PROCESS_POWER_THROTTLING_STATE).cast(),
+                    size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+                ) != 0
+            }
+        };
+        let speed = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        if !opt_out(speed | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION) {
+            opt_out(speed);
+        }
+    });
 }
