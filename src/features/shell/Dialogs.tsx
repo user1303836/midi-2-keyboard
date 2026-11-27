@@ -401,7 +401,8 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       : ""}
                     Pass it on to a virtual port (loopMIDI, for one) and point the other program at that port: both then get
                     every message, mapped or not, also while output is paused. What comes straight back from such a port is
-                    recognized as an echo and not acted on.
+                    recognized as an echo and not acted on. If the other program cannot open the port, switch the port off
+                    in this list: this app then leaves it alone.
                   </div>
                 </div>
               )}
