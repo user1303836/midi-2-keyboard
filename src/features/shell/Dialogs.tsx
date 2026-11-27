@@ -397,12 +397,13 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   </div>
                   <div className="mt-1.5 text-sm leading-snug text-fg-faint">
                     {platform() === "windows"
-                      ? "Windows gives a MIDI device to one program at a time. "
-                      : ""}
-                    Pass it on to a virtual port (loopMIDI, for one) and point the other program at that port: both then get
-                    every message, mapped or not, also while output is paused. What comes straight back from such a port is
-                    recognized as an echo and not acted on. If the other program cannot open the port, switch the port off
-                    in this list: this app then leaves it alone.
+                      ? "Windows gives a MIDI device to one program at a time. Pass it on to a virtual port (loopMIDI, for one) and point the other program at that port: both then get every message, mapped or not, also while output is paused."
+                      : platform() === "macos"
+                        ? "A copy of every message, mapped or not, also while output is paused: to a virtual port another program listens to (an IAC bus, set up in Audio MIDI Setup), or on to other gear."
+                        : "A copy of every message, mapped or not, also while output is paused. (On Linux other programs can usually open the device directly; this is for sending it somewhere else as well.)"}{" "}
+                    What comes straight back from a loopback port is recognized as an echo and not acted on.
+                    {platform() === "windows" &&
+                      " If the other program cannot open the port, switch the port off in this list: this app then leaves it alone."}
                   </div>
                 </div>
               )}
