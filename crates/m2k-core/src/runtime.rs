@@ -592,7 +592,7 @@ impl Inner {
         }
         // Before the engine sees the config: a device switched off in it must already be
         // refused when the engine sends the lights of the new config.
-        self.update_output_policy(config);
+        self.update_output_policy();
         self.engine.set_config(config.clone());
         if let Some(input) = lock(&self.input).as_ref() {
             let policy = policy_for(config);
@@ -605,15 +605,16 @@ impl Inner {
 
     /// Leaves the outputs of switched-off devices alone (the engine asks first; the manager's
     /// policy refuses them as well).
-    fn update_output_policy(&self, config: &Config) {
-        let outputs = lock(&self.outputs).clone();
-        let disabled = disabled_outputs(config, &outputs);
+    ///
+    /// One at a time, from the config and the output list as they are now: a config save and an
+    /// output port change can race, and the later one must not apply an older config.
+    fn update_output_policy(&self) {
         let mut current = lock(&self.output_disabled);
+        let disabled = disabled_outputs(&lock(&self.config), &lock(&self.outputs));
         if *current == disabled {
             return;
         }
         *current = disabled.clone();
-        drop(current);
         if let Some(manager) = lock(&self.output).as_ref() {
             manager.set_policy(PortPolicy::AllExcept(disabled));
         }
@@ -786,16 +787,17 @@ impl Inner {
             }
             InputEvent::PortsChanged { ports } => {
                 let previous = std::mem::replace(&mut *lock(&self.ports), ports.clone());
-                let connected = connected_inputs(&ports);
-                if connected != connected_inputs(&previous) {
-                    self.engine.midi_inputs_changed(connected);
-                }
+                // What a closed port held is released first, then the lights follow the inputs.
                 for old in previous.iter().filter(|p| p.state == PortState::Connected) {
                     let still_connected =
                         ports.iter().any(|p| p.name == old.name && p.state == PortState::Connected);
                     if !still_connected {
                         self.engine.device_disconnected(&old.name);
                     }
+                }
+                let connected = connected_inputs(&ports);
+                if connected != connected_inputs(&previous) {
+                    self.engine.midi_inputs_changed(connected);
                 }
                 self.emit(RuntimeEvent::Ports { ports });
             }
@@ -818,8 +820,7 @@ impl Inner {
                     .map(|port| port.name.clone())
                     .collect();
                 // Outputs paired with switched-off inputs may have come or gone.
-                let config = lock(&self.config).clone();
-                self.update_output_policy(&config);
+                self.update_output_policy();
                 if !refresh.is_empty() {
                     self.engine.midi_outputs_changed(refresh);
                 }

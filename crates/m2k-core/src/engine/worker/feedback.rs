@@ -5,7 +5,11 @@
 //! state it shows (engaged, a layer, the effective profile) with what it last sent, and only a
 //! change goes out. A refresh sends the current state again even when it did not change: when
 //! the set of live mappings changes (a mapping that stops being live sends its `off`, before the
-//! newly live ones send theirs), when output ports (re)appear and with a new MIDI sink. A config
+//! newly live ones send theirs), when output ports (re)appear and with a new MIDI sink. A light
+//! with nowhere to go (its controller closed or gone) forgets what it showed and is sent once it
+//! has an output again, so a reopen (inputs closed, then open, outputs replaced) sends each light
+//! once whichever order the reports come in, except that a light whose input reopened before its
+//! output gets its state again when the output comes back (what it was sent before was lost). A config
 //! install sends the state of new mappings and of those whose feedback changed (the old light's
 //! `off` first), and the `off` of lit mappings it removes. Pausing sends only what it changes (a
 //! toggle or hold it releases goes dark; layers and profiles keep their lights), so the pads stay
@@ -142,6 +146,7 @@ impl Worker {
             }
             if target.is_none() {
                 rt.fb.force = false;
+                rt.fb.sent = None;
                 return;
             }
         }
@@ -155,6 +160,9 @@ impl Worker {
         };
         let force = std::mem::take(&mut rt.fb.force);
         let Some(target) = target else {
+            // Nowhere to send (its controller is gone or closed): what it shows is unknown, so it
+            // is sent once it can be again.
+            rt.fb.sent = None;
             return;
         };
         let port = target.name().clone();

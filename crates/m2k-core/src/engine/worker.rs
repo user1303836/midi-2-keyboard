@@ -311,8 +311,11 @@ impl Worker {
                     connected: connected.into_iter().map(Arc::from).collect(),
                     known: true,
                 };
+                // Targets are worked out again; a light whose controller came back (or that has
+                // one for the first time) is sent, the others are left as they are. The output
+                // side refreshes what a port that came back lost.
                 self.outputs_generation += 1;
-                self.refresh_feedback();
+                self.fb_due = true;
             }
             Command::DeviceDisconnected(device) => self.device_disconnected(&device),
             Command::SetPaused(paused) => self.set_gate(|g| g.paused = paused),
