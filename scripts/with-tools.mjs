@@ -3,13 +3,15 @@
 // On Windows with the Rust GNU toolchain, building needs `dlltool` and `windres` from MinGW-w64.
 // If a portable MinGW lives in `.tools/mingw64` (in this directory or any parent, so per-agent
 // clones under `.agents/<name>/` find the shared copy), its `bin` directory is prepended to PATH.
-// Everywhere else this is a transparent pass-through.
+// Release builds additionally get their home-directory paths rewritten (see below). Everything
+// else is a transparent pass-through.
 //
 //   node scripts/with-tools.mjs cargo check --workspace
 //   node scripts/with-tools.mjs tauri dev
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -34,6 +36,25 @@ if (process.platform === "win32") {
     if (parent === dir) break;
     dir = parent;
   }
+}
+
+// Release builds do not carry the home directory of whoever built them. Rust keeps the source
+// path of every dependency for its panic messages (…/.cargo/registry/src/…), a few hundred of
+// them, so an exe or installer built on someone's machine would otherwise name their account.
+// The paths are rewritten to start at "~". Only for release builds (the debug caches stay
+// valid), and only when the environment sets no rustflags of its own — which would replace any
+// rustflags from a cargo config file, as these do; M2K_KEEP_PATHS=1 switches this off.
+const release =
+  (command === "tauri" && args[0] === "build" && !args.includes("--debug")) ||
+  (command === "cargo" && (args.includes("--release") || args.includes("-r")));
+if (release && !env.RUSTFLAGS && !env.CARGO_ENCODED_RUSTFLAGS && !env.M2K_KEEP_PATHS) {
+  const home = os.homedir();
+  const remap = [
+    [env.CARGO_HOME ?? path.join(home, ".cargo"), "~/.cargo"],
+    [env.RUSTUP_HOME ?? path.join(home, ".rustup"), "~/.rustup"],
+    [home, "~"],
+  ];
+  env.CARGO_ENCODED_RUSTFLAGS = remap.flatMap(([from, to]) => ["--remap-path-prefix", `${from}=${to}`]).join("\x1f");
 }
 
 // Prefer locally installed CLIs (node_modules/.bin), e.g. `tauri`.

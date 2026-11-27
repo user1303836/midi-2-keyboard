@@ -316,6 +316,10 @@ npm run tauri dev        # run the desktop app in development mode
 npm run tauri build      # build a release bundle into target/release/bundle
 ```
 
+A release built this way does not carry your home directory: Rust keeps the source path of every
+dependency inside the program, and the build script rewrites those to start at `~` (set
+`M2K_KEEP_PATHS=1` to leave them as they are). A plain `cargo build --release` does not do this.
+
 Other useful commands:
 
 ```sh

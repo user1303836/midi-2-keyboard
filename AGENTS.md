@@ -114,7 +114,10 @@ npm run cargo -- run -p m2k-cli -- devices   # the headless CLI (devices / monit
 ```
 
 `npm run cargo -- <args>` and `npm run tauri -- <args>` are plain `cargo` / `tauri` wrapped by
-`scripts/with-tools.mjs`, which puts `.tools/mingw64/bin` on `PATH` when it exists. The Tauri shell
+`scripts/with-tools.mjs`, which puts `.tools/mingw64/bin` on `PATH` when it exists. For release
+builds it also passes `--remap-path-prefix` for the home directory, so an exe or installer does
+not carry the account name of whoever built it (a few hundred dependency paths otherwise do).
+**Make release builds through the wrapper**; a plain `cargo build --release` leaves the paths in. The Tauri shell
 (`src-tauri`) is not a default workspace member: it needs the built frontend (`npm run build`) to
 compile, so plain `cargo check` skips it.
 
