@@ -243,7 +243,9 @@ function match(mapping: Mapping, device: string, message: MidiMessage): Edge | n
   const event = source.event;
   if (event.type === "note" && (message.type === "note_on" || message.type === "note_off")) {
     if (message.note < event.notes.min || message.note > event.notes.max) return null;
-    return message.type === "note_on" && message.velocity > 0 ? "press" : "release";
+    if (message.type !== "note_on" || message.velocity === 0) return "release";
+    // Velocity zones: a hit outside the mapping's range does not reach it.
+    return message.velocity >= event.velocity.min && message.velocity <= event.velocity.max ? "press" : null;
   }
   if (event.type === "control_change" && message.type === "control_change") {
     if (message.controller !== event.controller) return null;

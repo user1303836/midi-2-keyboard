@@ -8,6 +8,7 @@ import {
   CopyPlus,
   Filter,
   FolderInput,
+  Gauge,
   FolderPlus,
   GripVertical,
   Lightbulb,
@@ -58,7 +59,7 @@ import { cn, plural } from "@/lib/utils";
 import { mapMessage } from "../monitor/Monitor";
 import { bulk, pickedMappings } from "./BulkPanel";
 import { NoteRunDialog } from "./NoteRunDialog";
-import { ZonesDialog } from "./ZonesDialog";
+import { ZonesDialog, type ZoneKind } from "./ZonesDialog";
 import { BehaviorSummary, SourceIcon } from "./tokens";
 
 const FLASH: Keyframe[] = [
@@ -323,7 +324,7 @@ export function MappingList({ profile }: { profile: Profile }) {
   const config = useApp((state) => state.config);
   const octave = useOctave();
   const [runOpen, setRunOpen] = useState(false);
-  const [zonesOpen, setZonesOpen] = useState(false);
+  const [zones, setZones] = useState<ZoneKind | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   // One right-click menu for the whole list (not one per row): which row it is for, if any.
@@ -488,10 +489,16 @@ export function MappingList({ profile }: { profile: Profile }) {
                   <div className="text-sm text-fg-faint">A stretch of keys or pads to a row of computer keys</div>
                 </div>
               </MenuItem>
-              <MenuItem icon={<SlidersHorizontal size={14} />} className="h-auto py-1.5" onSelect={() => setZonesOpen(true)}>
+              <MenuItem icon={<SlidersHorizontal size={14} />} className="h-auto py-1.5" onSelect={() => setZones("position")}>
                 <div>
                   <div>Split a knob into zones…</div>
                   <div className="text-sm text-fg-faint">A knob or fader as a selector switch: a key per position</div>
+                </div>
+              </MenuItem>
+              <MenuItem icon={<Gauge size={14} />} className="h-auto py-1.5" onSelect={() => setZones("velocity")}>
+                <div>
+                  <div>Split a pad by how hard it is hit…</div>
+                  <div className="text-sm text-fg-faint">Soft and hard hits send different keys</div>
                 </div>
               </MenuItem>
             </MenuContent>
@@ -499,7 +506,9 @@ export function MappingList({ profile }: { profile: Profile }) {
         </div>
       </div>
       <NoteRunDialog open={runOpen} onOpenChange={setRunOpen} />
-      <ZonesDialog open={zonesOpen} onOpenChange={setZonesOpen} />
+      {/* One instance per kind, so each starts out fresh. */}
+      <ZonesDialog kind="position" open={zones === "position"} onOpenChange={(open) => setZones(open ? "position" : null)} />
+      <ZonesDialog kind="velocity" open={zones === "velocity"} onOpenChange={(open) => setZones(open ? "velocity" : null)} />
 
       {profile.mappings.length === 0 ? (
         <EmptyState onAdd={quickAdd} />
@@ -563,8 +572,11 @@ export function MappingList({ profile }: { profile: Profile }) {
                 <ContextMenuItem icon={<Piano size={14} />} onSelect={() => setRunOpen(true)}>
                   Map a run of notes…
                 </ContextMenuItem>
-                <ContextMenuItem icon={<SlidersHorizontal size={14} />} onSelect={() => setZonesOpen(true)}>
+                <ContextMenuItem icon={<SlidersHorizontal size={14} />} onSelect={() => setZones("position")}>
                   Split a knob into zones…
+                </ContextMenuItem>
+                <ContextMenuItem icon={<Gauge size={14} />} onSelect={() => setZones("velocity")}>
+                  Split a pad by how hard it is hit…
                 </ContextMenuItem>
               </>
             )}
