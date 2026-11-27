@@ -85,6 +85,9 @@ src/bindings/   TypeScript types GENERATED from the Rust types with ts-rs. Never
     came from. Port names go through the same normalization on both sides.
   - An empty action (no keys, no text, a macro without effect) is no action: the engine never
     fires or reports it.
+  - A shuttle's arithmetic exists twice: in the engine and, for the editor's live preview and
+    the mock, in `src/lib/model.ts` (`shuttleRestZone`, `shuttleAt`, `shuttleRate`). The doc
+    comment on `Behavior::Shuttle` is the contract; change both sides together.
 - Platform-specific code lives behind `cfg` in per-OS modules. Every platform must keep compiling;
   CI builds all three.
 

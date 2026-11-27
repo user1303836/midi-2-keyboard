@@ -442,10 +442,23 @@ function VirtualController() {
               setBend(value);
               void send([status(0xe0), value & 0x7f, value >> 7]);
             }}
+            // A pitch wheel is sprung: letting go (of the pointer, of an arrow key, of the focus)
+            // takes it back to the middle, which is also what stops a shuttle mapped to it.
             onPointerUp={() => {
               setBend(8192);
               void send([status(0xe0), 0, 64]);
             }}
+            onKeyUp={() => {
+              if (bend === 8192) return;
+              setBend(8192);
+              void send([status(0xe0), 0, 64]);
+            }}
+            onBlur={() => {
+              if (bend === 8192) return;
+              setBend(8192);
+              void send([status(0xe0), 0, 64]);
+            }}
+            title="Springs back to the middle when you let go, like a real pitch wheel"
             className="min-w-0 flex-1 accent-(--midi)"
           />
           <span className="w-[44px] text-right font-mono tabular-nums">{bend - 8192}</span>
