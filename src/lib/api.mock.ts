@@ -384,10 +384,26 @@ export function createMockBackend(): Backend {
         else if (b.type === "toggle" && edge === "press") description = `toggle ${targetText(b.target)}`;
         else if (b.type === "step" && edge === "value" && (b.up || b.down)) description = actionText(b.up ?? b.down, config);
         if (!description) continue;
+        // Layers, just enough for "this pad does something else while that one is held": a
+        // mapping whose layer condition is not met says so instead of firing (a release always
+        // goes through), and a hold or toggle on a layer switches it.
+        const unmet =
+          edge === "release"
+            ? undefined
+            : mapping.conditions.find((c) => c.type === "layer" && status.layers.includes(c.layer) !== c.active);
         const limit = mapping.rate_limit;
         const last = lastFired.get(mapping.id) ?? -Infinity;
         const limited = limit !== null && performance.now() - last < limit.interval_ms;
-        if (!limited) lastFired.set(mapping.id, performance.now());
+        if (!limited && !unmet) lastFired.set(mapping.id, performance.now());
+        const blocked = status.learning || status.paused || limited || unmet !== undefined;
+        if (!blocked && (b.type === "hold" || b.type === "toggle") && b.target.type === "layer") {
+          const layer = b.target.layer;
+          const on = b.type === "hold" ? edge !== "release" : !status.layers.includes(layer);
+          if (status.layers.includes(layer) !== on) {
+            status.layers = on ? [...status.layers, layer].sort() : status.layers.filter((name) => name !== layer);
+            setTimeout(emitStatus, 0);
+          }
+        }
         fired.push({
           type: "fired",
           time_us: now(),
@@ -398,9 +414,11 @@ export function createMockBackend(): Backend {
             ? { type: "skipped", reason: "learning", detail: "" }
             : status.paused
               ? { type: "skipped", reason: "paused", detail: "" }
-              : limited
-                ? { type: "skipped", reason: "rate_limited", detail: "" }
-                : { type: "sent" },
+              : unmet?.type === "layer"
+                ? { type: "skipped", reason: "condition_failed", detail: `layer "${unmet.layer}" is ${unmet.active ? "off" : "on"}` }
+                : limited
+                  ? { type: "skipped", reason: "rate_limited", detail: "" }
+                  : { type: "sent" },
         });
       }
     }

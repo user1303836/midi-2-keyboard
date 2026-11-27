@@ -573,6 +573,20 @@ export function LastEvent() {
     });
     const offFired = onFired((log) => {
       if (!current || !current.midi.mappings.includes(log.mapping_id)) return;
+      // One message can reach several mappings — the layer variants of a pad, for one: the
+      // variant whose layer is on fires, its sibling reports that its condition is not met.
+      // What was sent is the news; a mapping that merely did not apply must not replace it.
+      // (A failure still does: that is something to act on.)
+      const shownNow = current.fired;
+      if (
+        log.outcome.type === "skipped" &&
+        shownNow &&
+        shownNow.sent &&
+        !shownNow.earlier &&
+        shownNow.mappingId !== log.mapping_id
+      ) {
+        return;
+      }
       current = {
         midi: current.midi,
         fired: {
