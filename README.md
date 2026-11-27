@@ -38,6 +38,9 @@ it speaks, acceleration included), or an NRPN parameter.
 - **On change** – fire whenever a knob/fader moves
 - **Up / Down** – one action per step up, another per step down (absolute controls and encoders),
   optionally a second, coarser action for fast turns
+- **Shuttle** – repeat an action for as long as the control is pushed away from where it rests,
+  faster the further: a pitch wheel that scrolls, a shuttle ring, a joystick axis that moves the
+  pointer, a fader that sets an auto-fire pace, a pad that fires faster the harder it is hit
 - **Tap or hold** – different actions for a quick tap and a long press (including dual-role keys:
   tap = Esc, hold = Ctrl)
 - **Multi-tap** – single / double / triple press, plus a long press, on one control
@@ -62,8 +65,10 @@ mappings as plain text. The list points out mappings that share a control, and *
 touching* jumps to the mapping of whatever control you touch.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
-*why* something was not sent), the engine's measured MIDI-to-key latency, an activity dot on
-every mapping in the list, and an on-screen virtual controller for trying things without hardware.
+*why* something was not sent; a repeating shuttle shows as one row about every tenth of a second,
+with ×N, rather than a row per firing), the engine's measured MIDI-to-key latency, an activity
+dot on every mapping in the list, and an on-screen virtual controller for trying things without
+hardware.
 
 **Safety** — everything the app holds down is tracked and released on pause, profile switch,
 device disconnect, config change and exit; a key release the system refuses is retried until it
@@ -85,7 +90,6 @@ from the tray with no browser view loaded at all (about 30 MB).
 
 Not there yet:
 
-- Output that scales with the value (knob position → pointer speed, jog / shuttle rates).
 - Per-application profiles on Wayland (there is no portable way to ask which window is in front).
 - Signed installers: Windows SmartScreen and macOS Gatekeeper warn about the downloads.
 
@@ -225,6 +229,11 @@ Shorthands:
   half starts above the resting center.
 - Keys are named like the browser's `KeyboardEvent.code`: `KeyA`, `Digit1`, `ArrowUp`, `Space`,
   `ControlLeft`, `ShiftLeft`, `F13`, `NumpadAdd`, `AudioVolumeUp`.
+- A shuttle needs only its actions: `{"type": "shuttle", "up": …, "down": …}`. It rests in the
+  middle for pitch bend and at the bottom for everything else (`"rest": "center" | "low" |
+  "high"`), the 5 % next to that still count as rest (`dead_zone`), and it fires every 400 ms
+  just outside that and every 30 ms at the end of the travel (`slow_ms`, `fast_ms`), in between
+  at a rate that grows evenly with the distance; `"curve": "squared"` keeps it gentle near rest.
 - Leaving out `version`, `id`, `name`, `velocity`, a tap-hold's `hold_ms` or a multi-tap's
   `window_ms` is fine; the full format is what the app writes back when you change anything in
   it.

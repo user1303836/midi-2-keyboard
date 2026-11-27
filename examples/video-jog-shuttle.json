@@ -261,6 +261,49 @@
             },
             "hysteresis": 0
           }
+        },
+        {
+          "behavior": {
+            "curve": "linear",
+            "dead_zone": 5,
+            "down": {
+              "keys": [
+                "ArrowLeft"
+              ],
+              "tap_ms": 5,
+              "type": "keys"
+            },
+            "fast_ms": 30,
+            "rest": null,
+            "slow_ms": 400,
+            "type": "shuttle",
+            "up": {
+              "keys": [
+                "ArrowRight"
+              ],
+              "tap_ms": 5,
+              "type": "keys"
+            }
+          },
+          "conditions": [],
+          "enabled": true,
+          "feedback": null,
+          "id": "ex-video-walk",
+          "name": "Walk the timeline, faster the further",
+          "rate_limit": null,
+          "source": {
+            "channel": null,
+            "debounce_ms": 0,
+            "device": null,
+            "event": {
+              "range": {
+                "max": 16383,
+                "min": 0
+              },
+              "type": "pitch_bend"
+            },
+            "hysteresis": 0
+          }
         }
       ],
       "name": "Video editing: jog & shuttle"
