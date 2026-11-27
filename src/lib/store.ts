@@ -833,7 +833,7 @@ export const useApp = create<State>((set, get) => {
     updateDevice(name, change, coalesceKey) {
       get().edit((config) => {
         const existing = config.devices.find((d) => d.name === name);
-        const base: DeviceConfig = existing ?? { name, alias: "", enabled: true };
+        const base: DeviceConfig = existing ?? { name, alias: "", enabled: true, forward_to: null };
         const next = change(base);
         if (existing && next === existing) return config;
         const devices = existing

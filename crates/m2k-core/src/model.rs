@@ -276,6 +276,24 @@ pub struct DeviceConfig {
     /// Disabled devices are never opened.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Pass every message this device sends on to this MIDI output, unchanged ("MIDI thru"), so
+    /// that another program can listen there while this app holds the device: on Windows most
+    /// devices serve one program at a time. The name of an output port as in
+    /// `Snapshot::outputs` (typically a virtual loopback port); `None` = off.
+    ///
+    /// Everything is passed on (also clock, active sensing and SysEx), whether or not a mapping
+    /// reacts, and also while output is paused, while learning and while the app's own window
+    /// has focus: this is routing, not something a mapping does. It goes through the same
+    /// output path as lights, so it never blocks, a target switched off under MIDI devices gets
+    /// nothing, and neither does anything when MIDI output is switched off altogether.
+    ///
+    /// A loopback port hands what it is sent straight back on the input of the same name. Such
+    /// an echo (a message equal to one passed on to that port a moment ago) is dropped when it
+    /// arrives: it is not matched, not shown and not passed on again, so a mapping never fires
+    /// twice and two devices passed on to each other cannot loop. The device's own output is
+    /// not a valid target.
+    #[serde(default)]
+    pub forward_to: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -271,6 +271,13 @@ pub fn sanitize(config: &mut Config) -> Vec<String> {
 
     let mut seen_devices = HashSet::new();
     config.devices.retain(|d| !d.name.is_empty() && seen_devices.insert(d.name.clone()));
+    for device in &mut config.devices {
+        sanitize_port(&mut device.forward_to);
+        // Passing a device on to itself would only send its own messages back to it.
+        if device.forward_to.as_deref() == Some(device.name.as_str()) {
+            device.forward_to = None;
+        }
+    }
 
     let settings = &mut config.settings;
     settings.tap_ms = settings.tap_ms.clamp(1, 5_000);

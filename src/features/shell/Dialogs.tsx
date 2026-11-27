@@ -9,6 +9,7 @@ import { Badge, Kbd, Option } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlays";
 import { deviceLabel } from "@/lib/describe";
 import { pauseHotkeyProblem } from "@/lib/keys";
+import { platform } from "@/lib/platform";
 import { api, restartAsAdmin, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -268,6 +269,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 // Devices
 // ---------------------------------------------------------------------------------------------
 
+/** "Pass on to: nothing" (a select cannot carry an empty value). */
+const NOWHERE = "(nothing)";
+
 export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const ports = useApp((state) => state.ports);
   const outputs = useApp((state) => state.outputs);
@@ -275,6 +279,8 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const connectNew = useApp((state) => state.config.settings.connect_new_devices);
   const updateDevice = useApp((state) => state.updateDevice);
   const forgetDevice = useApp((state) => state.forgetDevice);
+  /** Devices whose "pass it on" row was opened (it stays open by itself once a target is set). */
+  const [passing, setPassing] = useState<string[]>([]);
 
   const names = Array.from(new Set([...ports.map((p) => p.name), ...devices.map((d) => d.name)]));
 
@@ -303,6 +309,11 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           const port = ports.find((p) => p.name === name);
           const device = devices.find((d) => d.name === name);
           const enabled = device ? device.enabled : connectNew;
+          // Passing a device on ("MIDI thru"): anywhere but back to itself.
+          const forward = device?.forward_to ?? null;
+          const targets = outputs.filter((o) => o.name !== name).map((o) => o.name);
+          if (forward !== null && !targets.includes(forward)) targets.push(forward);
+          const passOpen = forward !== null || passing.includes(name);
           return (
             <div key={name} className="rounded-lg border bg-app p-3">
               <div className="flex items-center gap-3">
@@ -324,6 +335,18 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                         : port.state === "disabled"
                           ? "Present, switched off"
                           : "Could not be opened"}
+                    {enabled && port?.state === "connected" && !passOpen && targets.length > 0 && (
+                      <>
+                        {" · "}
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-fg"
+                          onClick={() => setPassing([...passing, name])}
+                        >
+                          pass it on…
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <TextInput
@@ -351,6 +374,35 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                   <span className="selectable">
                     {(port.error || "The device could not be opened").trim().replace(/[.!]?$/, ".")} It is retried automatically.
                   </span>
+                </div>
+              )}
+              {passOpen && (
+                <div className="mt-2.5 border-t pt-2.5">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                    <span>Pass everything it sends on to</span>
+                    <Select
+                      aria-label={`Pass ${name} on to`}
+                      size="sm"
+                      className="w-[250px]"
+                      value={forward ?? NOWHERE}
+                      options={[
+                        { value: NOWHERE, label: "Nothing" },
+                        ...targets.map((target) => ({
+                          value: target,
+                          label: outputs.some((o) => o.name === target) ? target : `${target} (not connected)`,
+                        })),
+                      ]}
+                      onChange={(value) => updateDevice(name, (d) => ({ ...d, forward_to: value === NOWHERE ? null : value }))}
+                    />
+                  </div>
+                  <div className="mt-1.5 text-sm leading-snug text-fg-faint">
+                    {platform() === "windows"
+                      ? "Windows gives a MIDI device to one program at a time. "
+                      : ""}
+                    Pass it on to a virtual port (loopMIDI, for one) and point the other program at that port: both then get
+                    every message, mapped or not, also while output is paused. What comes straight back from such a port is
+                    recognized as an echo and not acted on.
+                  </div>
                 </div>
               )}
             </div>

@@ -39,7 +39,7 @@ function sampleConfig(): Config {
       injector: { windows_key_mode: "auto", linux_backend: "auto" },
       pause_hotkey: [],
     },
-    devices: [{ name: "Launchkey Mini MK3", alias: "Launchkey", enabled: true }],
+    devices: [{ name: "Launchkey Mini MK3", alias: "Launchkey", enabled: true, forward_to: null }],
     selected_profile: "default",
     profiles: [
       {
@@ -441,6 +441,7 @@ export function createMockBackend(): Backend {
           { name: "Launchkey Mini MK3", state: "disabled", error: "", is_virtual: false },
           { name: "Arturia BeatStep", state: "disabled", error: "", is_virtual: false },
           { name: "Microsoft GS Wavetable Synth", state: "disabled", error: "", is_virtual: false },
+          { name: "loopMIDI Port", state: "disabled", error: "", is_virtual: false },
         ],
         permissions: { can_inject: true, can_detect_foreground: true, hint: "" },
         warnings: [],
