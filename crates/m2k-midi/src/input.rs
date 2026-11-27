@@ -653,22 +653,42 @@ impl Drop for Connection {
 }
 
 /// The callback of one connection: decode and deliver, while the gate is open.
+///
+/// It runs inside midir's OS callback (an `extern "system"` function on Windows, a CoreMIDI or
+/// ALSA thread elsewhere), where a panic would abort the whole process. So nothing unwinds out of
+/// it: if decoding panics, the bytes of that callback are dropped, the parser starts over (a SysEx
+/// in progress is lost), it is logged once per port, and the port stays open. The gate cannot
+/// wedge the port afterwards: `lock` takes a poisoned guard anyway, and the poison is cleared.
+/// (The sink is guarded separately, by [`Delivery::send`].)
 fn port_callback(
     delivery: Arc<Delivery>,
     port: Arc<str>,
     gate: Arc<Mutex<bool>>,
 ) -> impl FnMut(u64, &[u8], &mut ()) + Send + 'static {
     let mut parser = Parser::new();
+    let mut failed_before = false;
     move |_os_time, bytes, _| {
-        let open = lock(&gate);
-        if !*open {
-            return;
+        let handled = catch_unwind(AssertUnwindSafe(|| {
+            let open = lock(&gate);
+            if !*open {
+                return;
+            }
+            let time_us = delivery.now_us();
+            parser.feed(bytes, &mut |message| {
+                delivery.send(InputEvent::Message { port: port.clone(), time_us, message });
+            });
+            drop(open);
+        }));
+        if handled.is_err() {
+            parser = Parser::new();
+            gate.clear_poison();
+            if !failed_before {
+                failed_before = true;
+                log::error!(
+                    "MIDI input {port}: incoming bytes could not be decoded and were dropped"
+                );
+            }
         }
-        let time_us = delivery.now_us();
-        parser.feed(bytes, &mut |message| {
-            delivery.send(InputEvent::Message { port: port.clone(), time_us, message });
-        });
-        drop(open);
     }
 }
 

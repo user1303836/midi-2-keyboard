@@ -543,7 +543,9 @@ fn output_thread(shared: Arc<Shared>, options: OutputOptions, ready: mpsc::SyncS
                 continue;
             }
             if catch_unwind(AssertUnwindSafe(|| poller.deliver(pending, &policy))).is_err() {
-                log::error!("sending MIDI to {} failed unexpectedly", pending.port);
+                // The connection is in an unknown state now: close it (the next poll opens it
+                // again while the port is wanted) and say so on the port.
+                poller.failed(&pending.port, "The MIDI driver failed unexpectedly while sending.");
             }
         }
         poller.report();
@@ -788,6 +790,14 @@ impl Poller {
     }
 
     /// Sends one accepted send: opens the port first if nothing was sent to it yet.
+    /// Marks the port called `name` as failed: its connection is dropped and the next poll opens
+    /// it again while it is wanted.
+    fn failed(&mut self, name: &str, error: &str) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.name == name) {
+            entry.failed(error.to_owned());
+        }
+    }
+
     fn deliver(&mut self, pending: &Pending, policy: &PortPolicy) {
         if !policy.allows(&pending.port) {
             return; // switched off after `send()` checked
