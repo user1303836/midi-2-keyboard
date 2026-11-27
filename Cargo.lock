@@ -2442,6 +2442,7 @@ dependencies = [
 name = "midi-2-keyboard"
 version = "0.1.0"
 dependencies = [
+ "gio",
  "gtk",
  "log",
  "m2k-core",
