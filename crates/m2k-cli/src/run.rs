@@ -17,6 +17,7 @@ use m2k_core::{
     Snapshot, store,
 };
 use m2k_midi::input::{PortState, PortStatus};
+use m2k_midi::output::paired_output_name;
 
 use crate::devices::{describe_derived, describe_message, describe_state};
 
@@ -220,6 +221,20 @@ impl Printer {
             self.out(format_args!("  output   {}", snapshot.engine.backend));
         } else {
             self.out(format_args!("  output   NOT WORKING: {}", snapshot.backend_error));
+        }
+        for device in config.devices.iter().filter(|device| device.enabled) {
+            let Some(target) = &device.forward_to else {
+                continue;
+            };
+            let names = snapshot.outputs.iter().map(|port| port.name.as_str());
+            let note = if paired_output_name(&device.name, names) == Some(target.as_str()) {
+                " (its own output: nothing is passed on)"
+            } else if !snapshot.outputs.iter().any(|port| port.name == *target) {
+                " (no MIDI output of that name right now)"
+            } else {
+                ""
+            };
+            self.out(format_args!("  thru     {} \u{2192} {target}{note}", device.name));
         }
         let outputs = output_list(&snapshot.outputs);
         if dry_run {

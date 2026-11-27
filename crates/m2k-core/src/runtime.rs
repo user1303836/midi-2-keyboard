@@ -9,15 +9,21 @@
 //! anything else, applies a valid edit like [`Runtime::set_config`] (without rewriting the
 //! file) and reports an invalid one while the previous configuration stays active.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
+use m2k_midi::MidiMessage;
 use m2k_midi::input::{InputEvent, InputManager, InputOptions, PortPolicy, PortState, PortStatus};
-use m2k_midi::output::{OutputEvent, OutputManager, OutputOptions, SendError, paired_output_name};
+use m2k_midi::output::{
+    InvalidMidi, MAX_SYSEX_LEN, OutputEvent, OutputManager, OutputOptions, SendError,
+    paired_output_name,
+};
+use m2k_midi::parser::encode;
 use m2k_output::platform::{self, Permissions};
 use m2k_output::{Injector, Key, NullInjector};
 
@@ -92,6 +98,12 @@ struct Inner {
     /// Outputs switched off under MIDI devices (and the outputs paired with those inputs):
     /// the manager's policy, shared with the engine's [`OutputSink`].
     output_disabled: Arc<Mutex<Vec<String>>>,
+    /// Why no MIDI is sent at all (a dry run, `M2K_NO_MIDI_OUT`), if so.
+    no_output: Option<&'static str>,
+    /// MIDI thru (`DeviceConfig::forward_to`); `thru_active`: some device is passed on, so a
+    /// message from a device that is not costs one atomic load.
+    thru: Mutex<Thru>,
+    thru_active: AtomicBool,
     permissions: Mutex<Permissions>,
     backend_error: Mutex<String>,
     /// Keys the current output backend cannot send (shown as unavailable in the UI).
@@ -183,6 +195,91 @@ impl MidiSink for OutputSink {
     fn paired_output(&self, input: &str) -> Option<String> {
         let names = lock(&self.names);
         paired_output_name(input, names.iter().map(String::as_str)).map(str::to_string)
+    }
+}
+
+/// How long a message passed on is remembered, to recognise its echo.
+const ECHO_WINDOW: Duration = Duration::from_millis(500);
+
+/// The most messages remembered per thru target.
+const ECHO_MEMORY: usize = 512;
+
+/// What was passed on to one target lately: the bytes and when, oldest first.
+type Passed = VecDeque<(Box<[u8]>, Instant)>;
+
+/// MIDI thru (`DeviceConfig::forward_to`): which device is passed on to which output, and what
+/// was just passed on, so that the echo a loopback port hands back on its input is dropped.
+#[derive(Default)]
+struct Thru {
+    /// Input port -> output port (a device's own output is never its target).
+    routes: HashMap<String, Arc<str>>,
+    /// Input port -> the target whose echo arrives there: the input named like the target, or
+    /// the one paired with it. Inputs that are nobody's target are not in it.
+    echoes: HashMap<String, Arc<str>>,
+    /// Per target: what was passed on lately.
+    sent: HashMap<Arc<str>, Passed>,
+    /// Per device: the problem with its target reported last, with that target.
+    problems: HashMap<String, (Arc<str>, String)>,
+    /// Device and target pairs for which a message the target cannot take was reported.
+    refused: HashSet<(String, Arc<str>)>,
+}
+
+/// What keeps a message from being passed on, said after "Cannot pass “X” on to “Y”: ".
+enum Refusal {
+    /// About the target: reported again when it changes, forgotten once a message goes through.
+    Target(String),
+    /// About the message (a SysEx too long for an output): reported once.
+    Message(String),
+}
+
+const THRU_SWITCHED_OFF: &str = "it is switched off under MIDI devices";
+const THRU_ABSENT: &str = "there is no MIDI output of that name right now";
+
+impl Thru {
+    /// Whether `bytes` arriving on `input` is the echo of something passed on a moment ago (the
+    /// entry is used up).
+    fn take_echo(&mut self, input: &str, bytes: &[u8], now: Instant) -> bool {
+        let Some(target) = self.echoes.get(input) else {
+            return false;
+        };
+        let Some(memory) = self.sent.get_mut(target) else {
+            return false;
+        };
+        while memory
+            .front()
+            .is_some_and(|(_, at)| now.saturating_duration_since(*at) >= ECHO_WINDOW)
+        {
+            memory.pop_front();
+        }
+        match memory.iter().position(|(sent, _)| **sent == *bytes) {
+            Some(i) => {
+                memory.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn remember(&mut self, target: &Arc<str>, bytes: &[u8], now: Instant) {
+        let memory = self.sent.entry(target.clone()).or_default();
+        while memory.len() >= ECHO_MEMORY
+            || memory
+                .front()
+                .is_some_and(|(_, at)| now.saturating_duration_since(*at) >= ECHO_WINDOW)
+        {
+            memory.pop_front();
+        }
+        memory.push_back((bytes.into(), now));
+    }
+
+    /// Takes back the newest entry equal to `bytes`: it was not sent after all.
+    fn forget(&mut self, target: &Arc<str>, bytes: &[u8]) {
+        let Some(memory) = self.sent.get_mut(target) else {
+            return;
+        };
+        if let Some(i) = memory.iter().rposition(|(sent, _)| **sent == *bytes) {
+            memory.remove(i);
+        }
     }
 }
 
@@ -346,6 +443,9 @@ impl Runtime {
                 outputs: Mutex::new(outputs.clone()),
                 output_names,
                 output_disabled,
+                no_output,
+                thru: Mutex::new(Thru::default()),
+                thru_active: AtomicBool::new(false),
                 permissions: Mutex::new(platform::permissions()),
                 backend_error: Mutex::new(backend_error),
                 unsupported_keys: Mutex::new(unsupported),
@@ -377,6 +477,10 @@ impl Runtime {
             inner.on_output_event(OutputEvent::PortsChanged { ports: now });
         }
 
+        // The thru routes before the first message can arrive; the inputs paired with a target
+        // follow once the inputs are known.
+        inner.rebuild_thru();
+
         // MIDI input.
         let for_input = Arc::downgrade(&inner);
         let manager = InputManager::start(
@@ -395,6 +499,7 @@ impl Runtime {
         inner.engine.midi_inputs_changed(connected_inputs(&ports));
         *lock(&inner.ports) = ports;
         *lock(&inner.input) = Some(manager);
+        inner.rebuild_thru();
 
         // Event flusher.
         let for_flusher = Arc::downgrade(&inner);
@@ -593,6 +698,7 @@ impl Inner {
         // Before the engine sees the config: a device switched off in it must already be
         // refused when the engine sends the lights of the new config.
         self.update_output_policy();
+        self.rebuild_thru();
         self.engine.set_config(config.clone());
         if let Some(input) = lock(&self.input).as_ref() {
             let policy = policy_for(config);
@@ -783,7 +889,11 @@ impl Inner {
     fn on_input_event(&self, event: InputEvent) {
         match event {
             InputEvent::Message { port, time_us, message } => {
-                self.engine.midi(&port, time_us, message);
+                if self.thru_active.load(Ordering::Relaxed) {
+                    self.through(&port, time_us, message);
+                } else {
+                    self.engine.midi(&port, time_us, message);
+                }
             }
             InputEvent::PortsChanged { ports } => {
                 let previous = std::mem::replace(&mut *lock(&self.ports), ports.clone());
@@ -799,6 +909,8 @@ impl Inner {
                 if connected != connected_inputs(&previous) {
                     self.engine.midi_inputs_changed(connected);
                 }
+                // Inputs paired with a thru target hand its echo back.
+                self.rebuild_thru();
                 self.emit(RuntimeEvent::Ports { ports });
             }
         }
@@ -819,14 +931,182 @@ impl Inner {
                     .filter(|port| replaced || !previous.contains(port))
                     .map(|port| port.name.clone())
                     .collect();
-                // Outputs paired with switched-off inputs may have come or gone.
+                // Outputs paired with switched-off inputs may have come or gone, and so may the
+                // outputs a device is passed on to.
                 self.update_output_policy();
+                self.rebuild_thru();
                 if !refresh.is_empty() {
                     self.engine.midi_outputs_changed(refresh);
                 }
                 self.emit(RuntimeEvent::Outputs { outputs: ports });
             }
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // MIDI thru
+    // -----------------------------------------------------------------------------------------
+
+    /// A message from `port` while some device is passed on: dropped if it is the echo of
+    /// something passed on; otherwise on to its target when `port` is passed on, and to the
+    /// engine. Called on the threads that deliver MIDI input (one per port on some systems).
+    fn through(&self, port: &str, time_us: u64, message: MidiMessage) {
+        // Undecodable bytes (an undefined status byte, a message cut short, the first bytes of a
+        // SysEx too long to keep) are no MIDI an output takes: never passed on, never an echo.
+        if matches!(message, MidiMessage::Unknown { .. }) {
+            self.engine.midi(port, time_us, message);
+            return;
+        }
+        let now = Instant::now();
+        let mut thru = lock(&self.thru);
+        let target = thru.routes.get(port).cloned();
+        let echoes = thru.echoes.contains_key(port);
+        if target.is_none() && !echoes {
+            drop(thru);
+            self.engine.midi(port, time_us, message);
+            return;
+        }
+        let bytes = encode(&message);
+        if echoes && thru.take_echo(port, &bytes, now) {
+            // Not matched, not shown, not passed on again.
+            return;
+        }
+        drop(thru);
+        let Some(target) = target else {
+            self.engine.midi(port, time_us, message);
+            return;
+        };
+        let outcome = self.pass_on(&target, &bytes, now);
+        self.engine.midi(port, time_us, message);
+        self.note_thru(port, &target, outcome);
+    }
+
+    /// Hands `bytes` to the output manager for `target` behind the guards of lights and Send
+    /// MIDI: nothing at all without MIDI output, nothing to a port switched off under MIDI
+    /// devices. It never blocks and opens the port on first use. Remembered for its echo.
+    fn pass_on(&self, target: &Arc<str>, bytes: &[u8], now: Instant) -> Result<(), Refusal> {
+        if let Some(problem) = self.thru_problem(target) {
+            return Err(Refusal::Target(problem));
+        }
+        let Some(manager) = lock(&self.output).clone() else {
+            return Ok(()); // shutting down
+        };
+        // Remembered before it goes out: the echo may come back on another thread at once.
+        lock(&self.thru).remember(target, bytes, now);
+        let Err(error) = manager.send(Some(target), bytes) else {
+            return Ok(());
+        };
+        lock(&self.thru).forget(target, bytes);
+        Err(match error {
+            SendError::Disabled(_) => Refusal::Target(THRU_SWITCHED_OFF.into()),
+            SendError::UnknownPort(_) => Refusal::Target(THRU_ABSENT.into()),
+            SendError::Invalid(
+                InvalidMidi::TooLong { len, .. } | InvalidMidi::SysExTooLong { len, .. },
+            ) => Refusal::Message(format!(
+                "a SysEx of {len} bytes is longer than a MIDI output takes ({MAX_SYSEX_LEN} at \
+                 most), so such messages are not passed on"
+            )),
+            SendError::Invalid(error) => Refusal::Message(error.to_string()),
+            other => Refusal::Target(other.to_string()),
+        })
+    }
+
+    /// Why nothing can be passed on to `target` now (`None`: it can), worded to follow
+    /// "Cannot pass “X” on to “Y”: ". A port that could not be opened is retried by the output
+    /// manager on its own, and passed on to again once it is open.
+    fn thru_problem(&self, target: &str) -> Option<String> {
+        if let Some(reason) = self.no_output {
+            return Some(reason.to_string());
+        }
+        if lock(&self.output_disabled).iter().any(|name| name == target) {
+            return Some(THRU_SWITCHED_OFF.into());
+        }
+        match lock(&self.outputs).iter().find(|port| port.name == target) {
+            None => Some(THRU_ABSENT.into()),
+            Some(port) if port.state == PortState::Error => {
+                Some(format!("it cannot be opened. {}", port.error).trim_end().to_string())
+            }
+            Some(_) => None,
+        }
+    }
+
+    /// Reports what kept `device` from being passed on, once per device, target and state:
+    /// about the target (missing, switched off, cannot be opened) again when that changes and
+    /// quietly forgotten once a message goes through; about a message it cannot take once.
+    fn note_thru(&self, device: &str, target: &Arc<str>, outcome: Result<(), Refusal>) {
+        let mut thru = lock(&self.thru);
+        let problem = match outcome {
+            Ok(()) => {
+                if !thru.problems.is_empty() {
+                    thru.problems.remove(device);
+                }
+                return;
+            }
+            Err(Refusal::Target(problem)) => {
+                if thru.problems.get(device).is_some_and(|(t, p)| t == target && *p == problem) {
+                    return;
+                }
+                thru.problems.insert(device.to_string(), (target.clone(), problem.clone()));
+                problem
+            }
+            Err(Refusal::Message(problem)) => {
+                if !thru.refused.insert((device.to_string(), target.clone())) {
+                    return;
+                }
+                problem
+            }
+        };
+        drop(thru);
+        let mut message = format!(
+            "Cannot pass \u{201C}{device}\u{201D} on to \u{201C}{target}\u{201D}: {problem}"
+        );
+        if !message.ends_with('.') {
+            message.push('.');
+        }
+        self.emit_error(message);
+    }
+
+    /// Works out the thru routes from the config and the ports as they are now: at start, on a
+    /// config change (which so takes effect at once) and when ports come or go. The echo memory
+    /// of targets that are gone is forgotten. One at a time (a save and a port change can race,
+    /// and the later one must not store routes worked out from the older config).
+    fn rebuild_thru(&self) {
+        let mut thru = lock(&self.thru);
+        let devices: Vec<(String, String)> = lock(&self.config)
+            .devices
+            .iter()
+            .filter(|device| device.enabled)
+            .filter_map(|device| Some((device.name.clone(), device.forward_to.clone()?)))
+            .collect();
+        let outputs = lock(&self.output_names).clone();
+        let inputs: Vec<String> = lock(&self.ports).iter().map(|port| port.name.clone()).collect();
+        let paired = |input: &str| {
+            paired_output_name(input, outputs.iter().map(String::as_str)).map(str::to_string)
+        };
+        let mut routes: HashMap<String, Arc<str>> = HashMap::new();
+        for (device, target) in devices {
+            // The device's own output is not a target.
+            if target.is_empty() || target == device || paired(&device).as_deref() == Some(&*target)
+            {
+                continue;
+            }
+            routes.insert(device, Arc::from(target));
+        }
+        let mut echoes: HashMap<String, Arc<str>> = HashMap::new();
+        for target in routes.values() {
+            echoes.insert(target.to_string(), target.clone());
+            for input in &inputs {
+                if paired(input).as_deref() == Some(&**target) {
+                    echoes.insert(input.clone(), target.clone());
+                }
+            }
+        }
+        thru.sent.retain(|target, _| routes.values().any(|routed| routed == target));
+        thru.problems.retain(|device, (target, _)| routes.get(device) == Some(target));
+        thru.refused.retain(|(device, target)| routes.get(device) == Some(target));
+        thru.routes = routes;
+        thru.echoes = echoes;
+        self.thru_active.store(!thru.routes.is_empty(), Ordering::Relaxed);
     }
 
     fn rebuild_injector(&self, config: &Config) {
