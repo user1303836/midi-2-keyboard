@@ -39,6 +39,7 @@ import {
   supportsRateLimit,
   UPPER7,
   type BehaviorType,
+  type ShuttleBehavior,
   type SourceShape,
 } from "@/lib/model";
 import { platform } from "@/lib/platform";
@@ -69,7 +70,7 @@ function reconcile(previous: Mapping, next: Mapping): Mapping {
 
   if (previous.source !== next.source && before !== after) {
     if (!behaviorTypeInfo(result.behavior.type).fits.includes(after)) {
-      result = { ...result, behavior: defaultBehavior(suggestedBehavior(after), result.behavior) };
+      result = { ...result, behavior: defaultBehavior(suggestedBehavior(after, result.source.event), result.behavior) };
     }
   }
 
@@ -77,17 +78,23 @@ function reconcile(previous: Mapping, next: Mapping): Mapping {
     const event = result.source.event;
     const limit = rangeLimit(event);
     const absolute = event.type !== "control_change" || event.encoding === "absolute";
-    if (
-      previous.behavior.type !== result.behavior.type &&
-      BUTTON_BEHAVIORS.includes(result.behavior.type) &&
-      limit !== null &&
-      absolute &&
-      "range" in event &&
-      isFullRange(event)
-    ) {
-      // Pitch bend rests in the middle, so its "pressed" part starts well above the rest position.
-      const range = { min: event.type === "pitch_bend" ? 12288 : Math.ceil((limit + 1) / 2), max: limit };
-      result = { ...result, source: { ...result.source, event: { ...event, range } as Source["event"] } };
+    // Pitch bend rests in the middle, so its "pressed" part starts well above the rest position.
+    const pressed = limit === null ? null : { min: event.type === "pitch_bend" ? 12288 : Math.ceil((limit + 1) / 2), max: limit };
+    const changed = previous.behavior.type !== result.behavior.type;
+    if (changed && pressed && absolute && "range" in event) {
+      if (BUTTON_BEHAVIORS.includes(result.behavior.type) && isFullRange(event)) {
+        result = { ...result, source: { ...result.source, event: { ...event, range: pressed } as Source["event"] } };
+      } else if (
+        // And back: a behavior that follows the value gets the whole travel again, when the range
+        // is still the "pressed" part that was put there for a button behavior.
+        !BUTTON_BEHAVIORS.includes(result.behavior.type) &&
+        BUTTON_BEHAVIORS.includes(previous.behavior.type) &&
+        event.range.min === pressed.min &&
+        event.range.max === pressed.max
+      ) {
+        const range = { min: 0, max: pressed.max };
+        result = { ...result, source: { ...result.source, event: { ...event, range } as Source["event"] } };
+      }
     }
   }
 
@@ -220,7 +227,7 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
             update((m) => ({
               ...m,
               source: result.source,
-              behavior: defaultBehavior(suggestedBehavior(result.shape), m.behavior),
+              behavior: defaultBehavior(suggestedBehavior(result.shape, result.source.event), m.behavior),
             }));
             // It has a real source now: make it a real mapping (it appears in the list).
             commitDraft();
@@ -246,6 +253,9 @@ export function MappingEditor({ mapping }: { mapping: Mapping }) {
               onChange={(behavior, key) => update((m) => ({ ...m, behavior }), key && `beh:${key}`)}
             />
             <RateTip mapping={mapping} onApply={(rate_limit) => update((m) => ({ ...m, rate_limit }))} />
+            {mapping.behavior.type === "shuttle" && isEmptyAction(primaryAction(mapping.behavior)) && (
+              <Suggestions shape={shape} shuttle={mapping.behavior} onPick={(behavior) => update((m) => ({ ...m, behavior }))} />
+            )}
           </Section>
 
           <div className="flex flex-col gap-1 px-4 py-3">
@@ -539,13 +549,35 @@ function RateTip({
  * Esc, the scroll wheel) cannot be captured by pressing them. Turning controls get pairs for
  * the two directions, everything else single actions.
  */
-function Suggestions({ shape, onPick }: { shape: SourceShape; onPick: (behavior: Behavior) => void }) {
+function Suggestions({
+  shape,
+  shuttle,
+  onPick,
+}: {
+  shape: SourceShape;
+  /** The mapping is a shuttle: offer things worth repeating, each with a pace that suits it. */
+  shuttle: ShuttleBehavior | null;
+  onPick: (behavior: Behavior) => void;
+}) {
   const unsupported = useApp((state) => state.unsupportedKeys);
   const mac = platform() === "macos";
   const mod: Key = mac ? "MetaLeft" : "ControlLeft";
   const keys = (...combo: Key[]): Action => ({ type: "keys", keys: combo, tap_ms: null });
   const scroll = (dy: number): Action => ({ type: "mouse_scroll", dx: 0, dy });
+  const move = (x: number, y: number): Action => ({ type: "mouse_move", x, y, absolute: false });
   const usable = (action: Action) => action.type !== "keys" || action.keys.every((key) => !unsupported.includes(key));
+
+  // [label, up, down, slowest ms, fastest ms, gentle start]. One pixel per firing at up to a
+  // thousand firings a second is a pointer that moves smoothly at any speed.
+  const paced: [string, Action, Action, number, number, boolean][] = [
+    ["Scroll", scroll(1), scroll(-1), 250, 20, false],
+    ["← →", keys("ArrowRight"), keys("ArrowLeft"), 400, 30, false],
+    ["↑ ↓", keys("ArrowUp"), keys("ArrowDown"), 400, 30, false],
+    ["Pointer ↔", move(1, 0), move(-1, 0), 40, 1, true],
+    ["Pointer ↕", move(0, -1), move(0, 1), 40, 1, true],
+    ["Volume", keys("AudioVolumeUp"), keys("AudioVolumeDown"), 300, 50, false],
+    ["Zoom", keys(mod, "Equal"), keys(mod, "Minus"), 400, 60, false],
+  ];
 
   const pairs: [string, Action, Action][] = [
     ["Volume", keys("AudioVolumeUp"), keys("AudioVolumeDown")],
@@ -567,7 +599,14 @@ function Suggestions({ shape, onPick }: { shape: SourceShape; onPick: (behavior:
     ["Undo", keys(mod, "KeyZ")],
   ];
   const turning = shape === "relative" || shape === "continuous";
-  const offers: [string, Behavior][] = turning
+  const offers: [string, Behavior][] = shuttle
+    ? paced
+        .filter(([, up, down]) => usable(up) && usable(down))
+        .map(([label, up, down, slow_ms, fast_ms, gentle]) => [
+          label,
+          { ...shuttle, up, down, slow_ms, fast_ms, curve: gentle ? "squared" : "linear" },
+        ])
+    : turning
     ? pairs
         .filter(([, up, down]) => usable(up) && usable(down))
         .map(([label, up, down]) => [
@@ -755,9 +794,11 @@ function Wizard({
                     ? "It is typed into whatever application is in front."
                     : primaryKind !== null && primaryKind !== "keys"
                       ? "Fill in the details below."
-                      : shape === "relative"
-                        ? "First for turning up, then set the other direction below."
-                        : "Just press it on your computer keyboard."}
+                      : mapping.behavior.type === "shuttle" && event.type === "pitch_bend"
+                        ? "First for pushing the wheel up, then the other direction below. It repeats for as long as you push — the further, the faster."
+                        : shape === "relative"
+                          ? "First for turning up, then set the other direction below."
+                          : "Just press it on your computer keyboard."}
                 </div>
               )}
             </div>
@@ -767,6 +808,7 @@ function Wizard({
               key={mapping.behavior.type}
               behavior={mapping.behavior}
               shape={shape}
+              compact
               armedSlot={armedSlot}
               onCaptured={(slot) => setArmedSlot(slot + 1)}
               onChange={(behavior, key) => {
@@ -779,6 +821,7 @@ function Wizard({
           {stage === "action" && !done && (
             <Suggestions
               shape={shape}
+              shuttle={mapping.behavior.type === "shuttle" ? mapping.behavior : null}
               onPick={(behavior) => {
                 setArmedSlot(null);
                 onBehavior(behavior);
@@ -792,6 +835,8 @@ function Wizard({
           {stage === "action" &&
             done &&
             hasOnState(mapping) &&
+            // A wheel or fader has no light of its own to offer in one click.
+            mapping.behavior.type !== "shuttle" &&
             feedbackForSource(mapping.source) &&
             (mapping.feedback ? (
               <div className="mt-3 flex items-center gap-1.5 text-sm text-fg-muted">

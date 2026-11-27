@@ -389,14 +389,18 @@ export function defaultBehavior(type: BehaviorType, previous?: Behavior): Behavi
   }
 }
 
-/** The behavior a freshly learned source should start with. */
-export function suggestedBehavior(shape: SourceShape): BehaviorType {
+/**
+ * The behavior a freshly learned source should start with. A pitch wheel springs back to the
+ * middle: "on change" would fire for every message of a push and again on the way back, so it
+ * starts as a shuttle (up does one thing, down another, faster the further).
+ */
+export function suggestedBehavior(shape: SourceShape, event?: SourceEvent): BehaviorType {
   switch (shape) {
     case "button":
     case "pulse":
       return "trigger";
     case "continuous":
-      return "change";
+      return event?.type === "pitch_bend" ? "shuttle" : "change";
     case "relative":
       return "step";
   }
@@ -676,7 +680,7 @@ export function newMapping(source: Source = newSource(), behavior?: Behavior): M
     name: "",
     enabled: true,
     source,
-    behavior: behavior ?? defaultBehavior(suggestedBehavior(sourceShape(source.event))),
+    behavior: behavior ?? defaultBehavior(suggestedBehavior(sourceShape(source.event), source.event)),
     conditions: [],
     rate_limit: null,
     feedback: null,

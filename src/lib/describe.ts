@@ -215,7 +215,11 @@ function scrollText(dx: number, dy: number): string {
 }
 
 function moveText(x: number, y: number, absolute: boolean): string {
-  return absolute ? `move pointer to ${x}, ${y}` : `move pointer by ${x}, ${y}`;
+  if (absolute) return `move pointer to ${x}, ${y}`;
+  // Along one axis, say which way: "by 0, -1" takes a moment to read as "up".
+  if (y === 0 && x !== 0) return `move pointer ${Math.abs(x)} px ${x > 0 ? "right" : "left"}`;
+  if (x === 0 && y !== 0) return `move pointer ${Math.abs(y)} px ${y > 0 ? "down" : "up"}`;
+  return `move pointer by ${x}, ${y}`;
 }
 
 /** One-line description of an action: "Ctrl+Shift+O", "type “hello”", "scroll up 3"… */

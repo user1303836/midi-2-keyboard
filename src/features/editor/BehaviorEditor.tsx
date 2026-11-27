@@ -13,7 +13,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useContext, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 
 import type { Action } from "@/bindings/Action";
 import type { Behavior } from "@/bindings/Behavior";
@@ -170,9 +170,12 @@ export function BehaviorEditor({
   onChange,
   armedSlot = null,
   onCaptured,
+  compact = false,
 }: {
   behavior: Behavior;
   shape: SourceShape;
+  /** The quick add: keep to what the two gestures need, the rest one click away. */
+  compact?: boolean;
   onChange: (behavior: Behavior, coalesceKey?: string) => void;
   /** Which action slot (0 = first) should start capturing keys right away (quick-add flow). */
   armedSlot?: number | null;
@@ -388,7 +391,7 @@ export function BehaviorEditor({
         </div>
       )}
 
-      {b.type === "shuttle" && <ShuttleForm b={b} shape={shape} onChange={onChange} arm={arm} />}
+      {b.type === "shuttle" && <ShuttleForm b={b} shape={shape} compact={compact} onChange={onChange} arm={arm} />}
 
       {b.type === "tap_hold" && (
         <div className="flex flex-col gap-2.5">
@@ -558,14 +561,18 @@ const NO_SOURCE: Source = {
 function ShuttleForm({
   b,
   shape,
+  compact,
   onChange,
   arm,
 }: {
   b: ShuttleBehavior;
   shape: SourceShape;
+  /** Quick add: the two actions first, the fine-tuning one click away. */
+  compact: boolean;
   onChange: (behavior: Behavior, coalesceKey?: string) => void;
   arm: (slot: number, action: Action | null) => { autoCapture: boolean; onCaptured: () => void };
 }) {
+  const [open, setOpen] = useState(!compact);
   const source = useContext(SourceContext);
   const event = source?.event ?? null;
   const live = useLiveValue(source ?? NO_SOURCE);
@@ -589,6 +596,22 @@ function ShuttleForm({
           ? `values from ${zone.min}`
           : `values ${zone.min}–${zone.max}`;
 
+  const restRow = (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+      <span className="shrink-0">{hit ? "The softest hit is" : "It rests"}</span>
+      <Segmented<ShuttleRest>
+        size="sm"
+        value={rest}
+        options={[
+          { value: "center", label: "in the middle", title: "A pitch wheel, a joystick axis, a shuttle ring: one action above the middle, another below" },
+          { value: "low", label: "at the bottom", title: "A fader, a pedal, pressure, how hard a pad is hit: the higher, the faster" },
+          { value: "high", label: "at the top", title: "A control that reads backwards: the lower, the faster" },
+        ]}
+        onChange={(next) => onChange({ ...b, rest: next })}
+      />
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-2.5">
       {(shape === "relative" || shape === "pulse") && (
@@ -598,19 +621,7 @@ function ShuttleForm({
             : "This message has no position, so there is nothing to set the pace. Try Press."}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
-        <span className="shrink-0">{hit ? "The softest hit is" : "It rests"}</span>
-        <Segmented<ShuttleRest>
-          size="sm"
-          value={rest}
-          options={[
-            { value: "center", label: "in the middle", title: "A pitch wheel, a joystick axis, a shuttle ring: one action above the middle, another below" },
-            { value: "low", label: "at the bottom", title: "A fader, a pedal, pressure, how hard a pad is hit: the higher, the faster" },
-            { value: "high", label: "at the top", title: "A control that reads backwards: the lower, the faster" },
-          ]}
-          onChange={(next) => onChange({ ...b, rest: next })}
-        />
-      </div>
+      {open && restRow}
       {sides.up && (
         <StepSlot
           label={both ? <><ArrowUp size={14} /> Up</> : "Repeat"}
@@ -627,47 +638,65 @@ function ShuttleForm({
           onChange={(down, key) => onChange({ ...b, down }, key && `down:${key}`)}
         />
       )}
-      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
-        <span className="whitespace-nowrap">From every</span>
-        <Ms
-          label="Pace near rest"
-          max={600000}
-          value={b.slow_ms}
-          onChange={(slow_ms) => onChange({ ...b, slow_ms, fast_ms: Math.min(b.fast_ms, slow_ms) }, "slow")}
-        />
-        <span className="whitespace-nowrap">{hit ? "for the softest hit to every" : "near rest to every"}</span>
-        <Ms
-          label="Pace at the end of the travel"
-          value={b.fast_ms}
-          onChange={(fast_ms) => onChange({ ...b, fast_ms, slow_ms: Math.max(b.slow_ms, fast_ms) }, "fast")}
-        />
-        <span className="whitespace-nowrap">{hit ? "for the hardest" : "at the end of its travel"}</span>
-      </div>
-      <div className="text-sm text-fg-faint" data-shuttle-pace>
-        That is {perSecond(shuttleRate(b, 0) * unit.per)} to {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.
-      </div>
-      <InlineSwitch
-        label="Gentle start"
-        hint="The pace builds up slowly at first and reaches full speed only at the very end: fine control near rest, where it matters (what game controllers do for a pointer)"
-        checked={b.curve === "squared"}
-        onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
-      />
-      <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
-        <span className="whitespace-nowrap">{hit ? "Ignore the softest" : "Counts as rest:"}</span>
-        <NumberInput
-          aria-label="Dead zone"
-          suffix="%"
-          className="w-[72px]"
-          min={0}
-          max={90}
-          value={b.dead_zone}
-          onChange={(dead_zone) => onChange({ ...b, dead_zone }, "dead")}
-        />
-        <span>
-          {hit ? "of the velocity range" : "of the travel next to the rest position"}{" "}
-          <span className="text-fg-faint">({restText})</span>
-        </span>
-      </div>
+      {open ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+            <span className="whitespace-nowrap">Every</span>
+            <NumberInput
+              aria-label="Pace near rest"
+              suffix="ms"
+              className="w-[80px]"
+              min={1}
+              max={600000}
+              value={b.slow_ms}
+              onChange={(slow_ms) => onChange({ ...b, slow_ms, fast_ms: Math.min(b.fast_ms, slow_ms) }, "slow")}
+            />
+            <span className="whitespace-nowrap">{hit ? "hit softly, every" : "near rest, every"}</span>
+            <NumberInput
+              aria-label="Pace at the end of the travel"
+              suffix="ms"
+              className="w-[80px]"
+              min={1}
+              max={60000}
+              value={b.fast_ms}
+              onChange={(fast_ms) => onChange({ ...b, fast_ms, slow_ms: Math.max(b.slow_ms, fast_ms) }, "fast")}
+            />
+            <span className="whitespace-nowrap">{hit ? "hit hard" : "at the end"}</span>
+          </div>
+          <div className="text-sm text-fg-faint" data-shuttle-pace>
+            That is {perSecond(shuttleRate(b, 0) * unit.per)} to {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.
+          </div>
+          <InlineSwitch
+            label="Gentle start"
+            hint="The pace builds up slowly at first and reaches full speed only at the very end: fine control near rest, where it matters (what game controllers do for a pointer)"
+            checked={b.curve === "squared"}
+            onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
+          />
+          <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+            <span className="whitespace-nowrap">Rest zone:</span>
+            <NumberInput
+              aria-label="Dead zone"
+              suffix="%"
+              className="w-[72px]"
+              min={0}
+              max={90}
+              value={b.dead_zone}
+              onChange={(dead_zone) => onChange({ ...b, dead_zone }, "dead")}
+            />
+            <span>
+              {hit ? "of the velocities" : "of the travel"} <span className="text-fg-faint">({restText})</span>
+            </span>
+          </div>
+        </>
+      ) : (
+        <div className="text-sm leading-snug text-fg-faint" data-shuttle-pace>
+          {rest === "center" ? "Rests in the middle" : rest === "low" ? "Rests at the bottom" : "Rests at the top"}; {perSecond(shuttleRate(b, 0) * unit.per)} to{" "}
+          {perSecond(shuttleRate(b, 1) * unit.per)} {unit.unit}.{" "}
+          <button type="button" className="text-fg-muted underline underline-offset-2 hover:text-fg" onClick={() => setOpen(true)}>
+            Adjust
+          </button>
+        </div>
+      )}
       <div>
         <div
           className="relative h-[22px] overflow-hidden rounded-md border bg-app"

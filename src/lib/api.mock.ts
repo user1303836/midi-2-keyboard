@@ -14,6 +14,7 @@ import type { Snapshot } from "@/bindings/Snapshot";
 
 import type { Backend } from "./api";
 import { actionText, targetText } from "./describe";
+import { isEmptyAction, shuttleAt } from "./model";
 import { download } from "./utils";
 
 const STORAGE_KEY = "m2k.mock.config";
@@ -258,7 +259,24 @@ function match(mapping: Mapping, device: string, message: MidiMessage): Edge | n
     return message.program >= event.programs.min && message.program <= event.programs.max ? "press" : null;
   }
   if (event.type === "pitch_bend" && message.type === "pitch_bend") return "value";
+  if (event.type === "channel_pressure" && message.type === "channel_pressure") return "value";
   return null;
+}
+
+/** Where a message says its control is (what a shuttle reads its pace from); `null` = let go. */
+function position(message: MidiMessage): number | null {
+  switch (message.type) {
+    case "note_on":
+      return message.velocity > 0 ? message.velocity : null;
+    case "control_change":
+    case "pitch_bend":
+      return message.value;
+    case "channel_pressure":
+    case "poly_pressure":
+      return message.pressure;
+    default:
+      return null;
+  }
 }
 
 export function createMockBackend(): Backend {
@@ -293,6 +311,55 @@ export function createMockBackend(): Backend {
   const emitStatus = () => emit([{ type: "status", ...status }]);
   const now = () => Math.round((performance.now() - started) * 1000);
 
+  // Shuttles keep firing between messages: one timer per mapping, and the mapping counts as
+  // engaged while it runs. (At most ten reports a second, however fast the pace.)
+  const shuttles = new Map<string, { timer: ReturnType<typeof setTimeout> | null; last: number }>();
+  const setEngaged = (id: string, on: boolean) => {
+    if (status.engaged_mappings.includes(id) === on) return;
+    status.engaged_mappings = on ? [...status.engaged_mappings, id] : status.engaged_mappings.filter((m) => m !== id);
+    emitStatus();
+  };
+  const stopShuttle = (id: string) => {
+    const state = shuttles.get(id);
+    if (!state) return;
+    if (state.timer !== null) clearTimeout(state.timer);
+    shuttles.delete(id);
+    setEngaged(id, false);
+  };
+  const stopShuttles = () => [...shuttles.keys()].forEach(stopShuttle);
+  const shuttle = (profileId: string, mapping: Mapping, value: number | null) => {
+    const b = mapping.behavior;
+    if (b.type !== "shuttle") return;
+    const at = value === null ? null : shuttleAt(b, mapping.source.event, value);
+    const action = at ? (at.side === "up" ? b.up : b.down) : null;
+    if (!at || !action || isEmptyAction(action)) return stopShuttle(mapping.id);
+    const fired = (outcome: Extract<EngineEvent, { type: "fired" }>["outcome"]): EngineEvent => ({
+      type: "fired",
+      time_us: now(),
+      profile_id: profileId,
+      mapping_id: mapping.id,
+      description: actionText(action, config),
+      outcome,
+    });
+    if (status.learning || status.paused) {
+      stopShuttle(mapping.id);
+      setTimeout(() => emit([fired({ type: "skipped", reason: status.learning ? "learning" : "paused", detail: "" })]), 0);
+      return;
+    }
+    const interval = Math.max(1000 / at.rate, 100);
+    const state = shuttles.get(mapping.id) ?? { timer: null, last: -Infinity };
+    if (state.timer !== null) clearTimeout(state.timer);
+    const fire = () => {
+      state.last = performance.now();
+      emit([fired({ type: "sent" })]);
+      state.timer = setTimeout(fire, interval);
+    };
+    // Never sooner after the last firing than the pace of this position allows.
+    state.timer = setTimeout(fire, Math.max(0, state.last + interval - performance.now()));
+    shuttles.set(mapping.id, state);
+    setEngaged(mapping.id, true);
+  };
+
   const handle = (device: string, message: MidiMessage) => {
     const profile = config.profiles.find((p) => p.id === status.effective_profile);
     const live = config.profiles.filter((p) => p.always_on || p === profile);
@@ -305,6 +372,10 @@ export function createMockBackend(): Backend {
         if (!edge) continue;
         matched.push(mapping.id);
         const b = mapping.behavior;
+        if (b.type === "shuttle") {
+          shuttle(p.id, mapping, position(message));
+          continue;
+        }
         let description: string | null = null;
         if (b.type === "trigger" && edge !== "release" && b.on_press) description = actionText(b.on_press, config);
         else if (b.type === "trigger" && edge === "release" && b.on_release) description = actionText(b.on_release, config);
@@ -361,6 +432,7 @@ export function createMockBackend(): Backend {
     },
     async saveConfig(next) {
       config = next;
+      stopShuttles();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       if (status.selected_profile !== next.selected_profile) {
         status.selected_profile = next.selected_profile;
@@ -371,6 +443,7 @@ export function createMockBackend(): Backend {
     },
     async setPaused(paused) {
       status.paused = paused;
+      if (paused) stopShuttles();
       emitStatus();
     },
     async setLearning(learning) {

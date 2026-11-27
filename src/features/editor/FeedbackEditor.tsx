@@ -11,10 +11,10 @@ import { useApp, useKnownLayers } from "@/lib/store";
 import { InlineSwitch, LayerInput } from "./ActionEditor";
 import { MidiSendEditor, OutputSelect } from "./MidiSendEditor";
 
-/** Whether the behavior has an "on" state of its own (something held or latched). */
+/** Whether the behavior has an "on" state of its own (something held or latched, a shuttle that is repeating). */
 export function hasOnState(mapping: Mapping): boolean {
   const b = mapping.behavior;
-  return b.type === "hold" || b.type === "toggle" || (b.type === "tap_hold" && b.hold_target !== null);
+  return b.type === "hold" || b.type === "toggle" || b.type === "shuttle" || (b.type === "tap_hold" && b.hold_target !== null);
 }
 
 /**
@@ -107,7 +107,7 @@ export function FeedbackEditor({
             className="w-[212px]"
             value={when.type}
             options={[
-              { value: "engaged", label: "This mapping is on", hint: "held, or toggled on" },
+              { value: "engaged", label: "This mapping is on", hint: mapping.behavior.type === "shuttle" ? "while it repeats" : "held, or toggled on" },
               { value: "layer", label: "A layer is on" },
               { value: "profile", label: "A profile is active" },
             ]}
