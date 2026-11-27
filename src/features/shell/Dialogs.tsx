@@ -286,7 +286,11 @@ export function DevicesDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       description="Devices are picked up as soon as they are plugged in. Give them a friendlier name, or switch off the ones this app should leave alone."
       width={620}
       footer={
-        <Button icon={<RefreshCw size={13} />} onClick={async () => (await api()).rescanDevices()}>
+        <Button
+          icon={<RefreshCw size={13} />}
+          title="Looks for devices again and reopens the connected ones: the fix when a controller has gone quiet (after the computer slept, after a loose cable)"
+          onClick={async () => (await api()).rescanDevices()}
+        >
           Rescan now
         </Button>
       }

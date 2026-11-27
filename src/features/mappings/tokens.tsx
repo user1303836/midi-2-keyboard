@@ -8,6 +8,7 @@ import {
   Binary,
   CircleDot,
   ExternalLink,
+  FastForward,
   Gauge,
   Layers,
   ListMusic,
@@ -82,7 +83,9 @@ function Token({ icon, children, muted }: { icon: ReactNode; children: ReactNode
   return (
     <span
       className={cn(
-        "inline-flex h-[22px] max-w-full items-center gap-1 rounded-[5px] border px-1.5 text-sm whitespace-nowrap",
+        // `min-w-0`: next to an arrow or a word it has to give way itself (shortening its text),
+        // or it pushes out of its box and over whatever comes after it.
+        "inline-flex h-[22px] max-w-full min-w-0 items-center gap-1 rounded-[5px] border px-1.5 text-sm whitespace-nowrap",
         muted ? "border-line-strong bg-hover text-fg-faint italic" : "border-key-line bg-key-soft text-key",
       )}
     >
@@ -261,8 +264,14 @@ export function BehaviorSummary({ behavior, event = null }: { behavior: Behavior
       const up = sides.up && b.up && !isEmptyAction(b.up) ? b.up : null;
       const down = sides.down && b.down && !isEmptyAction(b.down) ? b.down : null;
       const both = sides.up && sides.down;
+      if (!up && !down) return <Verb>does nothing yet</Verb>;
+      // The shuttle's own sign always; the words only where the list is wide enough for the
+      // actions and the words (with the editor open, the actions matter more).
       return (
         <>
+          <span className="inline-flex shrink-0 text-fg-muted" title="Repeats for as long as the control is pushed away from rest — faster the further">
+            <FastForward size={13} />
+          </span>
           {up && (
             <span className="inline-flex min-w-0 items-center gap-1">
               {both && <ArrowUp size={13} className="shrink-0 text-fg-muted" />}
@@ -275,7 +284,7 @@ export function BehaviorSummary({ behavior, event = null }: { behavior: Behavior
               <ActionView action={down} />
             </span>
           )}
-          <Verb>{up || down ? "· faster the further" : "does nothing yet"}</Verb>
+          <span className="hidden shrink-0 text-sm text-fg-muted @min-[900px]:inline">· faster the further</span>
         </>
       );
     }
