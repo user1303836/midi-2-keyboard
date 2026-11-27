@@ -341,6 +341,37 @@ fn normalize(offset: i64, size: i32) -> i32 {
     ((offset * 65536 + size - 1) / size).min(65535) as i32
 }
 
+/// [`crate::release_held`]: releases straight through `SendInput`, without an injector and
+/// without a lock. A key goes up by scan code and by the virtual key the current layout gives it
+/// (its press may have been sent either way); a release of a key that is not down is ignored.
+pub(crate) fn emergency_release(
+    keys: impl Iterator<Item = Key>,
+    buttons: impl Iterator<Item = MouseButton>,
+) {
+    let send = |inputs: &[INPUT]| unsafe {
+        SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32);
+    };
+    let mut layout = Layout::default();
+    for key in keys {
+        let Some(wk) = keymap::windows(key) else { continue };
+        let extended = if wk.extended { KEYEVENTF_EXTENDEDKEY } else { 0 };
+        send(&[
+            key_input(0, wk.scan, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP | extended),
+            key_input(layout.vk(wk), wk.scan, KEYEVENTF_KEYUP | extended),
+        ]);
+    }
+    for button in buttons {
+        let (flag, data) = match button {
+            MouseButton::Left => (MOUSEEVENTF_LEFTUP, 0),
+            MouseButton::Right => (MOUSEEVENTF_RIGHTUP, 0),
+            MouseButton::Middle => (MOUSEEVENTF_MIDDLEUP, 0),
+            MouseButton::Back => (MOUSEEVENTF_XUP, u32::from(XBUTTON1)),
+            MouseButton::Forward => (MOUSEEVENTF_XUP, u32::from(XBUTTON2)),
+        };
+        send(&[mouse_input(0, 0, data, flag)]);
+    }
+}
+
 fn key_input(vk: u16, scan: u16, flags: u32) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,

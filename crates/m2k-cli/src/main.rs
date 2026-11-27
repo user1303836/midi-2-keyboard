@@ -27,6 +27,8 @@ commands:
 static ALLOCATOR: bench::CountingAllocator = bench::CountingAllocator;
 
 fn main() {
+    // `m2k run` presses real keys: a panic must not leave one of them down.
+    m2k_output::install_panic_release();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or(&[]);
     let code = match args.first().map(String::as_str) {

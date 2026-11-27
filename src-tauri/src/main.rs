@@ -749,6 +749,8 @@ fn wait_for_exit(pid: u32) {
 fn wait_for_exit(_pid: u32) {}
 
 fn main() {
+    // Whatever panics from here on, nothing this process pressed stays down.
+    m2k_output::install_panic_release();
     let args: Vec<String> = std::env::args().collect();
     let launched_minimized = args.iter().any(|arg| arg == "--minimized");
     // Started by "Restart as administrator": let the previous instance finish quitting first,

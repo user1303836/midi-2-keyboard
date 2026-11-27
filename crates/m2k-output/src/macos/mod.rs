@@ -505,6 +505,56 @@ impl Drop for CgInjector {
     }
 }
 
+/// [`crate::release_held`]: posts releases straight to the HID event tap, without an injector or
+/// its event source. Caps Lock (a toggle) and the media keys (no held state) are left alone.
+pub(crate) fn emergency_release(
+    keys: impl Iterator<Item = Key>,
+    buttons: impl Iterator<Item = MouseButton>,
+) {
+    let post = |event: &CGEvent| {
+        CGEvent::set_integer_value_field(
+            Some(event),
+            CGEventField::EventSourceUserData,
+            i64::from(INJECTION_TAG),
+        );
+        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(event));
+    };
+    for key in keys {
+        let Some(MacKey::Code(code)) = keymap::macos(key) else { continue };
+        if key == Key::CapsLock {
+            continue;
+        }
+        let Some(event) = CGEvent::new_keyboard_event(None, code, false) else { continue };
+        if modifier_bits(key).is_some() {
+            CGEvent::set_type(Some(&event), CGEventType::FlagsChanged);
+        }
+        CGEvent::set_flags(Some(&event), CGEventFlags(0));
+        post(&event);
+    }
+    let position = CGEvent::new(None)
+        .map(|event| CGEvent::location(Some(&event)))
+        .unwrap_or(CGPoint::new(0.0, 0.0));
+    for button in buttons {
+        let (kind, cg_button, number) = match button {
+            MouseButton::Left => (CGEventType::LeftMouseUp, CGMouseButton::Left, 0),
+            MouseButton::Right => (CGEventType::RightMouseUp, CGMouseButton::Right, 1),
+            MouseButton::Middle => (CGEventType::OtherMouseUp, CGMouseButton(2), 2),
+            MouseButton::Back => (CGEventType::OtherMouseUp, CGMouseButton(3), 3),
+            MouseButton::Forward => (CGEventType::OtherMouseUp, CGMouseButton(4), 4),
+        };
+        let Some(event) = CGEvent::new_mouse_event(None, kind, position, cg_button) else {
+            continue;
+        };
+        CGEvent::set_integer_value_field(
+            Some(&event),
+            CGEventField::MouseEventButtonNumber,
+            number,
+        );
+        CGEvent::set_flags(Some(&event), CGEventFlags(0));
+        post(&event);
+    }
+}
+
 /// Device-independent plus device-dependent flag bits of a modifier key.
 fn modifier_bits(key: Key) -> Option<u64> {
     Some(match key {

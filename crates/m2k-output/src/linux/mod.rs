@@ -40,6 +40,16 @@ pub(crate) fn create(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
     }
 }
 
+/// [`crate::release_held`]. uinput needs nothing: the kernel releases whatever a virtual device
+/// holds when the device goes away with the process. XTest presses outlive the connection that
+/// made them, so they are released through a connection of their own.
+pub(crate) fn emergency_release(
+    keys: impl Iterator<Item = crate::Key>,
+    buttons: impl Iterator<Item = crate::MouseButton>,
+) {
+    x11::emergency_release(keys, buttons);
+}
+
 /// Whether this is a Wayland session (where X11 APIs only see XWayland clients).
 pub(crate) fn is_wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())

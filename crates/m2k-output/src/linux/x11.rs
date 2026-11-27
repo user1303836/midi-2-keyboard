@@ -23,6 +23,7 @@
 //! On a Wayland session this only reaches X11 (XWayland) applications.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -126,9 +127,39 @@ pub(crate) struct XTestInjector {
     buttons: HashSet<MouseButton>,
 }
 
+/// An XTest injector was created in this process (see [`emergency_release`]).
+static IN_USE: AtomicBool = AtomicBool::new(false);
+
+/// Releases `keys` and `buttons` through a new connection (the injector's may be held by the
+/// thread that panicked). Nothing when no XTest injector was ever created.
+pub(crate) fn emergency_release(
+    keys: impl Iterator<Item = Key>,
+    buttons: impl Iterator<Item = MouseButton>,
+) {
+    if !IN_USE.load(Ordering::SeqCst) {
+        return;
+    }
+    let Ok((conn, _)) = x11rb::connect(None) else { return };
+    let fake = |kind: u8, detail: u8| {
+        if let Ok(cookie) = conn.xtest_fake_input(kind, detail, CURRENT_TIME, NONE, 0, 0, 0) {
+            cookie.ignore_error();
+        }
+    };
+    for key in keys {
+        if let Some(keycode) = keymap::evdev(key).and_then(|code| u8::try_from(code + 8).ok()) {
+            fake(KEY_RELEASE_EVENT, keycode);
+        }
+    }
+    for button in buttons {
+        fake(BUTTON_RELEASE_EVENT, button_number(button));
+    }
+    let _ = conn.flush();
+}
+
 impl XTestInjector {
     pub(crate) fn new() -> std::result::Result<Self, String> {
         let link = Link::open()?;
+        IN_USE.store(true, Ordering::SeqCst);
         let mut injector = Self {
             min_keycode: link.min_keycode,
             max_keycode: link.max_keycode,

@@ -10,6 +10,7 @@
 //! - [`create_injector`]: builds the best backend for the current platform/session.
 //! - [`platform`]: probes the UI needs (permissions, foreground application).
 
+mod emergency;
 pub mod key;
 mod keymap;
 pub mod platform;
@@ -21,6 +22,7 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+pub use emergency::{install_panic_release, release_held};
 pub use key::{Key, MouseButton};
 
 /// Marker carried by every injected event where the platform has room for one (`dwExtraInfo`
@@ -199,7 +201,8 @@ impl Injector for NullInjector {
     }
 }
 
-/// Creates the best available injector for this platform and session.
+/// Creates the best available injector for this platform and session. What it presses is
+/// recorded for [`release_held`] (see [`install_panic_release`]).
 ///
 /// Never panics; when no backend can be started the error says what to do about it.
 pub fn create_injector(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
@@ -207,6 +210,7 @@ pub fn create_injector(options: &InjectorOptions) -> Result<Box<dyn Injector>> {
         .unwrap_or_else(|_| {
             Err(OutputError::Unavailable("the output backend crashed while starting".into()))
         })
+        .map(|injector| Box::new(emergency::Tracked(injector)) as Box<dyn Injector>)
 }
 
 #[cfg(target_os = "linux")]
@@ -224,5 +228,11 @@ mod backend {
         Err(OutputError::Unavailable(
             "keyboard and mouse output is not implemented for this operating system yet".into(),
         ))
+    }
+
+    pub fn emergency_release(
+        _keys: impl Iterator<Item = Key>,
+        _buttons: impl Iterator<Item = MouseButton>,
+    ) {
     }
 }
