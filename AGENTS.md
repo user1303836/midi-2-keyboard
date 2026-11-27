@@ -158,8 +158,13 @@ There is no test suite (see the ground rules). Verify by exercising the real thi
 - **Never send MIDI to the owner's hardware.** A controller that receives MIDI changes what it
   shows or stores, and other gear may hang off an interface's outputs. Engine-side checks of
   "Send MIDI" and lights belong in `m2k simulate` (it prints `MIDI-OUT` lines; a dry run has no
-  output at all). For the real output path on Windows, name "Microsoft GS Wavetable Synth" as
-  the output and send only control changes (silent); never a note, the machine has speakers.
+  output at all). **Start every real app and every `m2k run` with `M2K_NO_MIDI_OUT=1`**: with it
+  set (to anything) nothing is ever sent, lights and "Send MIDI" report "MIDI output is switched
+  off" and the outputs are still listed. A light needs no explicit device to reach a controller:
+  it goes to the output named like the input, and that once sent two messages to the owner's
+  controller from a test profile. The only run without the variable is one that is about the
+  real output path itself: on Windows, name "Microsoft GS Wavetable Synth" as the output and
+  send only control changes (silent); never a note, the machine has speakers.
 - The owner may be sitting at the machine. A run that takes the foreground or sends real input
   steals their keystrokes (one of theirs once ended up as the key of a test mapping) and can put
   yours into their window. Before every such run, read how long the desktop has been idle
