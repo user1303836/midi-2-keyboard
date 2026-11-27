@@ -155,7 +155,8 @@ came in: pass a control on to other gear, switch a synth's sound. And a mapping 
 pad** (*Light on the controller* in the editor, or one click in the quick add): one message when
 a state turns on, another when it turns off — while the mapping is held or toggled on, while a
 layer is on, or while a profile is active. Most pad controllers light a pad for a note on and
-switch it off for velocity 0. [`examples/pad-lights.json`](examples/pad-lights.json) shows all three.
+switch it off for velocity 0. [`examples/pad-lights.json`](examples/pad-lights.json) shows all
+three.
 
 - **Where it goes.** *The controller it came from* is the output named like the input the message
   came from (Windows' extra `MIDIIN2 (…)` ports pair with `MIDIOUT2 (…)`); any output can also be
@@ -252,7 +253,7 @@ npm run bindings                              # regenerate the TypeScript types 
 m2k devices                                   # list MIDI input ports
 m2k monitor [name]                            # print incoming MIDI, decoded
 m2k outputs                                   # list MIDI output ports (opens none of them)
-m2k send <port> <hex bytes>...                # send MIDI to an output once: m2k send wavetable B0 07 64
+m2k send <port> <hex bytes>...                # send MIDI to an output once, e.g. B0 07 64
 m2k run [--config file] [--dry-run]           # run a config without the UI (dry run sends nothing)
 m2k simulate config.json script.txt           # replay scripted MIDI and print what would be sent
 ```
@@ -260,7 +261,7 @@ m2k simulate config.json script.txt           # replay scripted MIDI and print w
 ## How it is put together
 
 ```
-crates/m2k-midi     MIDI parsing, state tracking (NRPN/RPN/14-bit), device input and output with hot-plug
+crates/m2k-midi     MIDI parsing, state tracking (NRPN/RPN/14-bit), device input/output, hot-plug
 crates/m2k-output   key model and OS input injection (SendInput / CGEvent / uinput / XTest)
 crates/m2k-core     config model, persistence, the engine, the application runtime
 crates/m2k-cli      headless tools (devices, monitor, outputs, send, run, simulate)
