@@ -875,7 +875,11 @@ export const useApp = create<State>((set, get) => {
     toast(message, options) {
       const id = toastId++;
       set((state) => ({
-        toasts: [...state.toasts.slice(-3), { id, kind: options?.kind ?? "info", message, action: options?.action }],
+        // The same message again takes the place of the one that is showing instead of stacking.
+        toasts: [
+          ...state.toasts.filter((toast) => toast.message !== message).slice(-3),
+          { id, kind: options?.kind ?? "info", message, action: options?.action },
+        ],
       }));
       const lifetime = options?.kind === "error" || options?.kind === "warning" || options?.action ? 9000 : 4500;
       setTimeout(() => get().dismissToast(id), lifetime);

@@ -10,6 +10,8 @@ It is built around two promises:
 - **The weird case is possible.** *"CC 20 on channel 2 comes from a knob; when I turn it, send
   Ctrl+Shift+O — but at most once every 500 ms."* That is one mapping with a rate limit.
 
+![The mapping list, with the editor open on a knob that sends Ctrl+Shift+O at most once per 500 ms](docs/screenshot.png)
+
 ## What it can do
 
 **Every kind of MIDI input**
