@@ -13,14 +13,17 @@
 //! fires at once, but never sooner after the previous firing than the pace of the position allows
 //! (an analog control hovering at the edge cannot beat `slow_ms`); a new value re-times the next
 //! firing from the last one. A note or a chord is different: each hit is a deliberate, discrete
-//! event and fires at once, with no memory of the previous one. Intervals shorter than [`MIN_WAKE`] are not woken for one by one: the
-//! engine wakes every few milliseconds and makes up what fell due (at most [`MAX_BATCH`] at
-//! once), and a pointer move or a scroll then goes out as one call carrying all of them. An
-//! action that queues (key taps, macros, text) never has more than one firing waiting, so letting
-//! go stops it at once (a firing that has not started is dropped). Conditions are checked at
-//! every firing, quietly. The monitor gets the first firing of a repetition as a row of its own,
-//! then at most one row per [`REPORT_EVERY`] per mapping, marked with how many firings it stands
-//! for (`Right ×5`), and a last row with the rest when it stops, so the rows add up.
+//! event and fires at once, with no memory of the previous one. Intervals shorter than
+//! [`MIN_WAKE`] are not woken for one by one: the engine wakes every few milliseconds and makes
+//! up what fell due (at most [`MAX_BATCH`] at once), and a pointer move or a scroll then goes out
+//! as one call carrying all of them. An action that queues (key taps, macros, text) never has
+//! more than one firing waiting, so letting go stops it at once (a firing that has not started
+//! is dropped). Conditions and the gates (pause, the app's window in front, learning) are
+//! checked at every firing; when the first firing of a push (leaving rest, crossing to the
+//! other side, a hit) is held back, one skip row says why, and the rest of the push stays
+//! quiet. The monitor gets the first firing of a repetition as a row of its own, then at most
+//! one row per [`REPORT_EVERY`] per mapping, marked with how many firings it stands for
+//! (`Right ×5`), and a last row with the rest when it stops, so the rows add up.
 
 use std::time::{Duration, Instant};
 
@@ -28,7 +31,7 @@ use super::compile::{ActionKind, CAction, CBehavior, CMapping, Prim};
 use super::cx::{Ctx, Cx, OwnerInfo, TimerKind};
 use super::source::{DeviceId, InstKey};
 use super::timers::TimerId;
-use crate::events::Outcome;
+use crate::events::{Outcome, SkipReason};
 use crate::model::{ShuttleCurve, ShuttleRest, ValueRange};
 
 /// Shortest time between two wakes of one repetition.
@@ -131,6 +134,9 @@ struct Run {
     /// When it last fired, across rests: hovering at the edge cannot beat the pace.
     last: Option<Instant>,
     timer: Option<TimerId>,
+    /// The push (leaving rest, crossing to the other side, a hit) has not tried to fire yet:
+    /// when its first firing cannot go out, that is reported, once for the push.
+    first: bool,
 }
 
 /// The runtime state of a `Shuttle` mapping.
@@ -187,8 +193,15 @@ impl Shuttle {
             Some(i) => i,
             None => {
                 self.prune(zone, now);
-                let run =
-                    Run { key, side: None, ctx, interval: Duration::ZERO, last: None, timer: None };
+                let run = Run {
+                    key,
+                    side: None,
+                    ctx,
+                    interval: Duration::ZERO,
+                    last: None,
+                    timer: None,
+                    first: false,
+                };
                 self.runs.push(run);
                 self.runs.len() - 1
             }
@@ -197,11 +210,13 @@ impl Shuttle {
         if press && *hits {
             // A hit fires at once, whatever fired before.
             run.last = None;
+            run.first = true;
         }
         // Leaving the dead zone, or crossing to the other side.
         let starting = run.side != Some(side);
         if starting {
             run.side = Some(side);
+            run.first = true;
             self.fresh = true;
             cx.dirty = true;
         }
@@ -397,6 +412,7 @@ impl Shuttle {
         let next = last + run.interval.max(MIN_WAKE);
         run.timer = Some(cx.timers.schedule(next, TimerKind::Shuttle(info.owner, run.key)));
         let ctx = run.ctx;
+        let first = std::mem::take(&mut run.first);
 
         // A firing that was waiting to start has started meanwhile: it counts now.
         if let Some(waited) = self.waiting
@@ -405,7 +421,20 @@ impl Shuttle {
             self.waiting = None;
             self.add(def, info, cx, waited, 1);
         }
-        if cx.failed_condition(&def.conditions).is_some() {
+        // Held back: said once, for the first firing of the push; the timer goes on quietly
+        // (a condition that comes to hold, or a gate that lifts, lets the next firing out).
+        if let Some(detail) = cx.failed_condition(&def.conditions) {
+            if first {
+                let description = cx.describe(action, &ctx);
+                cx.report_skip(info, description, SkipReason::ConditionFailed, detail);
+            }
+            return;
+        }
+        if let Some(reason) = cx.gate.check(action.class) {
+            if first {
+                let description = cx.describe(action, &ctx);
+                cx.report_skip(info, description, reason, String::new());
+            }
             return;
         }
         let Some((done, waiting)) = perform(cx, info, action, ctx, count) else {
@@ -450,9 +479,9 @@ fn batchable(action: &CAction) -> Option<&[Prim]> {
     }
 }
 
-/// Performs `count` firings of `action` (quietly: the shuttle makes its own monitor rows).
-/// Returns how many firings went out now and whether one is waiting to start behind the action
-/// that is playing; `None` when nothing went out.
+/// Performs `count` firings of `action`, which the gate lets through (quietly: the shuttle makes
+/// its own monitor rows). Returns how many firings went out now and whether one is waiting to
+/// start behind the action that is playing; `None` when nothing went out.
 fn perform(
     cx: &mut Cx,
     info: &OwnerInfo,
@@ -460,9 +489,6 @@ fn perform(
     ctx: Ctx,
     count: u32,
 ) -> Option<(u32, bool)> {
-    if cx.gate.check(action.class).is_some() {
-        return None;
-    }
     if let Some(prims) = batchable(action) {
         let n = i32::try_from(count).unwrap_or(i32::MAX);
         for prim in prims {
