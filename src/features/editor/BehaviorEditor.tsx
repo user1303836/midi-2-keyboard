@@ -699,7 +699,13 @@ function ShuttleForm({
             : "This message has no position, so there is nothing to set the pace. Try Press."}
         </div>
       )}
-      {open && restRow}
+      {hit && (
+        <div className="text-sm text-fg-muted">
+          On a pad or key it repeats for as long as the pad is held: the harder the hit, the faster.
+        </div>
+      )}
+      {/* A hit has no middle to rest in: the softest hit is the slow end (shown only if a config says otherwise). */}
+      {open && (!hit || rest !== "low") && restRow}
       {sides.up && (
         <StepSlot
           label={both ? <><ArrowUp size={14} /> Up</> : "Repeat"}
@@ -751,13 +757,15 @@ function ShuttleForm({
             <Switch
               checked={b.curve === "squared"}
               onChange={(on) => onChange({ ...b, curve: on ? "squared" : "linear" })}
-              aria-label="Gentle near rest"
+              aria-label={hit ? "Gentle for soft hits" : "Gentle near rest"}
             />
-            <span>Gentle near rest</span>
-            <span className="text-sm text-fg-faint">slow for small pushes, fast only near the end</span>
+            <span>{hit ? "Gentle for soft hits" : "Gentle near rest"}</span>
+            <span className="text-sm text-fg-faint">
+              {hit ? "slow for most hits, fast only for the hardest" : "slow for small pushes, fast only near the end"}
+            </span>
           </label>
           <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
-            <span className="whitespace-nowrap">Rest zone:</span>
+            <span className="whitespace-nowrap">{hit ? "Too soft to count:" : "Rest zone:"}</span>
             <NumberInput
               aria-label="Dead zone"
               suffix="%"

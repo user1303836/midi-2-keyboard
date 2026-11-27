@@ -134,7 +134,9 @@ a stub: a file `stub-pkg-config.cmd` *outside the repository* containing the sin
 `@echo -lasound`, then (bash) `PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG='C:\path\to\stub-pkg-config.cmd'`
 before the command (PowerShell: set `$env:PKG_CONFIG_ALLOW_CROSS = "1"` and `$env:PKG_CONFIG`
 first). This covers the core crates (the default members, also with `clippy -p <crate>`); the
-Tauri shell needs the target's system libraries, so leave `src-tauri` to CI.
+Tauri shell needs the target's system libraries to build, so its builds are CI's. (Its code can
+still be type-checked from here: with stub `cc` and `ar` next to the stub `pkg-config`,
+`clippy -p midi-2-keyboard --target …` works for both targets.)
 
 ## Verifying without tests
 
