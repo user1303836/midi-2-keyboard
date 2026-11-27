@@ -193,6 +193,78 @@ impl Default for Settings {
     }
 }
 
+/// Why `keys` cannot be the system-wide pause shortcut ([`Settings::pause_hotkey`]), as a
+/// sentence for the user; `None` when it can (an empty list is no shortcut, not a problem).
+///
+/// A shortcut is modifiers plus exactly one other key. It must hold Ctrl, Alt or the Windows /
+/// Command key, unless that key is one nobody types (F13–F24, Pause, Scroll Lock): the OS
+/// takes the combination away from every application, so a bare "P" would vanish everywhere
+/// and toggle the output on each keystroke. Shift alone does not count.
+pub fn pause_hotkey_problem(keys: &[Key]) -> Option<String> {
+    if keys.is_empty() {
+        return None;
+    }
+    let label = hotkey_label(keys);
+    let meta = Key::MetaLeft.label();
+    let mut main: Vec<Key> = keys.iter().copied().filter(|key| !key.is_modifier()).collect();
+    main.sort_unstable();
+    main.dedup();
+    match main.as_slice() {
+        [] => Some(format!("The pause shortcut {label} needs a key besides Ctrl, Shift, Alt and {meta}.")),
+        [key] => {
+            let guarded = keys.iter().any(|key| {
+                matches!(
+                    key,
+                    Key::ControlLeft
+                        | Key::ControlRight
+                        | Key::AltLeft
+                        | Key::AltRight
+                        | Key::MetaLeft
+                        | Key::MetaRight
+                )
+            });
+            let safe_alone = matches!(
+                key,
+                Key::F13
+                    | Key::F14
+                    | Key::F15
+                    | Key::F16
+                    | Key::F17
+                    | Key::F18
+                    | Key::F19
+                    | Key::F20
+                    | Key::F21
+                    | Key::F22
+                    | Key::F23
+                    | Key::F24
+                    | Key::Pause
+                    | Key::ScrollLock
+            );
+            (!guarded && !safe_alone)
+                .then(|| format!("The pause shortcut {label} needs Ctrl, Alt or {meta}."))
+        }
+        _ => Some(format!(
+            "The pause shortcut {label} has more than one key besides Ctrl, Shift, Alt and {meta}: \
+             keep just one."
+        )),
+    }
+}
+
+/// `Ctrl+Alt+Pause`: modifiers first, in a fixed order (Ctrl, Alt, Shift, Windows / Command).
+pub fn hotkey_label(keys: &[Key]) -> String {
+    let rank = |key: &Key| match key {
+        Key::ControlLeft | Key::ControlRight => 0,
+        Key::AltLeft | Key::AltRight => 1,
+        Key::ShiftLeft | Key::ShiftRight => 2,
+        Key::MetaLeft | Key::MetaRight => 3,
+        _ => 4,
+    };
+    let mut keys = keys.to_vec();
+    keys.sort_by_key(|key| (rank(key), *key));
+    keys.dedup();
+    keys.iter().map(|key| key.label()).collect::<Vec<_>>().join("+")
+}
+
 /// A MIDI input device the app knows about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DeviceConfig {
