@@ -56,8 +56,8 @@ for worn knobs that flutter on their own, debouncing for chattering switches, pe
 **Organization** — profiles, always-on (global) profiles, automatic profile switching by
 foreground application (picked from a list of open apps) or by program change, layers with
 one-click "layer variants", mapping a whole run of notes to a row of keys in one step, splitting
-a knob or fader into zones (a selector switch: one key per position),
-import/export, undo/redo, copy and paste of mappings as plain text. The list points out mappings
+a knob or fader into zones (a selector switch: one key per position) or a pad into velocity
+bands (a soft and a hard hit press different keys), import/export, undo/redo, copy and paste of mappings as plain text. The list points out mappings
 that share a control, and *find by touching* jumps to the mapping of whatever control you touch.
 
 **Feedback** — a live monitor of everything that comes in and everything that goes out (including
