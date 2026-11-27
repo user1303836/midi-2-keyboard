@@ -314,6 +314,8 @@ export function createMockBackend(): Backend {
   // Shuttles keep firing between messages: one timer per mapping, and the mapping counts as
   // engaged while it runs. (At most ten reports a second, however fast the pace.)
   const shuttles = new Map<string, { timer: ReturnType<typeof setTimeout> | null; last: number }>();
+  /** Shuttles whose current push was reported as held back (paused, learning), and which way. */
+  const heldBack = new Map<string, "up" | "down">();
   const setEngaged = (id: string, on: boolean) => {
     if (status.engaged_mappings.includes(id) === on) return;
     status.engaged_mappings = on ? [...status.engaged_mappings, id] : status.engaged_mappings.filter((m) => m !== id);
@@ -332,7 +334,10 @@ export function createMockBackend(): Backend {
     if (b.type !== "shuttle") return;
     const at = value === null ? null : shuttleAt(b, mapping.source.event, value);
     const action = at ? (at.side === "up" ? b.up : b.down) : null;
-    if (!at || !action || isEmptyAction(action)) return stopShuttle(mapping.id);
+    if (!at || !action || isEmptyAction(action)) {
+      heldBack.delete(mapping.id);
+      return stopShuttle(mapping.id);
+    }
     const fired = (outcome: Extract<EngineEvent, { type: "fired" }>["outcome"]): EngineEvent => ({
       type: "fired",
       time_us: now(),
@@ -343,9 +348,14 @@ export function createMockBackend(): Backend {
     });
     if (status.learning || status.paused) {
       stopShuttle(mapping.id);
-      setTimeout(() => emit([fired({ type: "skipped", reason: status.learning ? "learning" : "paused", detail: "" })]), 0);
+      // One report per push (and per direction), not one per message of it.
+      if (heldBack.get(mapping.id) !== at.side) {
+        heldBack.set(mapping.id, at.side);
+        setTimeout(() => emit([fired({ type: "skipped", reason: status.learning ? "learning" : "paused", detail: "" })]), 0);
+      }
       return;
     }
+    heldBack.delete(mapping.id);
     const interval = Math.max(1000 / at.rate, 100);
     const state = shuttles.get(mapping.id) ?? { timer: null, last: -Infinity };
     if (state.timer !== null) clearTimeout(state.timer);
