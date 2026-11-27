@@ -349,7 +349,8 @@ impl Worker {
             | TimerKind::MultiTap(key)
             | TimerKind::LongPress(key)
             | TimerKind::Debounce(key, _)
-            | TimerKind::Limiter(key, _) => {
+            | TimerKind::Limiter(key, _)
+            | TimerKind::Shuttle(key, _) => {
                 if let Some(&i) = self.by_key.get(&key) {
                     behavior::on_timer(
                         &mut self.maps[i],

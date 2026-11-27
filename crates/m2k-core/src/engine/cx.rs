@@ -82,6 +82,8 @@ pub enum TimerKind {
     /// A debounce window of one source instance ended.
     Debounce(u64, super::source::InstKey),
     Limiter(u64, super::limiter::Slot),
+    /// The next firing of a shuttle's repetition (mapping key, instance).
+    Shuttle(u64, super::source::InstKey),
     /// Key stagger of a hold engagement (owner key).
     Hold(u64),
     /// Next step of an owner's action queue.

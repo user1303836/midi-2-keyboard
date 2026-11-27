@@ -105,7 +105,19 @@ struct Tally {
 struct LogMidiSink {
     clock: Arc<Clock>,
     absent: Arc<Mutex<BTreeSet<String>>>,
+    /// Devices switched off in the config (`devices[].enabled: false`): left alone like the app
+    /// leaves them (outputs of the same name; the app also pairs MIDIINn / MIDIOUTn names).
+    disabled: Arc<Mutex<BTreeSet<String>>>,
     sent: Arc<std::sync::atomic::AtomicU64>,
+}
+
+fn switched_off(config: &Config) -> BTreeSet<String> {
+    config
+        .devices
+        .iter()
+        .filter(|device| !device.enabled)
+        .map(|device| device.name.clone())
+        .collect()
 }
 
 impl MidiSink for LogMidiSink {
@@ -121,6 +133,13 @@ impl MidiSink for LogMidiSink {
 
     fn has_port(&self, name: &str) -> bool {
         !self.absent.lock().unwrap_or_else(|e| e.into_inner()).contains(name)
+    }
+
+    fn unavailable(&self, port: &str) -> Option<String> {
+        if self.disabled.lock().unwrap_or_else(|e| e.into_inner()).contains(port) {
+            return Some(format!("\u{201C}{port}\u{201D} is switched off under MIDI devices"));
+        }
+        (!self.has_port(port)).then(|| format!("there is no MIDI output named \"{port}\""))
     }
 }
 
@@ -768,8 +787,13 @@ pub fn run(args: &[String]) -> i32 {
     let injector = backend(backend_name);
     let midi_sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let absent = Arc::new(Mutex::new(absent));
-    let midi_out =
-        LogMidiSink { clock: clock.clone(), absent: absent.clone(), sent: midi_sent.clone() };
+    let disabled = Arc::new(Mutex::new(switched_off(&config)));
+    let midi_out = LogMidiSink {
+        clock: clock.clone(),
+        absent: absent.clone(),
+        disabled: disabled.clone(),
+        sent: midi_sent.clone(),
+    };
     let options = EngineOptions {
         injector: Box::new(injector),
         track_foreground,
@@ -826,7 +850,10 @@ pub fn run(args: &[String]) -> i32 {
             Step::OutputsChanged(ports) => engine.midi_outputs_changed(ports.clone()),
             Step::Inputs(connected) => engine.midi_inputs_changed(connected.clone()),
             Step::Config(path) => match load_config(path) {
-                Ok(config) => engine.set_config(config),
+                Ok(config) => {
+                    *disabled.lock().unwrap_or_else(|e| e.into_inner()) = switched_off(&config);
+                    engine.set_config(config)
+                }
                 Err(error) => clock.print("ERROR", error),
             },
             Step::Run { delay_ms, action } => engine.run_action((**action).clone(), *delay_ms),

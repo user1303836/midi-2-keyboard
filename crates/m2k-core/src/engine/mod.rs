@@ -36,6 +36,7 @@ mod limiter;
 mod midi_out;
 mod output;
 mod pattern;
+mod shuttle;
 mod source;
 mod sys;
 mod text;

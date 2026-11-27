@@ -22,6 +22,7 @@ use std::time::Instant;
 use super::compile::{CAction, CBehavior, CFastStep, CMapping, CSource, Class};
 use super::cx::{Ctx, Cx, OwnerInfo, TimerKind};
 use super::limiter::{Admission, Limiter, SLOTS, Slot};
+use super::shuttle::Shuttle;
 use super::source::{DeviceId, InstKey, Obs};
 use super::timers::TimerId;
 use crate::events::SkipReason;
@@ -122,6 +123,7 @@ pub enum State {
         /// The long-press action fired for the press that is still down.
         held: bool,
     },
+    Shuttle(Shuttle),
     Plain,
 }
 
@@ -142,6 +144,7 @@ impl State {
                 long: None,
                 held: false,
             },
+            CBehavior::Shuttle { .. } => State::Shuttle(Shuttle::default()),
             CBehavior::Change { .. } | CBehavior::Step { .. } | CBehavior::Inert => State::Plain,
         }
     }
@@ -234,6 +237,8 @@ impl MappingRt {
             State::Hold { engaged } => engaged,
             State::Toggle { latched, .. } => latched,
             State::TapHold { phase: TapPhase::Holding { engaged }, .. } => engaged,
+            // Repeating.
+            State::Shuttle(ref shuttle) => shuttle.engaged(),
             _ => false,
         }
     }
@@ -753,6 +758,20 @@ pub fn on_edge(
 
         CBehavior::Inert => {}
 
+        CBehavior::Shuttle { .. } => {
+            let State::Shuttle(shuttle) = &mut rt.state else {
+                return;
+            };
+            match edge {
+                Edge::Press | Edge::Repress | Edge::Repeat | Edge::Update => {
+                    shuttle.moved(def, &rt.info, cx, inst, ctx)
+                }
+                Edge::Release => shuttle.released(def, &rt.info, cx, inst),
+                // No position.
+                Edge::Pulse | Edge::Ticks(_) => {}
+            }
+        }
+
         CBehavior::Step { up, down, step, max_burst, invert, fast } => {
             let moved = match edge {
                 Edge::Press => {
@@ -976,6 +995,12 @@ pub fn on_timer(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, kind: TimerKind
         }
         TimerKind::LongPress(_) => on_long_press(rt, def, cx, id),
         TimerKind::Limiter(_, slot) => on_limiter(rt, def, cx, slot, id),
+        TimerKind::Shuttle(_, inst) => {
+            let live = rt.live;
+            if let State::Shuttle(shuttle) = &mut rt.state {
+                shuttle.on_timer(def, &rt.info, cx, inst, id, live);
+            }
+        }
         TimerKind::Debounce(_, inst) => {
             let was_active = !rt.instances.is_empty();
             if rt.live
@@ -1135,6 +1160,8 @@ pub fn release(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, all: bool) {
             *engaged = false;
         }
         (_, State::Trigger { repeat, .. }) => cx.timers.cancel_slot(repeat),
+        // Like auto-fire: stops, and starts again with the next message from the control.
+        (_, State::Shuttle(shuttle)) => shuttle.stop_all(def, &rt.info, cx),
         _ => {}
     }
 }
@@ -1161,6 +1188,7 @@ pub fn deactivate(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx) {
             *count = 0;
             *held = false;
         }
+        State::Shuttle(shuttle) => shuttle.clear(def, &rt.info, cx),
         _ => {}
     }
     for limiter in &mut rt.limiters {
@@ -1233,6 +1261,7 @@ pub fn drop_device(rt: &mut MappingRt, def: &CMapping, cx: &mut Cx, device: Devi
             cx.timers.cancel_slot(long);
             *held = false;
         }
+        (_, State::Shuttle(shuttle)) => shuttle.drop_device(def, &rt.info, cx, device),
         _ => {}
     }
     removed || latched_here

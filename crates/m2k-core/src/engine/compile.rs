@@ -11,6 +11,7 @@ use m2k_output::{Key, MouseButton};
 use super::cx::Ctx;
 use super::midi_out::{CSend, parse_raw};
 use super::pattern::{AppRule, SysExPattern};
+use super::shuttle::Zone;
 use super::source::Obs;
 use super::text::{TextTemplate, shorten, type_label};
 use crate::model::*;
@@ -230,6 +231,13 @@ pub enum CBehavior {
     Change {
         action: CAction,
         min_change: u16,
+    },
+    /// Repeats `up` / `down` while the control is away from rest, faster the further away
+    /// (see `shuttle`). Without a position (relative encoders, pulses) or actions: `Inert`.
+    Shuttle {
+        up: Option<CAction>,
+        down: Option<CAction>,
+        zone: Zone,
     },
     /// The mapping's only action or target is empty: it matches, but never does anything.
     Inert,
@@ -607,7 +615,34 @@ fn compile_mapping(
             invert: *invert,
         },
         // Not built yet: the mapping loads and does nothing.
-        Behavior::Shuttle { .. } => CBehavior::Inert,
+        Behavior::Shuttle { up, down, rest, dead_zone, slow_ms, fast_ms, curve } => {
+            // The travel: the source's range (for a note its velocity range, any velocity for a
+            // chord: the hit's velocity is the position).
+            let travel = match &source.kind {
+                CSourceKind::Note { velocity, .. } => Some(*velocity),
+                CSourceKind::Chord { .. } => Some(ValueRange::new(1, 127)),
+                CSourceKind::Cc { range, encoding: ValueEncoding::Absolute, .. }
+                | CSourceKind::Cc14 { range, .. }
+                | CSourceKind::Param { range, .. }
+                | CSourceKind::PitchBend { range }
+                | CSourceKind::ChannelPressure { range }
+                | CSourceKind::PolyPressure { range, .. }
+                | CSourceKind::SongPosition { range } => Some(*range),
+                // Relative encoders and pulses have no position.
+                _ => None,
+            };
+            let (up, down) = (act_opt(up), act_opt(down));
+            match travel {
+                Some(travel) if up.is_some() || down.is_some() => {
+                    let sprung = matches!(source.kind, CSourceKind::PitchBend { .. });
+                    let rest =
+                        rest.unwrap_or(if sprung { ShuttleRest::Center } else { ShuttleRest::Low });
+                    let zone = Zone::new(travel, rest, *dead_zone, *slow_ms, *fast_ms, *curve);
+                    CBehavior::Shuttle { up, down, zone }
+                }
+                _ => CBehavior::Inert,
+            }
+        }
     };
 
     for action in behavior_actions(&mapping.behavior) {
@@ -696,8 +731,8 @@ fn behavior_actions(behavior: &Behavior) -> Vec<&Action> {
         Behavior::Hold { .. } | Behavior::Toggle { .. } => Vec::new(),
         Behavior::Cycle { actions, .. } => actions.iter().collect(),
         Behavior::TapHold { tap, hold, .. } => tap.iter().chain(hold).collect(),
-        Behavior::MultiTap { single, double, triple, .. } => {
-            single.iter().chain(double).chain(triple).collect()
+        Behavior::MultiTap { single, double, triple, hold, .. } => {
+            single.iter().chain(double).chain(triple).chain(hold).collect()
         }
         Behavior::Change { action, .. } => vec![action],
         Behavior::Step { up, down, fast, .. } => up
